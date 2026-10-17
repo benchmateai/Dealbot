@@ -65,10 +65,15 @@ def cmd_test_notify(args, cfg) -> int:
     if not ns:
         print("no notifiers configured; set webhook/env vars in .env", file=sys.stderr)
         return 1
+    failed = 0
     for n in ns:
-        n.send([alert])
-        print(f"sent test alert via {n.name}")
-    return 0
+        try:
+            n.send([alert])
+            print(f"sent test alert via {n.name}")
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            print(f"{n.name} FAILED: {e}", file=sys.stderr)
+    return 1 if failed else 0
 
 
 def cmd_history(args, cfg) -> int:
