@@ -35,7 +35,13 @@ def parse_search(data: dict, source_name: str = "walmart") -> list[Deal]:
 
 class Walmart(Source):
     name = "walmart"
-    requires = ("consumer_id", "private_key_path")
+    requires = ("consumer_id",)
+
+    def missing_requirements(self) -> list[str]:
+        missing = super().missing_requirements()
+        if not (self.options.get("private_key_path") or self.options.get("private_key_pem")):
+            missing.append("private_key_path or private_key_pem")
+        return missing
 
     def _headers(self) -> dict[str, str]:
         from cryptography.hazmat.primitives import hashes, serialization
@@ -44,8 +50,15 @@ class Walmart(Source):
         consumer_id = self.options["consumer_id"]
         key_version = str(self.options.get("key_version", "1"))
         ts = str(int(time.time() * 1000))
-        with open(self.options["private_key_path"], "rb") as f:
-            key = serialization.load_pem_private_key(f.read(), password=None)
+        pem = self.options.get("private_key_pem")
+        if pem:
+            pem_bytes = pem.strip().encode()
+            if b"-----BEGIN" not in pem_bytes:  # bare base64 body from the walmart.io portal
+                pem_bytes = b"-----BEGIN PRIVATE KEY-----\n" + pem_bytes + b"\n-----END PRIVATE KEY-----\n"
+        else:
+            with open(self.options["private_key_path"], "rb") as f:
+                pem_bytes = f.read()
+        key = serialization.load_pem_private_key(pem_bytes, password=None)
         msg = f"{consumer_id}\n{ts}\n{key_version}\n".encode()
         sig = base64.b64encode(key.sign(msg, padding.PKCS1v15(), hashes.SHA256())).decode()
         return {

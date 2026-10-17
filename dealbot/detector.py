@@ -42,12 +42,17 @@ class DetectorConfig:
     history_drop: float = 0.45       # new price < 45% of previously seen low
     extra_keywords: dict[str, int] = field(default_factory=dict)
     ignore_patterns: list[str] = field(default_factory=list)
+    #: if non-empty, a deal must match at least one of these regexes to alert.
+    include_patterns: list[str] = field(default_factory=list)
+    big_savings: float = 100.0       # saving this much in dollars adds weight
+    huge_savings: float = 300.0
 
 
 class Detector:
     def __init__(self, cfg: Optional[DetectorConfig] = None):
         self.cfg = cfg or DetectorConfig()
         self._ignore = [re.compile(p, re.I) for p in self.cfg.ignore_patterns]
+        self._include = [re.compile(p, re.I) for p in self.cfg.include_patterns]
         self._keywords = {**STRONG_KEYWORDS, **self.cfg.extra_keywords}
 
     def score(self, deal: Deal, prior_low: Optional[float] = None) -> Alert:
@@ -59,6 +64,8 @@ class Detector:
         for pat in self._ignore:
             if pat.search(haystack):
                 return Alert(deal, 0, [f"ignored: matches /{pat.pattern}/"])
+        if self._include and not any(p.search(haystack) for p in self._include):
+            return Alert(deal, 0, ["not a tracked category"])
 
         # --- discount depth ---------------------------------------------
         d = deal.discount
@@ -78,6 +85,12 @@ class Detector:
             elif d >= 0.5:
                 score += 10
                 reasons.append(f"{d:.0%} off")
+            if d >= cfg.big_discount and savings >= cfg.huge_savings:
+                score += 20
+                reasons.append(f"saves ${savings:,.0f}")
+            elif d >= cfg.big_discount and savings >= cfg.big_savings:
+                score += 10
+                reasons.append(f"saves ${savings:,.0f}")
 
             # Decimal-shift errors: $199.99 listed as $19.99 or $1.99.
             if deal.list_price >= cfg.min_list_price:

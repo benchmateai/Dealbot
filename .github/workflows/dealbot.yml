@@ -2,7 +2,7 @@ name: dealbot
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # GitHub cron is best-effort; runs may lag a few minutes
+    - cron: "*/10 * * * *"   # GitHub cron is best-effort; expect a few minutes of lag
   workflow_dispatch:
 
 concurrency:
@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
+      - run: pip install -r requirements.txt cryptography
 
       # Persist the SQLite state between runs so you aren't re-alerted.
       - name: Restore state
@@ -32,18 +32,12 @@ jobs:
       - name: Scan
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}
           BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
+          WALMART_CONSUMER_ID: ${{ secrets.WALMART_CONSUMER_ID }}
+          WALMART_PRIVATE_KEY_PEM: ${{ secrets.WALMART_PRIVATE_KEY_PEM }}
+          WALMART_KEY_VERSION: ${{ secrets.WALMART_KEY_VERSION }}
           KEEPA_API_KEY: ${{ secrets.KEEPA_API_KEY }}
-        run: python -m dealbot -c config.example.yaml run
+        run: python -m dealbot run
 
       - name: Save state
         uses: actions/cache/save@v4

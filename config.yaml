@@ -1,0 +1,98 @@
+# Live config, committed on purpose: no secrets live here, only ${ENV} references.
+# Tuned for "bangers only" on hot-ticket tech / tools / appliances, alerting to Discord.
+
+db_path: data/dealbot.db
+interval_minutes: 10
+max_alerts_per_run: 10
+prune_days: 30
+
+http:
+  min_interval_seconds: 1.0
+
+detector:
+  alert_threshold: 80         # strict. 90% off alone is not enough; needs a second signal
+  big_discount: 0.70
+  huge_discount: 0.85
+  extreme_discount: 0.95
+  min_list_price: 50          # don't care about cheap stuff
+  min_savings: 40
+  big_savings: 100            # +10
+  huge_savings: 300           # +20
+  history_drop: 0.40
+  extra_keywords:
+    "price drop glitch": 30
+    "clearance glitch": 30
+    "penny deal": 20
+  ignore_patterns:
+    - "\\bgift ?cards?\\b"
+    - "\\bsubscription\\b"
+    - "\\be-?books?\\b"
+    - "\\bkindle (?:books?|edition)\\b"
+    - "\\bdigital (?:code|download|copy)\\b"
+    - "\\brefurb"
+    - "\\bopen[- ]box\\b"
+    - "\\bused\\b"
+    - "\\bpre-?owned\\b"
+    - "\\bwarranty\\b"
+    - "\\bcoupon code\\b.*\\bfirst order\\b"
+  # Hot-ticket categories. A deal must match at least one or it is dropped.
+  include_patterns:
+    # tech
+    - "\\b(?:laptop|macbook|chromebook|thinkpad|ipad|iphone|pixel|galaxy|tablet|kindle|surface)\\b"
+    - "\\b(?:tv|oled|qled|mini-?led|4k|8k|projector|soundbar|home theater|receiver)\\b"
+    - "\\b(?:gpu|graphics card|rtx|radeon|ryzen|core i[3579]|intel|cpu|motherboard|ssd|nvme|ram|ddr[45])\\b"
+    - "\\b(?:monitor|ultrawide|keyboard|mouse|webcam|microphone|router|mesh wifi|nas|synology|printer)\\b"
+    - "\\b(?:headphones|airpods|earbuds|speaker|sonos|bose|sony|jbl|beats)\\b"
+    - "\\b(?:camera|lens|canon|nikon|fujifilm|gopro|dji|drone|insta360)\\b"
+    - "\\b(?:playstation|ps5|xbox|nintendo switch|steam deck|rog ally|meta quest|vr)\\b"
+    - "\\b(?:apple watch|garmin|fitbit|smartwatch|ring doorbell|nest|ecobee|starlink)\\b"
+    # tools
+    - "\\b(?:milwaukee|dewalt|makita|ryobi|bosch|festool|kreg|metabo|hilti|ridgid|craftsman|husky|snap-on|klein)\\b"
+    - "\\b(?:drill|impact driver|impact wrench|circular saw|miter saw|table saw|track saw|jigsaw|reciprocating saw|band ?saw)\\b"
+    - "\\b(?:planer|jointer|sander|router|nailer|nail gun|brad nailer|compressor|generator|pressure washer|chainsaw)\\b"
+    - "\\b(?:tool chest|tool box|tool cabinet|workbench|shop vac|dust collector|laser level|multimeter)\\b"
+    - "\\b(?:ego|greenworks|mower|trimmer|blower|snow ?blower)\\b"
+    # appliances
+    - "\\b(?:dyson|roomba|irobot|shark|vacuum|robot vac|air purifier)\\b"
+    - "\\b(?:refrigerator|fridge|washer|dryer|dishwasher|range|oven|cooktop|microwave|freezer|wine (?:fridge|cooler))\\b"
+    - "\\b(?:air fryer|instant pot|kitchenaid|vitamix|blendtec|espresso|breville|nespresso|keurig|ninja|cuisinart)\\b"
+    - "\\b(?:grill|traeger|weber|blackstone|smoker|pizza oven|ooni|solo stove)\\b"
+    - "\\b(?:mattress|purple|tempur|casper|massage chair|treadmill|peloton|rower)\\b"
+    # the stuff everyone flips
+    - "\\b(?:lego|yeti|stanley|hydro ?flask|ninja creami)\\b"
+
+sources:
+  reddit:
+    subreddits: [PriceErrors, deals, buildapcsales, GameDeals, dealsreddit]
+    limit: 50
+  slickdeals: {}
+  dealnews: {}
+  woot: {}
+  bestbuy:
+    api_key: ${BESTBUY_API_KEY}
+    min_percent_savings: 70
+    min_regular_price: 50
+    pages: 2
+  walmart:
+    consumer_id: ${WALMART_CONSUMER_ID}
+    private_key_pem: ${WALMART_PRIVATE_KEY_PEM}
+    private_key_path: ${WALMART_PRIVATE_KEY_PATH}
+    key_version: ${WALMART_KEY_VERSION:-1}
+    queries: [tv, laptop, gpu, headphones, dyson, kitchenaid, lego, milwaukee, dewalt, refrigerator, washer, grill, mattress, ps5, xbox]
+  keepa:
+    enabled: false            # flip on + add KEEPA_API_KEY if you subscribe
+    api_key: ${KEEPA_API_KEY}
+    domain: 1
+    min_percent_drop: 70
+    min_price: 50
+  watchlist:
+    items: []                 # add product URLs you want watched at any retailer
+
+notifiers:
+  console: {enabled: true}    # shows up in the Actions log
+  discord:
+    webhook_url: ${DISCORD_WEBHOOK_URL}
+    username: Dealbot
+  slack: {enabled: false}
+  telegram: {enabled: false}
+  email: {enabled: false}

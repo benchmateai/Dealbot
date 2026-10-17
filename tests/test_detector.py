@@ -56,3 +56,28 @@ def test_sub_dollar_price():
     det = Detector()
     a = det.score(deal(title="Power drill $0.01 at Lowe's", price=0.01, list_price=129.0))
     assert det.is_alert(a)
+
+
+def test_include_patterns_drop_off_category():
+    det = Detector(DetectorConfig(include_patterns=[r"\b(?:laptop|dewalt)\b"]))
+    sock = det.score(deal(title="Price error: socks $0.99 (reg $29.99)", price=0.99, list_price=29.99))
+    assert sock.score == 0 and sock.reasons == ["not a tracked category"]
+    drill = det.score(deal(title="Price error: DeWalt drill $9.99 (reg $199.99)", price=9.99, list_price=199.99))
+    assert det.is_alert(drill)
+
+
+def test_big_savings_bonus():
+    det = Detector()
+    small = det.score(deal(price=5.99, list_price=59.99))
+    big = det.score(deal(price=59.99, list_price=599.99))
+    assert big.score > small.score
+    assert any("saves $" in r for r in big.reasons)
+
+
+def test_bangers_config_is_strict():
+    """Mirror config.yaml: 90% off alone shouldn't alert; with a second signal it should."""
+    det = Detector(DetectorConfig(alert_threshold=80, min_list_price=50, min_savings=40))
+    plain = det.score(deal(title="Dyson V15 vacuum", price=59.99, list_price=599.99))
+    assert not det.is_alert(plain) or "decimal" in " ".join(plain.reasons)
+    flagged = det.score(deal(title="Dyson V15 vacuum PRICE ERROR", price=149.99, list_price=599.99))
+    assert det.is_alert(flagged)

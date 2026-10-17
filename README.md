@@ -29,7 +29,37 @@ Scores ≥ 60 (configurable) become alerts. Each item is alerted once, tracked
 in a local SQLite file, and tracking params are stripped from URLs so the same
 deal from two sources doesn't double-fire.
 
-## Quick start
+## Setup for GitHub Actions + Discord (the configured path)
+
+`config.yaml` is committed and already tuned: strict scoring (alert at 80+),
+hot-ticket categories only (tech, tools, appliances), Discord alerts, scan
+every 10 minutes. You only need to add secrets.
+
+1. **Discord webhook.** In your server: channel → Edit → Integrations →
+   Webhooks → New Webhook → Copy URL.
+2. **Best Buy key (free, instant).** https://developer.bestbuy.com → sign up →
+   the key is emailed to you.
+3. **Walmart key (free, ~10 min).** https://walmart.io → create account →
+   Affiliate API → create an application. Generate an RSA key pair:
+   ```bash
+   openssl genrsa -out wm.pem 2048
+   openssl rsa -in wm.pem -pubout -out wm_pub.pem   # paste this into the walmart.io app
+   ```
+   Note the Consumer ID and key version the portal shows.
+4. **Add repository secrets** at Settings → Secrets and variables → Actions:
+   `DISCORD_WEBHOOK_URL`, `BESTBUY_API_KEY`, `WALMART_CONSUMER_ID`,
+   `WALMART_PRIVATE_KEY_PEM` (the full contents of `wm.pem`),
+   `WALMART_KEY_VERSION` (usually `1`).
+5. Actions tab → **dealbot** → Run workflow. The log shows which sources
+   loaded and what scored. From then on it runs itself every 10 minutes.
+
+Missing a key? That source is skipped and everything else still runs.
+
+Amazon needs Keepa, which is a paid API starting around €49/month
+(there is no free tier). Flip `keepa.enabled: true` in `config.yaml` and add
+`KEEPA_API_KEY` if you subscribe.
+
+## Quick start (local)
 
 ```bash
 pip install -r requirements.txt
@@ -71,6 +101,29 @@ functions so they can be unit-tested with fixtures (see `tests/`).
 pip install -r requirements-dev.txt
 pytest -q
 ```
+
+## Direct retailer scraping: what's feasible
+
+Assessed, not built. The community feeds plus Best Buy/Walmart APIs cover
+these retailers already; the unofficial routes below are fragile and against
+each site's terms, so they're listed for reference.
+
+| Retailer | Official API | Unofficial route | Verdict |
+|---|---|---|---|
+| Best Buy | yes, free | — | **done** |
+| Walmart | yes, free (affiliate) | — | **done** |
+| Amazon | Product Advertising API needs an affiliate account with sales; Keepa is the practical option | page scraping is blocked hard | Keepa (paid) |
+| Target | none | `redsky.target.com` JSON that the website uses; needs a public key scraped from site JS, no catalog-wide "sale" query | watchlist-only via JSON-LD on product pages (works) |
+| Home Depot | none | internal GraphQL behind Akamai bot protection | watchlist-only via JSON-LD (works for most pages) |
+| Lowe's | none | Akamai protected, JSON-LD present | watchlist-only |
+| Costco | none | Akamai protected, prices often need login | community feeds only |
+| Newegg | affiliate feed (CJ) | JSON-LD present | watchlist-only |
+| eBay | Browse API (free key) | — | possible future source, high noise (3rd-party sellers) |
+
+So for Target / Home Depot / Lowe's the honest answer is: there is no way to
+sweep their whole catalog for mis-prices without a headless browser farm and
+rotating proxies, which is both expensive and a ban-me-please signal. The
+community feeds catch their errors within minutes anyway.
 
 ## Caveats
 
