@@ -79,6 +79,13 @@ sources:
     private_key_path: ${WALMART_PRIVATE_KEY_PATH}
     key_version: ${WALMART_KEY_VERSION:-1}
     queries: [tv, laptop, gpu, headphones, dyson, kitchenaid, lego, milwaukee, dewalt, refrigerator, washer, grill, mattress, ps5, xbox]
+  ebay:                       # free keys: https://developer.ebay.com (App ID + Cert ID)
+    client_id: ${EBAY_CLIENT_ID}
+    client_secret: ${EBAY_CLIENT_SECRET}
+    min_price: 50
+    min_feedback_score: 100   # skip fresh/zero-feedback sellers (scam filter)
+    min_feedback_pct: 98
+    queries: [laptop, gpu, oled tv, headphones, dyson, milwaukee m18, dewalt 20v, kitchenaid mixer, lego set, ps5, xbox series x, nintendo switch, ipad, macbook]
   keepa:
     enabled: false            # flip on + add KEEPA_API_KEY if you subscribe
     api_key: ${KEEPA_API_KEY}

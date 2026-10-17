@@ -36,6 +36,8 @@ jobs:
           WALMART_CONSUMER_ID: ${{ secrets.WALMART_CONSUMER_ID }}
           WALMART_PRIVATE_KEY_PEM: ${{ secrets.WALMART_PRIVATE_KEY_PEM }}
           WALMART_KEY_VERSION: ${{ secrets.WALMART_KEY_VERSION }}
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
           KEEPA_API_KEY: ${{ secrets.KEEPA_API_KEY }}
         run: python -m dealbot run
 

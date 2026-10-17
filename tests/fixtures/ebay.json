@@ -1,0 +1,11 @@
+{"total": 3, "itemSummaries": [
+  {"itemId": "v1|1111|0", "title": "Sony WH-1000XM5 Wireless Headphones Black - NEW SEALED", "itemWebUrl": "https://www.ebay.com/itm/1111?hash=abc&_trkparms=x",
+   "price": {"value": "34.99", "currency": "USD"}, "marketingPrice": {"originalPrice": {"value": "399.99", "currency": "USD"}, "discountPercentage": "91"},
+   "condition": "New", "seller": {"username": "bigstore", "feedbackPercentage": "99.6", "feedbackScore": 48210},
+   "shippingOptions": [{"shippingCost": {"value": "5.00", "currency": "USD"}}], "topRatedBuyingExperience": true},
+  {"itemId": "v1|2222|0", "title": "Sony WH-1000XM5 Headphones", "itemWebUrl": "https://www.ebay.com/itm/2222",
+   "price": {"value": "29.00", "currency": "USD"}, "condition": "New", "seller": {"username": "newguy1", "feedbackPercentage": "0", "feedbackScore": 0}},
+  {"itemId": "v1|3333|0", "title": "Dyson V15 Detect", "itemWebUrl": "https://www.ebay.com/itm/3333",
+   "price": {"value": "649.00", "currency": "USD"}, "condition": "New", "seller": {"username": "okshop", "feedbackPercentage": "99.1", "feedbackScore": 350},
+   "shippingOptions": [{"shippingCost": {"value": "0.00", "currency": "USD"}}]}
+]}

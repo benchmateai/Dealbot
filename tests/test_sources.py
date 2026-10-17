@@ -58,3 +58,15 @@ def test_retailer_from_url():
     assert retailer_from_url("https://www.homedepot.com/p/1") == "Home Depot"
     assert retailer_from_url("https://amzn.to/abc") == "Amazon"
     assert retailer_from_url("https://shop.example.org/x") == "shop.example.org"
+
+
+def test_ebay_search():
+    from dealbot.sources.ebay import parse_search as parse_ebay
+    deals = parse_ebay(json.loads((FIX / "ebay.json").read_text()))
+    assert [d.sku for d in deals] == ["v1|1111|0", "v1|3333|0"]  # zero-feedback seller dropped
+    sony = deals[0]
+    assert sony.retailer == "eBay"
+    assert sony.price == 39.99            # item + shipping
+    assert sony.list_price == 399.99
+    assert "top-rated" in sony.tags and sony.extra["seller"] == "bigstore"
+    assert deals[1].list_price is None

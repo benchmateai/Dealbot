@@ -13,7 +13,7 @@ approaches that together cover every major US retailer:
 | Approach | Covers | Key needed |
 |---|---|---|
 | **Community feeds** — r/PriceErrors, r/deals, r/buildapcsales, Slickdeals (front page + live "price error"/"glitch" searches), DealNews, Woot | Everything: Amazon, Walmart, Target, Home Depot, Lowe's, Costco, Best Buy, etc. Mistakes get posted within minutes. | none |
-| **Retailer APIs** — Best Buy (free), Walmart affiliate (free), Amazon via Keepa (paid) | Direct catalog queries for "sale price ≥70% under regular price" | free/paid key |
+| **Retailer APIs** — Best Buy (free), Walmart affiliate (free), eBay Browse (free), Amazon via Keepa (paid) | Direct catalog queries for "sale price ≥70% under regular price" | free/paid key |
 | **Watchlist** — any product URL | Reads the live price from the page's schema.org data (works on Target, Home Depot, Lowe's, Newegg, …) and alerts on a sudden drop | none |
 
 Every deal is scored 0–100 by `dealbot/detector.py`:
@@ -46,11 +46,13 @@ every 10 minutes. You only need to add secrets.
    openssl rsa -in wm.pem -pubout -out wm_pub.pem   # paste this into the walmart.io app
    ```
    Note the Consumer ID and key version the portal shows.
-4. **Add repository secrets** at Settings → Secrets and variables → Actions:
+4. **eBay keys (free, instant).** https://developer.ebay.com → Application
+   Keys → Production → copy the App ID (client id) and Cert ID (client secret).
+5. **Add repository secrets** at Settings → Secrets and variables → Actions:
    `DISCORD_WEBHOOK_URL`, `BESTBUY_API_KEY`, `WALMART_CONSUMER_ID`,
    `WALMART_PRIVATE_KEY_PEM` (the full contents of `wm.pem`),
-   `WALMART_KEY_VERSION` (usually `1`).
-5. Actions tab → **dealbot** → Run workflow. The log shows which sources
+   `WALMART_KEY_VERSION` (usually `1`), `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`.
+6. Actions tab → **dealbot** → Run workflow. The log shows which sources
    loaded and what scored. From then on it runs itself every 10 minutes.
 
 Missing a key? That source is skipped and everything else still runs.
@@ -118,7 +120,7 @@ each site's terms, so they're listed for reference.
 | Lowe's | none | Akamai protected, JSON-LD present | watchlist-only |
 | Costco | none | Akamai protected, prices often need login | community feeds only |
 | Newegg | affiliate feed (CJ) | JSON-LD present | watchlist-only |
-| eBay | Browse API (free key) | — | possible future source, high noise (3rd-party sellers) |
+| eBay | Browse API (free key) | — | **done** (new, fixed-price, established sellers only) |
 
 So for Target / Home Depot / Lowe's the honest answer is: there is no way to
 sweep their whole catalog for mis-prices without a headless browser farm and
