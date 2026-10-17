@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dealbot"
+version = "0.1.0"
+description = "Bot that scours deal feeds and retailer APIs for pricing errors and alerts you."
+requires-python = ">=3.10"
+dependencies = ["requests>=2.31", "PyYAML>=6.0", "feedparser>=6.0"]
+
+[project.optional-dependencies]
+walmart = ["cryptography>=41"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+dealbot = "dealbot.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["dealbot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

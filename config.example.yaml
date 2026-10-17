@@ -1,0 +1,71 @@
+# Copy to config.yaml and edit. ${VAR} pulls from the environment / .env file.
+
+db_path: data/dealbot.db
+interval_minutes: 10          # used by `dealbot loop`
+max_alerts_per_run: 25
+prune_days: 30
+
+http:
+  min_interval_seconds: 1.0   # politeness delay per host
+
+detector:
+  alert_threshold: 60         # 0-100; lower = more alerts, more noise
+  big_discount: 0.70          # 70%+ off is suspicious
+  huge_discount: 0.85
+  extreme_discount: 0.95
+  min_list_price: 15          # ignore $2 items that are "90% off"
+  min_savings: 10             # must save at least this much
+  history_drop: 0.45          # alert if price < 45% of the lowest we've seen before
+  extra_keywords: {}          # e.g. {"clearance glitch": 30}
+  ignore_patterns:            # regexes; matching deals are never alerted
+    - "\\bgift ?card\\b"
+    - "\\bsubscription\\b"
+    - "\\bebook\\b"
+
+# Sources run in the order listed. A source with missing keys is skipped, not fatal.
+sources:
+  reddit:                     # no key needed
+    subreddits: [PriceErrors, deals, buildapcsales, frugalmalefashion, GameDeals, dealsreddit]
+    limit: 50
+  slickdeals: {}              # front page, popular, and "price error"/"glitch" searches
+  dealnews: {}
+  woot: {}
+  bestbuy:                    # free key: https://developer.bestbuy.com
+    api_key: ${BESTBUY_API_KEY}
+    min_percent_savings: 70
+    min_regular_price: 15
+    pages: 2
+  walmart:                    # https://walmart.io (pip install cryptography)
+    consumer_id: ${WALMART_CONSUMER_ID}
+    private_key_path: ${WALMART_PRIVATE_KEY_PATH}
+    key_version: ${WALMART_KEY_VERSION:-1}
+    queries: [clearance, tv, laptop, headphones, lego, vacuum, tools, grill, mattress]
+  keepa:                      # Amazon, paid: https://keepa.com/#!api
+    api_key: ${KEEPA_API_KEY}
+    domain: 1                 # 1 = amazon.com
+    min_percent_drop: 70
+    min_price: 5
+  watchlist:                  # any retailer: reads the price off the product page
+    items:
+      # - url: https://www.target.com/p/-/A-12345678
+      #   expected: 499.99
+      # - url: https://www.homedepot.com/p/123456789
+      # - https://www.lowes.com/pd/123456
+
+notifiers:
+  console: {enabled: true}
+  discord:
+    webhook_url: ${DISCORD_WEBHOOK_URL}
+    username: Dealbot
+  slack:
+    webhook_url: ${SLACK_WEBHOOK_URL}
+  telegram:
+    bot_token: ${TELEGRAM_BOT_TOKEN}
+    chat_id: ${TELEGRAM_CHAT_ID}
+  email:
+    smtp_host: ${SMTP_HOST}
+    smtp_port: ${SMTP_PORT:-587}
+    username: ${SMTP_USER}
+    password: ${SMTP_PASSWORD}
+    from_addr: ${EMAIL_FROM}
+    to_addr: ${EMAIL_TO}

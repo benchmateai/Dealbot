@@ -1,0 +1,4 @@
+{"totalPages": 1, "products": [
+  {"sku": 6418599, "name": "Apple AirPods Pro (2nd generation)", "salePrice": 24.99, "regularPrice": 249.99, "percentSavings": 90.0, "url": "https://api.bestbuy.com/click/-/6418599/pdp", "onlineAvailability": true, "condition": "New"},
+  {"sku": 1, "name": "Open-Box Thing", "salePrice": 19.99, "regularPrice": 199.99, "percentSavings": 90.0, "url": "https://www.bestbuy.com/site/1.p", "onlineAvailability": false, "condition": "Refurbished"}
+]}
