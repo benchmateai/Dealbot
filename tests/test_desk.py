@@ -130,3 +130,26 @@ def test_executors(tmp_path):
         with pytest.raises(ValueError):
             PaperExecutor(NotPaper(), log)
     assert [e["kind"] for e in read_events(tmp_path)] == ["would_execute"]
+
+
+def test_trial_registry_is_wired_into_the_desk(tmp_path):
+    from trials.registry import TrialRegistry
+
+    cfg = DeskConfig.from_env(env(tmp_path))
+    desk1, log1 = build_desk(cfg, start_ms=T0, judge=FakeJudge(cfg.jev_model))
+    run_blocks(desk1, cfg, 11)
+    log1.close()
+    desk2, log2 = build_desk(cfg, start_ms=T0 + 1_000_000, judge=FakeJudge(cfg.jev_model))
+    log2.close()
+    other = DeskConfig.from_env(env(tmp_path, ORDER_QTY="0.3"))
+    desk3, log3 = build_desk(other, start_ms=T0, judge=FakeJudge(other.jev_model))
+    log3.close()
+    registry = TrialRegistry(cfg.trials_file)
+    assert registry.count() == 2 and registry.get(desk1.trial_id).runs == 2
+    assert desk1.trial_id == desk2.trial_id != desk3.trial_id and len(desk1.trial_id) == 16
+    events = list(read_events(cfg.log_dir))
+    assert [t["run"] for t in events if t["kind"] == "trial" and t["trial_id"] == desk1.trial_id] == [1, 2]
+    heartbeats = [e for e in events if e["kind"] == "heartbeat"]
+    assert [h["blk"] for h in heartbeats] == [0, 10] and all(h["trial_id"] == desk1.trial_id for h in heartbeats)
+    decisions = [e for e in events if e["kind"] == "decision"]
+    assert decisions and all(d["trial_id"] == desk1.trial_id for d in decisions)

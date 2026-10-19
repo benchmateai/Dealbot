@@ -203,7 +203,7 @@ class FinalPick:
                 continue
             if pick.is_hold:
                 if ctx.log is not None:
-                    ctx.log.write("decision", {"decision_id": c.decision_id, "bot": ctx.bot, "phase": ctx.phase, "mode": ctx.mode, "sym": c.sym, "blk": ctx.block, **pick.to_dict(), "order": None, "approved": None, "vetoes": [], "executed": False, "exec_status": "hold"}, ts_ms=ctx.now_ms)
+                    ctx.log.write("decision", {"decision_id": c.decision_id, "trial_id": ctx.trial_id, "bot": ctx.bot, "phase": ctx.phase, "mode": ctx.mode, "sym": c.sym, "blk": ctx.block, **pick.to_dict(), "order": None, "approved": None, "vetoes": [], "executed": False, "exec_status": "hold"}, ts_ms=ctx.now_ms)
                 rejected.append(Rejection(c.sym, self.name, "below_threshold", f"best action p={pick.prob:.3f} < threshold {pick.threshold:.3f}"))
                 continue
             picked.append(replace(c, pick=pick))

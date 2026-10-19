@@ -16,7 +16,8 @@ filter/     the funnel: free cut, one-call, hard facts, Jev, final pick   -> eve
 book/       one open position at a time, plus the bench                   -> no scan while open
 logs/       JSONL: every snapshot, question, answer (with probabilities), decision, veto, outcome
 outcomes/   grades every judgment after its horizon from the realized path -> calibration data
-reports/    calibration (buckets, Brier, reliability chart) and daily summary
+reports/    calibration (buckets, Brier, reliability chart), daily summary, trial report
+trials/     registry of every configuration ever run, deflated Sharpe haircut
 desk/       config, block clock, modes (shadow | paper), the loop, the CLI
 ```
 
@@ -103,6 +104,21 @@ State sent with every battery:
   compares with round-trip cost. Market orders (gambler, spy) pay `FEE_BPS`; resting limit orders (house)
   pay `MAKER_FEE_BPS`; `GAS_USD` is charged per transaction either way.
 
+## Trial registry and the deflated Sharpe haircut
+
+Every configuration the desk starts with is a trial: bot, battery version, thresholds, weights, edge model,
+risk limits, clip size, symbols, feed, cadence and the pinned Jev version (see `trials/fingerprint.py`; mode and
+deployment details are excluded, so a shadow run and a paper run of one configuration are one trial). The desk
+registers each run in `logs/data/trials.json`, logs a `trial` record, and stamps decisions and heartbeats with
+the trial id. Nothing is ever removed from the registry: its size is the N that deflates every survivor.
+
+`python -m reports.trials` builds each trial's return series from its heartbeat equity, computes the per-period
+Sharpe with skew and kurtosis, and deflates it (Bailey and López de Prado, 2014): the best-noise Sharpe is the
+expected maximum of N noise trials, the haircut Sharpe is the observed Sharpe minus that, and the DSR is the
+probability the survivor beats the best noise trial. The report also prints the minimum backtest length for N
+trials. Treat a configuration as a candidate only when its DSR is at least 0.95 on a sample longer than that
+minimum. Use `--effective-trials` to lower N for highly correlated trials or raise it for trials run elsewhere.
+
 ## Logs and reports
 
 `logs/data/events-YYYY-MM-DD.jsonl`, one record per line with `ts` and `kind`. Every value passes through
@@ -112,6 +128,7 @@ carry the predicted probabilities and the realized label, so calibration needs n
 - `python -m reports.calibration [--date D]` -> `reports/out/calibration-*.md` + `reliability-*.svg`
   (predicted vs observed per bucket, Brier overall and per question).
 - `python -m reports.daily --date D` -> decisions, trades, PnL after fees and gas, every veto, rejections by check.
+- `python -m reports.trials` -> `reports/out/trials.md`, every trial with its deflated Sharpe.
 
 ## Rules this repository follows
 

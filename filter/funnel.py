@@ -51,6 +51,7 @@ class FunnelContext:
     bench: Bench | None = None
     log: LogWriter | None = None
     on_labeled: Callable[[Candidate], None] | None = None
+    trial_id: str = ""
     fault: str | None = None
     rejections: list[Rejection] = field(default_factory=list)
 

@@ -93,6 +93,8 @@ class DeskConfig:
     pending_order_ttl_blocks: int
     synthetic_seed: int
     synthetic_tick_ms: int
+    trials_file: str
+    heartbeat_every_blocks: int
 
     @property
     def block_ms(self) -> int:
@@ -158,6 +160,10 @@ class DeskConfig:
         if order_qty <= 0:
             raise ConfigError("ORDER_QTY must be positive")
         replay_path = _get(env, "FEED_REPLAY_PATH", "") or None
+        log_dir = _get(env, "LOG_DIR", "logs/data")
+        heartbeat_every = _int(env, "HEARTBEAT_EVERY_BLOCKS", "10")
+        if heartbeat_every < 1:
+            raise ConfigError("HEARTBEAT_EVERY_BLOCKS must be at least 1")
         if feed == "replay" and not replay_path:
             raise ConfigError("FEED=replay needs FEED_REPLAY_PATH")
         return cls(
@@ -170,7 +176,7 @@ class DeskConfig:
             judge_url=judge_url,
             desk_secret=desk_secret,
             jev_model=jev_model,
-            log_dir=_get(env, "LOG_DIR", "logs/data"),
+            log_dir=log_dir,
             limits=limits,
             fee_bps=fee_bps,
             maker_fee_bps=maker_fee_bps,
@@ -193,6 +199,8 @@ class DeskConfig:
             pending_order_ttl_blocks=_int(env, "PENDING_ORDER_TTL_BLOCKS", "3"),
             synthetic_seed=_int(env, "SYNTHETIC_SEED", "7"),
             synthetic_tick_ms=_int(env, "SYNTHETIC_TICK_MS", "1000"),
+            trials_file=_get(env, "TRIALS_FILE", f"{log_dir}/trials.json"),
+            heartbeat_every_blocks=heartbeat_every,
         )
 
     def public_dict(self) -> dict:

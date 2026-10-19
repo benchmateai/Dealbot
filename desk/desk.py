@@ -66,6 +66,7 @@ class Desk:
         resolver: OutcomeResolver,
         executor: Executor,
         log: LogWriter,
+        trial_id: str = "",
     ) -> None:
         if battery.bot != cfg.bot:
             raise ValueError(f"battery is for {battery.bot!r}, desk is configured for {cfg.bot!r}")
@@ -83,6 +84,7 @@ class Desk:
         self._log = log
         self._fault: str | None = None
         self._order_seq = 0
+        self._trial_id = trial_id
         self._order_type = "limit" if cfg.bot == "house" else "market"
         self._bot_fee_bps = cfg.limits.fee_bps_for(self._order_type)
         free_cut = dict(max_spread_bps=cfg.max_spread_bps, rv_min_bps=cfg.rv_min_bps, rv_max_bps=cfg.rv_max_bps, min_ticks=cfg.min_ticks, max_stale_ms=cfg.max_stale_ms)
@@ -102,6 +104,10 @@ class Desk:
     @property
     def fault(self) -> str | None:
         return self._fault
+
+    @property
+    def trial_id(self) -> str:
+        return self._trial_id
 
     @property
     def book(self) -> Book:
@@ -124,7 +130,7 @@ class Desk:
                 self._scan(block, equity)
             elif self._book.position is not None:
                 self._manage(block, equity)
-        if block.number % 10 == 0 or self._fault is not None:
+        if block.number % self._cfg.heartbeat_every_blocks == 0 or self._fault is not None:
             self._heartbeat(block, equity)
 
     def _ingest(self, new_ticks: dict[str, list[Tick]], block: Block | None) -> None:
@@ -191,6 +197,7 @@ class Desk:
             bench=self._bench if phase == "entry" else None,
             log=self._log,
             on_labeled=self._register_outcomes,
+            trial_id=self._trial_id,
         )
 
     def _register_outcomes(self, c: Candidate) -> None:
@@ -289,6 +296,7 @@ class Desk:
             "decision",
             {
                 "decision_id": c.decision_id,
+                "trial_id": self._trial_id,
                 "bot": self._cfg.bot,
                 "phase": phase,
                 "mode": self._cfg.mode,
@@ -335,6 +343,7 @@ class Desk:
             "heartbeat",
             {
                 "blk": block.number,
+                "trial_id": self._trial_id,
                 "mode": self._cfg.mode,
                 "bot": self._cfg.bot,
                 "equity_usd": round(equity, 4),

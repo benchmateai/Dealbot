@@ -20,6 +20,7 @@ def summarize(events: list[dict]) -> dict:
     answers = [e for e in events if e["kind"] == "answer"]
     heartbeats = [e for e in events if e["kind"] == "heartbeat"]
     would = [e for e in events if e["kind"] == "would_execute"]
+    trials = Counter(d.get("trial_id") for d in decisions if d.get("trial_id"))
     fees = sum(float(f.get("fee_usd") or 0) + float(f.get("gas_usd") or 0) for f in fills)
     realized = sum(float(f.get("realized_pnl_usd") or 0) for f in fills)
     equity_start = heartbeats[0].get("equity_usd") if heartbeats else None
@@ -42,6 +43,7 @@ def summarize(events: list[dict]) -> dict:
         "judge_calls": len(answers),
         "judge_models": Counter(a.get("model") for a in answers),
         "judge_latency_ms": (sum(float(a.get("latency_ms") or 0) for a in answers) / len(answers)) if answers else None,
+        "trials": trials,
     }
 
 
@@ -53,6 +55,7 @@ def render_markdown(date: str, s: dict) -> str:
     if s["equity_start"] is not None and s["equity_end"] is not None:
         lines.append(f"- Equity: {s['equity_start']:.2f} -> {s['equity_end']:.2f} USD ({s['equity_end'] - s['equity_start']:+.2f}, includes unrealized)")
     lines.append(f"- Judge calls: {s['judge_calls']}, models seen: {dict(s['judge_models'])}, mean latency: {'n/a' if s['judge_latency_ms'] is None else f'{s['judge_latency_ms']:.0f} ms'}")
+    lines.append(f"- Trials (configurations) behind today's decisions: {dict(s['trials']) or 'none'}")
     lines += ["", "## Decisions by bot / phase / action", "", "| bot | phase | action | n |", "|---|---|---|---|"]
     for (bot, phase, action), n in sorted(s["decisions_by_bot_phase_action"].items(), key=lambda kv: str(kv[0])):
         lines.append(f"| {bot} | {phase} | {action} | {n} |")

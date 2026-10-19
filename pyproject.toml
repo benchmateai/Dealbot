@@ -15,7 +15,7 @@ judge = ["typesafe-sdk>=0.7.5,<0.8"]
 dev = ["pytest>=8"]
 
 [tool.setuptools]
-packages = ["desk", "state", "feed", "questions", "policy", "risk", "broker", "filter", "book", "logs", "judge", "outcomes", "reports"]
+packages = ["desk", "state", "feed", "questions", "policy", "risk", "broker", "filter", "book", "logs", "judge", "outcomes", "reports", "trials"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

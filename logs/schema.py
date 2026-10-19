@@ -15,6 +15,7 @@ KINDS: dict[str, tuple[str, ...]] = {
     "fill": ("order_id", "sym", "side", "qty", "price"),
     "outcome": ("decision_id", "qid", "qkind", "status"),
     "heartbeat": ("blk",),
+    "trial": ("trial_id", "spec"),
     "would_execute": ("decision_id", "order"),
     "position_opened": ("decision_id", "sym"),
     "position_closed": ("decision_id", "sym"),

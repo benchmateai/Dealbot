@@ -28,6 +28,8 @@ from logs.writer import LogWriter
 from outcomes.resolver import OutcomeResolver
 from questions import load_battery
 from risk.gate import RiskGate
+from trials.fingerprint import strategy_spec
+from trials.registry import TrialRegistry
 
 
 def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None) -> tuple[Desk, LogWriter]:
@@ -35,6 +37,11 @@ def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None) -> tuple[Desk, Log
     assert_desk_cannot_see_jev_key(os.environ)
     log = LogWriter(cfg.log_dir, Redactor([cfg.desk_secret]))
     feed = make_feed(cfg.feed, cfg.symbols, start_ms=start_ms - cfg.warmup_blocks * cfg.block_ms, replay_path=cfg.replay_path, seed=cfg.synthetic_seed, tick_ms=cfg.synthetic_tick_ms)
+    battery = load_battery(cfg.bot)
+    registry = TrialRegistry(cfg.trials_file)
+    spec = strategy_spec(cfg, battery)
+    trial = registry.register_run(spec, mode=cfg.mode, ts_ms=start_ms)
+    log.write("trial", {"trial_id": trial.trial_id, "spec": spec, "run": trial.runs, "mode": cfg.mode, "registered_trials": registry.count()}, ts_ms=start_ms)
     gate = RiskGate(cfg.limits)
     broker = make_broker("paper", gate, cash_usd=cfg.paper_cash_usd, fee_bps=cfg.fee_bps, maker_fee_bps=cfg.maker_fee_bps, gas_usd=cfg.gas_usd, slippage_bps=cfg.paper_slippage_bps)
     desk = Desk(
@@ -44,12 +51,13 @@ def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None) -> tuple[Desk, Log
         broker=broker,
         book=Book(),
         bench=Bench(),
-        battery=load_battery(cfg.bot),
+        battery=battery,
         judge=judge if judge is not None else make_judge(cfg.judge_url, cfg.desk_secret, model=cfg.jev_model),
         backoff=Backoff(),
         resolver=OutcomeResolver(log, block_ms=cfg.block_ms),
         executor=make_executor(cfg.mode, broker, log),
         log=log,
+        trial_id=trial.trial_id,
     )
     desk.warmup(start_ms)
     return desk, log
@@ -93,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, request_stop)
 
-    print(f"desk: mode={cfg.mode} bot={cfg.bot} symbols={','.join(cfg.symbols)} feed={cfg.feed} judge={cfg.judge_url} model={cfg.jev_model} log_dir={cfg.log_dir}")
+    print(f"desk: mode={cfg.mode} bot={cfg.bot} symbols={','.join(cfg.symbols)} feed={cfg.feed} judge={cfg.judge_url} model={cfg.jev_model} log_dir={cfg.log_dir} trial={desk.trial_id}")
     clock = BlockClock(cfg.block_ms, start_ms, realtime=not args.fast)
     blocks_done = 0
     try:
