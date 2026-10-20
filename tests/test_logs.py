@@ -17,6 +17,8 @@ def test_redactor_removes_values_patterns_and_secret_keys():
         "desk_secret": "anything at all",
         "hex": "deadbeef" * 6,
         "fine": "short values stay",
+        "tokens": 123,
+        "usage": {"input_tokens": 456, "access_token": "abcdefghijklmnop"},
     }
     out = r.redact(record)
     assert SECRET not in json.dumps(out)
@@ -24,6 +26,7 @@ def test_redactor_removes_values_patterns_and_secret_keys():
     assert out["nested"][0]["Authorization"] == REDACTED
     assert out["nested"][1] == REDACTED and out["nested"][2] == "x" * 10
     assert out["desk_secret"] == REDACTED and out["hex"] == REDACTED and out["fine"] == "short values stay"
+    assert out["tokens"] == 123 and out["usage"]["input_tokens"] == 456 and out["usage"]["access_token"] == REDACTED
 
 
 def test_writer_appends_jsonl_per_day_with_redaction_and_clean_floats(tmp_path):

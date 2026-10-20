@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import socket
 import time
@@ -139,6 +140,69 @@ class LocalStubJudge:
         return JudgeAnswer(decision_id, raw.model, self._backend.model, raw.answers, raw.usage, raw.request_id, raw.latency_ms, "stub")
 
 
+class DemoJudge:
+    """Scripted answers that trade, for exercising the paper path and the dashboard without a key
+    (JUDGE_URL=stub://demo). Enters with high confidence when flat (direction from a hash of the
+    decision id; one decision in five holds), exits after `hold_blocks` or past `stop_bps` of
+    drawdown. These are scripts, not judgments: never read calibration or PnL into them."""
+
+    def __init__(self, model: str = STUB_MODEL, *, hold_blocks: int = 8, stop_bps: float = 50.0) -> None:
+        self.model = model
+        self._hold_blocks = hold_blocks
+        self._stop_bps = stop_bps
+
+    def ask(self, *, decision_id: str, bot: str, state: dict, questions: dict, deadline_ms: int, now_ms: int) -> JudgeAnswer:
+        if deadline_ms - now_ms <= 0:
+            raise JudgeTimeout("deadline already passed; holding", code="deadline_passed")
+        pos = state.get("pos")
+        h = int(hashlib.sha256(decision_id.encode()).hexdigest()[:8], 16)
+        if pos is None:
+            want_exit = False
+            direction = None if h % 5 == 0 else ("up" if h % 2 else "down")
+        else:
+            want_exit = float(pos.get("age_blocks") or 0) >= self._hold_blocks or float(pos.get("upnl_bps") or 0) <= -self._stop_bps
+            direction = None
+        answers: dict[str, dict] = {}
+        for qid, q in questions.items():
+            kind = q.get("type")
+            if kind == "noul":
+                answers[qid] = {"type": "noul", "noul": self._noul(qid, want_exit)}
+            elif kind == "choice":
+                labels = list(q.get("criteria") or {})
+                favorite = self._choice(labels, direction)
+                probs = {label: round(0.12 / max(1, len(labels) - 1), 4) for label in labels}
+                probs[favorite] = round(1 - sum(p for label, p in probs.items() if label != favorite), 4)
+                answers[qid] = {"type": "choice", "choice": favorite, "confidence": probs[favorite], "probabilities": probs}
+            else:
+                levels = list(q.get("criteria") or [])
+                favorite_level = 1 if qid == "vol_next" and len(levels) > 1 else 0
+                probs = {str(i): round(0.12 / max(1, len(levels) - 1), 4) for i in range(len(levels))}
+                probs[str(favorite_level)] = round(1 - sum(p for i, p in probs.items() if i != str(favorite_level)), 4)
+                answers[qid] = {"type": "score", "score": round(sum(int(i) * p for i, p in probs.items()), 4), "confidence": probs[str(favorite_level)], "legend": {str(i): c for i, c in enumerate(levels)}, "probabilities": probs}
+        return JudgeAnswer(decision_id, self.model, self.model, answers, None, None, 0, "demo")
+
+    @staticmethod
+    def _noul(qid: str, want_exit: bool) -> float:
+        if qid in ("thesis_broken", "exit_now"):
+            return 0.9 if want_exit else 0.1
+        if qid == "keep_running":
+            return 0.1 if want_exit else 0.9
+        if qid == "spread_edge":
+            return 0.9
+        return 0.1
+
+    @staticmethod
+    def _choice(labels: list[str], direction: str | None) -> str:
+        if direction in labels:
+            return direction
+        if direction is None and "flat" in labels:
+            return "flat"
+        for preferred in ("trending", "revert", "none", "both"):
+            if preferred in labels:
+                return preferred
+        return labels[0]
+
+
 class Backoff:
     """Exponential backoff after rate limits, honoring the server's retry-after when given."""
 
@@ -163,6 +227,8 @@ class Backoff:
 
 
 def make_judge(url: str, desk_secret: str, *, model: str) -> Judge:
+    if url == "stub://demo":
+        return DemoJudge(model)
     if url.startswith("stub://"):
         return LocalStubJudge(model)
     return HttpJudge(url, desk_secret)

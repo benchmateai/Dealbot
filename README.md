@@ -18,6 +18,7 @@ logs/       JSONL: every snapshot, question, answer (with probabilities), decisi
 outcomes/   grades every judgment after its horizon from the realized path -> calibration data
 reports/    calibration (buckets, Brier, reliability chart), daily summary, trial report
 trials/     registry of every configuration ever run, deflated Sharpe haircut
+dashboard/  the visual desk: tails the event log and shows every move live    -> read-only
 desk/       config, block clock, modes (shadow | paper), the loop, the CLI
 ```
 
@@ -103,6 +104,27 @@ State sent with every battery:
 - `policy/thresholds.py` `EDGE`: target and stop in bps give `expected_edge_bps`, which the fees+gas veto
   compares with round-trip cost. Market orders (gambler, spy) pay `FEE_BPS`; resting limit orders (house)
   pay `MAKER_FEE_BPS`; `GAS_USD` is charged per transaction either way.
+
+## The visual desk
+
+```bash
+python -m dashboard.serve --log-dir logs/data        # open http://127.0.0.1:8080 next to a running desk
+python -m dashboard.export --log-dir logs/data --out reports/out/data.json   # static snapshot of the same page
+```
+
+The dashboard tails the event log every two seconds and is read-only. It shows the mode, bot, trial and Jev
+version; equity with today's PnL; the open position; counts of decisions, trades, vetoes and judge calls; the
+equity curve; rejections by funnel stage; and the moves feed, newest first: every decision (hold, enter, exit)
+with its probability against its threshold, every fill, every veto with the check that fired, shadow
+would-executes, position opens and closes, errors. Open a decision to see the policy scores, the order, the
+vetoes, every Jev question with its answer probabilities, and the snapshot it was decided on. Below: the
+calibration diagram, the trial registry with the deflated Sharpe, the bench, and judge stats. The page has
+no dependencies and works offline; served locally it refreshes itself, opened as a static file next to an
+exported `data.json` it shows that snapshot.
+
+`JUDGE_URL=stub://demo` runs a scripted judge that trades (enter when flat, exit after eight blocks or a
+50 bps drawdown) so the paper path and the dashboard can be exercised without a key. Its answers are a
+script, not judgments.
 
 ## Trial registry and the deflated Sharpe haircut
 

@@ -17,7 +17,15 @@ _PATTERNS = (
     re.compile(r"\b(?:sk|ts|tsk|key|tok|api)[-_][A-Za-z0-9]{16,}\b"),
     re.compile(r"\b[a-fA-F0-9]{40,}\b"),
 )
-_SECRET_KEYS = ("secret", "token", "api_key", "apikey", "authorization", "password", "credential")
+_SECRET_KEYS = frozenset({"secret", "token", "api_key", "apikey", "authorization", "password", "credential", "credentials", "cookie"})
+_SECRET_SUFFIXES = ("_secret", "_token", "_key", "_password", "_credential", "_credentials", "apikey")
+
+
+def looks_secret(key: str) -> bool:
+    """A key names a secret when it is one of the known names or ends with one of their suffixes.
+    Substrings are not enough: `tokens` and `input_tokens` are counts, not credentials."""
+    lowered = key.lower().replace("-", "_")
+    return lowered in _SECRET_KEYS or lowered.endswith(_SECRET_SUFFIXES)
 
 
 class Redactor:
@@ -38,7 +46,7 @@ class Redactor:
             out = {}
             for key, value in obj.items():
                 key_text = self.redact_text(str(key))
-                if any(marker in key_text.lower() for marker in _SECRET_KEYS):
+                if looks_secret(key_text):
                     out[key_text] = REDACTED
                 else:
                     out[key_text] = self.redact(value)

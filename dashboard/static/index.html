@@ -1,0 +1,496 @@
+<title>Dealbot Desk</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: identity bar, one row of tiles led by the equity figure, a band with the equity curve and the funnel,
+   the moves feed with its filters, then calibration, trials and the bench. Everything is scanned, not read. */
+:root {
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11, 11, 11, 0.10); --wash: rgba(11, 11, 11, 0.04);
+  --s1: #2a78d6; --s1-wash: rgba(42, 120, 214, 0.10); --s1-ink: #1c5cab;
+  --good: #0ca30c; --good-text: #006300; --warning: #fab219; --warning-text: #7a5200; --serious: #ec835a; --critical: #d03b3b; --critical-text: #a52a2a;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10); --wash: rgba(255, 255, 255, 0.05);
+  --s1: #3987e5; --s1-wash: rgba(57, 135, 229, 0.14); --s1-ink: #86b6ef;
+  --good-text: #0ca30c; --warning-text: #fab219; --critical-text: #e66767; color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255, 255, 255, 0.10); --wash: rgba(255, 255, 255, 0.05);
+  --s1: #3987e5; --s1-wash: rgba(57, 135, 229, 0.14); --s1-ink: #86b6ef;
+  --good-text: #0ca30c; --warning-text: #fab219; --critical-text: #e66767; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--page); color: var(--ink); font-family: var(--font); font-size: 14px; line-height: 1.4; margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px 40px; }
+h1 { font-size: 18px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: 13px; font-weight: 600; margin: 0; color: var(--ink2); text-transform: uppercase; letter-spacing: 0.04em; }
+.sub { color: var(--muted); font-size: 12px; }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.topbar .spacer { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--ink2); background: var(--surface); }
+.pill b { color: var(--ink); font-weight: 600; }
+.pill.mode-paper b { color: var(--s1-ink); }
+.live { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink2); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.dot.good { background: var(--good); } .dot.warning { background: var(--warning); } .dot.critical { background: var(--critical); } .dot.info { background: var(--s1); }
+.banner { margin-top: 12px; border-left: 4px solid var(--critical); background: var(--surface); padding: 10px 12px; border-radius: 0 6px 6px 0; }
+.banner b { color: var(--critical-text); }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 14px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.tile .label { font-size: 12px; color: var(--ink2); }
+.tile .value { font-size: 22px; font-weight: 600; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile.hero .value { font-size: clamp(24px, 2.4vw, 30px); letter-spacing: -0.01em; }
+.more { margin-top: 10px; }
+.tile .delta { font-size: 12px; margin-top: 2px; color: var(--ink2); }
+.up { color: var(--good-text); } .down { color: var(--critical-text); }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 16px; }
+.filters .group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.filters .group > span { font-size: 12px; color: var(--muted); margin-right: 2px; }
+.chip { font: inherit; font-size: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--ink2); border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--page); border-color: var(--ink); }
+.chip:focus-visible, .row:focus-visible, select:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+select { font: inherit; font-size: 12px; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; }
+.band { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; margin-top: 12px; }
+.band3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-top: 12px; }
+@media (max-width: 760px) { .band { grid-template-columns: minmax(0, 1fr); } }
+figure, .panel { margin: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; min-width: 0; position: relative; }
+figure header, .panel header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+figcaption { color: var(--muted); font-size: 12px; margin-top: 6px; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+.axis text { fill: var(--muted); font-size: 11px; }
+.grid line { stroke: var(--grid); stroke-width: 1; }
+.baseline { stroke: var(--axis); stroke-width: 1; }
+.series { fill: none; stroke: var(--s1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.area { fill: var(--s1-wash); }
+.mark { fill: var(--s1); stroke: var(--surface); stroke-width: 2; }
+.mark.hover { fill: var(--s1); }
+.crosshair { stroke: var(--axis); stroke-width: 1; }
+.label { fill: var(--ink); font-size: 12px; font-weight: 600; }
+.label2 { fill: var(--ink2); font-size: 11px; }
+.ref { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 5 5; }
+.bar { fill: var(--s1); }
+.bar.ghost { fill: var(--wash); }
+.tooltip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); color: var(--ink2); white-space: nowrap; }
+.tooltip b { color: var(--ink); font-size: 13px; }
+.empty { color: var(--muted); font-size: 13px; padding: 24px 0; text-align: center; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--ink2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+td.r, th.r { text-align: right; }
+.row { cursor: pointer; }
+.row:hover { background: var(--wash); }
+.row.open { background: var(--s1-wash); }
+.kind { font-size: 11px; color: var(--ink2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+.status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; color: var(--ink2); }
+.detail td { background: var(--page); padding: 12px 10px 14px; }
+.detail .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.detail h3 { font-size: 12px; margin: 0 0 6px; color: var(--ink2); text-transform: uppercase; letter-spacing: 0.04em; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+.q { margin-bottom: 8px; }
+.q .text { font-size: 12px; color: var(--ink2); }
+.pbar { display: grid; grid-template-columns: minmax(60px, 110px) 1fr 44px; align-items: center; gap: 6px; font-size: 12px; }
+.pbar .track { height: 8px; background: var(--wash); border-radius: 4px; position: relative; overflow: hidden; }
+.pbar .fill { position: absolute; inset: 0 auto 0 0; background: var(--s1); border-radius: 0 4px 4px 0; }
+.pbar .tick { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--ink); }
+.pbar .chosen { font-weight: 600; color: var(--ink); }
+.scroll { overflow-x: auto; }
+.list { margin: 0; padding-left: 18px; font-size: 13px; }
+.muted { color: var(--muted); }
+.note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+</style>
+
+<div class="topbar">
+  <h1>Dealbot desk</h1>
+  <span class="pill" id="pill-mode"><span>mode</span><b>…</b></span>
+  <span class="pill" id="pill-bot"><span>bot</span><b>…</b></span>
+  <span class="pill" id="pill-trial"><span>trial</span><b class="mono">…</b></span>
+  <span class="pill" id="pill-model"><span>Jev</span><b>…</b></span>
+  <span class="spacer"></span>
+  <span class="live" id="live"><span class="dot"></span><span>connecting</span></span>
+</div>
+<div class="banner" id="banner" hidden><b>Desk fault</b> <span id="banner-text"></span></div>
+
+<section class="tiles" id="tiles"></section>
+
+<section class="filters" aria-label="Filters">
+  <div class="group"><span>Range</span>
+    <button class="chip" data-range="all" aria-pressed="true">All</button>
+    <button class="chip" data-range="86400000" aria-pressed="false">24h</button>
+    <button class="chip" data-range="21600000" aria-pressed="false">6h</button>
+    <button class="chip" data-range="3600000" aria-pressed="false">1h</button>
+    <button class="chip" data-range="900000" aria-pressed="false">15m</button>
+  </div>
+  <div class="group"><span>Show</span>
+    <button class="chip" data-show="decision" aria-pressed="true">Decisions</button>
+    <button class="chip" data-show="trade" aria-pressed="true">Trades</button>
+    <button class="chip" data-show="veto" aria-pressed="true">Vetoes</button>
+    <button class="chip" data-show="rejection" aria-pressed="false">Funnel rejections</button>
+    <button class="chip" data-show="system" aria-pressed="true">System</button>
+  </div>
+  <div class="group"><span>Symbol</span><select id="sym-filter"><option value="">all</option></select></div>
+</section>
+
+<section class="band">
+  <figure id="equity-fig">
+    <header><h2>Equity</h2><span class="sub" id="equity-sub"></span></header>
+    <div id="equity-chart"></div>
+    <figcaption>Paper equity after fees and gas, sampled every heartbeat. Hover for the value at a block.</figcaption>
+  </figure>
+  <figure id="funnel-fig">
+    <header><h2>Funnel</h2><span class="sub">rejections since start</span></header>
+    <div id="funnel-chart"></div>
+    <div id="funnel-checks" class="note"></div>
+  </figure>
+</section>
+
+<section class="panel" style="margin-top:12px">
+  <header><h2>Moves</h2><span class="sub" id="moves-sub"></span></header>
+  <div class="scroll"><table id="moves"><thead><tr><th>Time (UTC)</th><th class="r">Block</th><th>Kind</th><th>Symbol</th><th>Move</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+  <button class="chip more" id="moves-more" hidden>Show more</button>
+</section>
+
+<section class="band3">
+  <figure id="cal-fig">
+    <header><h2>Calibration</h2><span class="sub" id="cal-sub"></span></header>
+    <div id="cal-chart"></div>
+    <figcaption>Observed frequency against predicted probability, one dot per bucket, sized by count. The dashed line is perfect calibration.</figcaption>
+  </figure>
+  <div class="panel" id="trials-panel">
+    <header><h2>Trials</h2><span class="sub" id="trials-sub"></span></header>
+    <div class="scroll"><table id="trials"><thead><tr><th>Trial</th><th>Bot</th><th class="r">Runs</th><th class="r">Obs</th><th class="r">Sharpe</th><th class="r">Best noise</th><th class="r">DSR</th><th>Verdict</th></tr></thead><tbody></tbody></table></div>
+    <div class="note" id="trials-note"></div>
+  </div>
+  <div class="panel" id="bench-panel">
+    <header><h2>Bench</h2><span class="sub" id="bench-sub"></span></header>
+    <div id="bench"></div>
+    <header style="margin-top:14px"><h2>Judge</h2></header>
+    <div id="judge" class="kv"></div>
+  </div>
+</section>
+
+<script>
+(function () {
+  'use strict';
+  const S = { data: null, details: {}, mode: 'live', range: 'all', show: { decision: true, trade: true, veto: true, rejection: false, system: true }, sym: '', expanded: null, lastFetch: 0, failed: false, limit: 120 };
+  const PAGE = 120;
+  const TRADE = new Set(['fill', 'order', 'would_execute', 'position_opened', 'position_closed', 'order_expired']);
+  const SYSTEM = new Set(['trial', 'error']);
+  const STAGES = ['free_cut', 'one_call', 'hard_facts', 'jev', 'final_pick'];
+  const $ = (sel) => document.querySelector(sel);
+
+  function el(tag, attrs, ...children) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (k === 'class') n.className = v; else if (k === 'text') n.textContent = v; else if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+    }
+    for (const c of children.flat()) { if (c === null || c === undefined) continue; n.append(c.nodeType ? c : document.createTextNode(String(c))); }
+    return n;
+  }
+  function svg(tag, attrs, ...children) {
+    const n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [k, v] of Object.entries(attrs || {})) { if (k === 'text') n.textContent = v; else n.setAttribute(k, v); }
+    for (const c of children.flat()) if (c) n.append(c);
+    return n;
+  }
+  const fmtUsd = (v) => v === null || v === undefined ? '–' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(v);
+  const fmtSigned = (v, d) => v === null || v === undefined ? '–' : (v > 0 ? '+' : '') + Number(v).toFixed(d === undefined ? 2 : d);
+  const fmtCompact = (v, step) => (step === undefined ? Math.abs(v) >= 1000 : step >= 1000) && Math.abs(v) >= 1000 ? '$' + (v / 1000).toFixed(step !== undefined && step >= 10000 ? 0 : 1) + 'K' : '$' + Math.round(v).toLocaleString('en-US');
+  const fmtTime = (ts) => ts ? new Date(ts).toISOString().slice(11, 19) : '–';
+  const fmtStamp = (ts) => ts ? new Date(ts).toISOString().replace('T', ' ').slice(0, 19) + 'Z' : '–';
+  const ago = (ms) => ms < 1000 ? 'just now' : ms < 60000 ? Math.round(ms / 1000) + 's ago' : ms < 3600000 ? Math.round(ms / 60000) + 'm ago' : Math.round(ms / 3600000) + 'h ago';
+  const num = (v, d) => v === null || v === undefined ? '–' : Number(v).toFixed(d === undefined ? 2 : d);
+
+  async function load() {
+    let data = null;
+    try {
+      const r = await fetch('./api/state', { cache: 'no-store' });
+      if (!r.ok) throw new Error('no api');
+      data = await r.json(); S.mode = 'live';
+    } catch (e) {
+      try {
+        const r = await fetch('./data.json', { cache: 'no-store' });
+        if (!r.ok) throw new Error('no snapshot');
+        data = await r.json(); S.mode = 'snapshot'; S.details = data.details || {};
+      } catch (e2) { S.failed = true; renderLive(); return; }
+    }
+    S.failed = false; S.data = data; S.lastFetch = Date.now();
+    render();
+  }
+
+  function latestTs() {
+    const d = S.data; let t = d.summary.last_event_ms || 0;
+    for (const m of d.moves) if (m.ts && m.ts > t) t = m.ts;
+    return t;
+  }
+  function cutoff() { return S.range === 'all' ? -Infinity : latestTs() - Number(S.range); }
+
+  function render() {
+    renderLive(); renderHeader(); renderTiles(); renderSymbols(); renderEquity(); renderFunnel(); renderMoves(); renderCalibration(); renderTrials(); renderBenchJudge();
+  }
+
+  function renderLive() {
+    const live = $('#live'); live.replaceChildren();
+    if (S.failed) { live.append(el('span', { class: 'dot critical' }), el('span', { text: 'no data: start the desk and run python -m dashboard.serve' })); return; }
+    if (!S.data) return;
+    const s = S.data.summary;
+    if (S.mode === 'snapshot') {
+      live.append(el('span', { class: 'dot info' }), el('span', { text: 'snapshot exported ' + fmtStamp(S.data.source && S.data.source.exported_ms) }));
+    } else {
+      const stale = s.last_event_ms ? Date.now() - s.last_event_ms : null;
+      const cls = stale !== null && stale < 120000 ? 'good' : 'warning';
+      live.append(el('span', { class: 'dot ' + cls }), el('span', { text: 'live, refreshed ' + ago(Date.now() - S.lastFetch) + (s.block_ts ? ', last block ' + fmtTime(s.block_ts) + 'Z' : '') }));
+    }
+  }
+
+  function setPill(id, value, cls) { const p = $(id); p.querySelector('b').textContent = value || '–'; if (cls) p.className = 'pill ' + cls; }
+  function renderHeader() {
+    const s = S.data.summary;
+    setPill('#pill-mode', s.mode ? s.mode.toUpperCase() : null, s.mode === 'paper' ? 'mode-paper' : '');
+    setPill('#pill-bot', s.bot); setPill('#pill-trial', s.trial_id ? s.trial_id.slice(0, 8) : null); setPill('#pill-model', s.model);
+    const banner = $('#banner'); banner.hidden = !s.fault; $('#banner-text').textContent = s.fault || '';
+  }
+
+  function tile(label, value, delta, opts) {
+    const t = el('div', { class: 'tile' + (opts && opts.hero ? ' hero' : '') }, el('div', { class: 'label', text: label }), el('div', { class: 'value' + (opts && opts.num ? ' num' : ''), text: value }));
+    if (delta) t.append(delta);
+    return t;
+  }
+  function renderTiles() {
+    const s = S.data.summary, c = s.counts || {};
+    const tiles = $('#tiles'); tiles.replaceChildren();
+    const pnl = s.day_pnl_usd, eq = s.equity_usd;
+    const bps = eq && pnl !== null && pnl !== undefined && eq - pnl > 0 ? (pnl / (eq - pnl)) * 1e4 : null;
+    const dir = pnl > 0 ? 'up' : pnl < 0 ? 'down' : '';
+    tiles.append(tile('Equity', fmtUsd(eq), el('div', { class: 'delta ' + dir, text: pnl === null || pnl === undefined ? 'no mark yet' : (pnl > 0 ? '▲ ' : pnl < 0 ? '▼ ' : '') + fmtSigned(pnl) + ' USD today' + (bps !== null ? ' (' + fmtSigned(bps, 0) + ' bps)' : '') }), { hero: true }));
+    const p = s.position;
+    tiles.append(tile('Position', p ? p.side + ' ' + Math.abs(p.qty) + ' ' + p.sym : 'flat', el('div', { class: 'delta', text: p ? 'entry ' + num(p.entry_price, 2) + (s.block !== null && p.entry_block !== undefined ? ', ' + (s.block - p.entry_block) + ' blocks' : '') : (s.pending_order ? 'entry order resting' : 'scanning') })));
+    tiles.append(tile('Block', s.block === null || s.block === undefined ? '–' : '#' + s.block, el('div', { class: 'delta', text: s.block_ts ? fmtStamp(s.block_ts) : '' }), { num: true }));
+    tiles.append(tile('Decisions', String(c.decisions || 0), el('div', { class: 'delta', text: 'executed ' + (c.executed || 0) + ', vetoed ' + (c.vetoed || 0) + ', hold ' + (c.holds || 0) + (c.shadow_approved ? ', shadow ' + c.shadow_approved : '') }), { num: true }));
+    const realized = (s.realized_pnl_usd || 0) - (s.fees_usd || 0);
+    tiles.append(tile('Trades', String(c.fills || 0) + ' fills', el('div', { class: 'delta ' + (realized > 0 ? 'up' : realized < 0 ? 'down' : ''), text: 'realized after fees ' + fmtSigned(realized) + ' USD' }), { num: true }));
+    const topVeto = Object.keys(S.data.vetoes_by_check || {})[0];
+    tiles.append(tile('Vetoes fired', String(c.vetoes || 0), el('div', { class: 'delta', text: topVeto ? 'most often: ' + topVeto : 'none so far' }), { num: true }));
+    const j = S.data.judge || {};
+    tiles.append(tile('Judge calls', String(j.calls || 0), el('div', { class: 'delta', text: (s.judge_latency_ms_mean !== null && s.judge_latency_ms_mean !== undefined ? 'mean ' + s.judge_latency_ms_mean + ' ms' : 'no calls') + (j.timeouts ? ', ' + j.timeouts + ' timeouts' : '') + (j.rate_limited ? ', ' + j.rate_limited + ' rate limited' : '') }), { num: true }));
+  }
+
+  function renderSymbols() {
+    const sel = $('#sym-filter'); const syms = new Set();
+    for (const m of S.data.moves) if (m.sym) syms.add(m.sym);
+    for (const r of S.data.rejections) if (r.sym) syms.add(r.sym);
+    const current = sel.value;
+    sel.replaceChildren(el('option', { value: '', text: 'all' }), ...[...syms].sort().map((s) => el('option', { value: s, text: s })));
+    sel.value = [...syms].includes(current) ? current : '';
+    S.sym = sel.value;
+  }
+
+  function niceTicks(lo, hi, n) {
+    if (!(hi > lo)) { const v = lo || 0; return [v]; }
+    const raw = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), norm = raw / mag;
+    const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+    const out = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(10));
+    return out;
+  }
+
+  function renderEquity() {
+    const host = $('#equity-chart'); host.replaceChildren();
+    const co = cutoff(); const pts = S.data.equity.filter((p) => p.equity !== null && (p.ts || 0) >= co);
+    $('#equity-sub').textContent = pts.length ? pts.length + ' samples, ' + fmtTime(pts[0].ts) + ' to ' + fmtTime(pts[pts.length - 1].ts) + 'Z' : '';
+    if (pts.length < 2) { host.append(el('div', { class: 'empty', text: 'Fewer than two equity samples in this range.' })); return; }
+    const W = Math.max(320, host.getBoundingClientRect().width || 600), H = 240, m = { l: 58, r: 76, t: 14, b: 26 };
+    const xs = pts.map((p) => p.ts), ys = pts.map((p) => p.equity);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs); let y0 = Math.min(...ys), y1 = Math.max(...ys);
+    if (y1 - y0 < 1e-9) { y0 -= 1; y1 += 1; } const pad = (y1 - y0) * 0.12; y0 -= pad; y1 += pad;
+    const X = (t) => m.l + ((t - x0) / Math.max(1, x1 - x0)) * (W - m.l - m.r), Y = (v) => m.t + (1 - (v - y0) / (y1 - y0)) * (H - m.t - m.b);
+    const root = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': 'Equity over time' });
+    const grid = svg('g', { class: 'grid' }), axis = svg('g', { class: 'axis' });
+    const yt = niceTicks(y0, y1, 4), yStep = yt.length > 1 ? yt[1] - yt[0] : 1000;
+    for (const v of yt) { grid.append(svg('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v) })); axis.append(svg('text', { x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end', text: fmtCompact(v, yStep) })); }
+    const nx = Math.max(2, Math.min(5, Math.floor((W - m.l - m.r) / 150), pts.length)); for (let i = 0; i < nx; i++) { const t = x0 + ((x1 - x0) * i) / Math.max(1, nx - 1); axis.append(svg('text', { x: X(t), y: H - 6, 'text-anchor': i === 0 ? 'start' : i === nx - 1 ? 'end' : 'middle', text: fmtTime(t) })); }
+    root.append(grid, axis, svg('line', { class: 'baseline', x1: m.l, x2: W - m.r, y1: H - m.b, y2: H - m.b }));
+    const d = pts.map((p, i) => (i ? 'L' : 'M') + X(p.ts).toFixed(1) + ',' + Y(p.equity).toFixed(1)).join(' ');
+    root.append(svg('path', { class: 'area', d: d + ' L' + X(x1).toFixed(1) + ',' + (H - m.b) + ' L' + X(x0).toFixed(1) + ',' + (H - m.b) + ' Z' }), svg('path', { class: 'series', d }));
+    const last = pts[pts.length - 1];
+    root.append(svg('circle', { class: 'mark', cx: X(last.ts), cy: Y(last.equity), r: 5 }), svg('text', { class: 'label', x: X(last.ts) + 10, y: Y(last.equity) + 4, text: fmtUsd(last.equity) }));
+    const cross = svg('line', { class: 'crosshair', x1: 0, x2: 0, y1: m.t, y2: H - m.b, visibility: 'hidden' }), hover = svg('circle', { class: 'mark', r: 5, visibility: 'hidden' });
+    const overlay = svg('rect', { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: 'transparent' });
+    root.append(cross, hover, overlay);
+    const tip = el('div', { class: 'tooltip' }); tip.hidden = true;
+    host.append(root, tip);
+    overlay.addEventListener('pointermove', (ev) => {
+      const box = root.getBoundingClientRect(); const px = ((ev.clientX - box.left) / box.width) * W; const t = x0 + ((px - m.l) / (W - m.l - m.r)) * (x1 - x0);
+      let lo = 0, hi = pts.length - 1; while (lo < hi) { const mid = (lo + hi) >> 1; if (pts[mid].ts < t) lo = mid + 1; else hi = mid; }
+      const i = lo > 0 && Math.abs(pts[lo - 1].ts - t) < Math.abs(pts[lo].ts - t) ? lo - 1 : lo; const p = pts[i];
+      cross.setAttribute('x1', X(p.ts)); cross.setAttribute('x2', X(p.ts)); cross.setAttribute('visibility', 'visible');
+      hover.setAttribute('cx', X(p.ts)); hover.setAttribute('cy', Y(p.equity)); hover.setAttribute('visibility', 'visible');
+      tip.replaceChildren(el('b', { text: fmtUsd(p.equity) }), el('div', { text: fmtStamp(p.ts) + (p.blk !== null && p.blk !== undefined ? ', block ' + p.blk : '') + (p.day_pnl !== null && p.day_pnl !== undefined ? ', day ' + fmtSigned(p.day_pnl) : '') }));
+      tip.hidden = false; const hb = host.getBoundingClientRect(); const left = ev.clientX - hb.left + 14; tip.style.left = Math.min(left, hb.width - 180) + 'px'; tip.style.top = Math.max(0, ev.clientY - hb.top - 48) + 'px';
+    });
+    overlay.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); hover.setAttribute('visibility', 'hidden'); tip.hidden = true; });
+  }
+
+  function roundedBar(x, y, w, h) { const r = Math.min(4, w / 2); return 'M' + x + ',' + y + ' h' + (w - r) + ' a' + r + ',' + r + ' 0 0 1 ' + r + ',' + r + ' v' + (h - 2 * r) + ' a' + r + ',' + r + ' 0 0 1 -' + r + ',' + r + ' h-' + (w - r) + ' z'; }
+  function renderFunnel() {
+    const host = $('#funnel-chart'); host.replaceChildren();
+    const by = S.data.funnel.by_stage || {}; const max = Math.max(1, ...STAGES.map((s) => by[s] || 0));
+    const W = Math.max(240, host.getBoundingClientRect().width || 300), rowH = 26, L = 84, R = 44, H = STAGES.length * rowH + 4;
+    const root = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': 'Rejections by funnel stage' });
+    STAGES.forEach((stage, i) => {
+      const v = by[stage] || 0, y = 4 + i * rowH, w = Math.max(v > 0 ? 2 : 0, ((W - L - R) * v) / max);
+      root.append(svg('text', { class: 'label2', x: L - 8, y: y + 13, 'text-anchor': 'end', text: stage.replace('_', ' ') }));
+      root.append(svg('rect', { class: 'bar ghost', x: L, y: y + 2, width: W - L - R, height: 16 }));
+      if (w > 0) { const bar = svg('path', { class: 'bar', d: roundedBar(L, y + 2, w, 16) }); bar.append(svg('title', { text: stage + ': ' + v + ' rejections' })); root.append(bar); }
+      root.append(svg('text', { class: 'label2', x: L + w + 6, y: y + 14, text: String(v) }));
+    });
+    host.append(root);
+    const checks = Object.entries(S.data.funnel.recent_by_check || {}).slice(0, 6);
+    $('#funnel-checks').textContent = checks.length ? 'Recent checks: ' + checks.map(([k, v]) => k + ' ×' + v).join(', ') : 'No rejections yet.';
+  }
+
+  function group(kind) { return kind === 'decision' ? 'decision' : kind === 'veto' ? 'veto' : kind === 'rejection' ? 'rejection' : TRADE.has(kind) ? 'trade' : SYSTEM.has(kind) ? 'system' : 'system'; }
+  function statusText(m) {
+    switch (m.kind) {
+      case 'decision': return m.detail.split('.')[0] || 'decided';
+      case 'veto': return 'vetoed';
+      case 'fill': return 'filled';
+      case 'order': return (m.title.match(/^order (\w+)/) || [])[1] || 'order';
+      case 'would_execute': return 'shadow';
+      case 'position_opened': return 'opened';
+      case 'position_closed': return 'closed';
+      case 'order_expired': return 'expired';
+      case 'rejection': return 'rejected';
+      case 'error': return 'fault';
+      case 'trial': return 'started';
+      default: return m.kind.replace('_', ' ');
+    }
+  }
+  function statusChip(m) { return el('span', { class: 'status' }, el('span', { class: 'dot ' + m.status }), statusText(m)); }
+  function renderMoves() {
+    const tbody = $('#moves tbody'); tbody.replaceChildren();
+    const co = cutoff(); let rows = S.data.moves.concat(S.show.rejection ? S.data.rejections : []);
+    rows = rows.filter((m) => S.show[group(m.kind)] && (!S.sym || m.sym === S.sym) && (m.ts || 0) >= co).sort((a, b) => (b.ts || 0) - (a.ts || 0) || (b.id > a.id ? 1 : -1));
+    const shown = rows.slice(0, S.limit);
+    $('#moves-sub').textContent = shown.length === rows.length ? rows.length + ' shown, newest first' : shown.length + ' of ' + rows.length + ' shown, newest first';
+    const more = $('#moves-more'); more.hidden = shown.length >= rows.length; more.textContent = 'Show ' + Math.min(PAGE, rows.length - shown.length) + ' more';
+    if (!shown.length) { tbody.append(el('tr', {}, el('td', { colspan: '6', class: 'empty', text: 'Nothing matches these filters.' }))); return; }
+    for (const m of shown) {
+      const tr = el('tr', { class: 'row' + (S.expanded === m.id ? ' open' : ''), tabindex: '0', onclick: () => toggle(m), onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(m); } } },
+        el('td', { class: 'num', text: fmtTime(m.ts) }), el('td', { class: 'num r', text: m.blk === null || m.blk === undefined ? '' : m.blk }), el('td', {}, el('span', { class: 'kind', text: m.kind.replace('_', ' ') })),
+        el('td', { text: m.sym || '' }), el('td', {}, el('div', { text: m.title }), el('div', { class: 'sub', text: m.detail })), el('td', {}, statusChip(m)));
+      tbody.append(tr);
+      if (S.expanded === m.id) tbody.append(detailRow(m));
+    }
+  }
+  function toggle(m) { S.expanded = S.expanded === m.id ? null : m.id; renderMoves(); if (S.expanded && m.decision_id && !S.details[m.decision_id] && S.mode === 'live') fetchDetail(m.decision_id); }
+  async function fetchDetail(id) {
+    try { const r = await fetch('./api/decision/' + encodeURIComponent(id), { cache: 'no-store' }); if (r.ok) { S.details[id] = await r.json(); renderMoves(); } } catch (e) { /* the row shows what the move record carries */ }
+  }
+  function pbar(label, p, opts) {
+    const row = el('div', { class: 'pbar' }, el('span', { class: opts && opts.chosen ? 'chosen' : '', text: label }), el('div', { class: 'track' }, el('div', { class: 'fill', style: 'width:' + (Math.max(0, Math.min(1, p)) * 100).toFixed(1) + '%' }), opts && opts.tick !== undefined ? el('div', { class: 'tick', style: 'left:' + (opts.tick * 100).toFixed(1) + '%', title: 'threshold ' + opts.tick.toFixed(2) }) : null), el('span', { class: 'num', text: num(p, 2) }));
+    return row;
+  }
+  function detailRow(m) {
+    const td = el('td', { colspan: '6' }); const cols = el('div', { class: 'cols' }); td.append(cols);
+    const det = m.decision_id ? S.details[m.decision_id] : null;
+    const dec = det && det.decision ? det.decision : (m.kind === 'decision' ? m.data : null);
+    if (m.kind === 'decision' || m.kind === 'veto') {
+      const policy = el('div', {}, el('h3', { text: 'Policy' }));
+      const scores = (dec && dec.scores) || m.data.scores || [];
+      for (const sc of scores) policy.append(pbar(sc.action, sc.prob, { tick: sc.threshold, chosen: dec && dec.action === sc.action }));
+      if (scores.length) policy.append(el('div', { class: 'note', text: 'Bar: probability. Tick: threshold from costs. Edge: ' + scores.map((s) => s.action + ' ' + fmtSigned(s.expected_edge_bps, 0) + ' bps').join(', ') }));
+      const order = (dec && dec.order) || m.data.order;
+      if (order) policy.append(el('div', { class: 'note', text: 'Order: ' + order.side + ' ' + order.qty + ' ' + order.sym + ' ' + order.type + (order.price ? ' at ' + order.price : '') + (order.reduce_only ? ', reduce only' : '') }));
+      const vetoes = (det && det.vetoes && det.vetoes.length ? det.vetoes : (dec && dec.vetoes) || m.data.vetoes) || [];
+      if (vetoes.length) policy.append(el('ul', { class: 'list' }, ...vetoes.map((v) => el('li', {}, el('b', { text: v.check + ': ' }), v.detail))));
+      if (dec && dec.model) policy.append(el('div', { class: 'note', text: 'Answered by ' + dec.model }));
+      cols.append(policy);
+      const jev = el('div', {}, el('h3', { text: 'Jev answers' }));
+      if (det && det.answer && det.questions) {
+        const answers = det.answer.answers || {};
+        for (const [qid, q] of Object.entries(det.questions)) {
+          const a = answers[qid]; const box = el('div', { class: 'q' }, el('div', { class: 'text', text: q.instructions || qid }));
+          if (!a) box.append(el('div', { class: 'muted', text: 'no answer' }));
+          else if (a.type === 'noul') box.append(pbar('yes', a.noul));
+          else if (a.type === 'choice') for (const [label, p] of Object.entries(a.probabilities || {})) box.append(pbar(label, p, { chosen: label === a.choice }));
+          else if (a.type === 'score') for (const [lvl, p] of Object.entries(a.probabilities || {})) box.append(pbar('level ' + lvl, p, { chosen: Math.round(a.score) === Number(lvl) }));
+          jev.append(box);
+        }
+        jev.append(el('div', { class: 'note', text: 'Model ' + det.answer.model + (det.answer.latency_ms !== null && det.answer.latency_ms !== undefined ? ', ' + det.answer.latency_ms + ' ms' : '') + (det.answer.request_id ? ', request ' + det.answer.request_id : '') }));
+      } else jev.append(el('div', { class: 'muted', text: m.decision_id ? (S.mode === 'live' ? 'Loading…' : 'Not in this snapshot.') : 'No judge call for this move.' }));
+      cols.append(jev);
+      const snap = el('div', {}, el('h3', { text: 'Snapshot' }));
+      if (det && det.snapshot && det.snapshot.snapshot) {
+        const s = det.snapshot.snapshot, st = det.snapshot.state || {}; const dl = el('dl', { class: 'kv' });
+        const kv = (k, v) => dl.append(el('dt', { text: k }), el('dd', { text: v === null || v === undefined ? '–' : String(v) }));
+        kv('as of', fmtStamp(s.as_of)); kv('mid', s.mid); kv('spread bps', s.spr_bps); kv('imbalance', s.imb); kv('realized vol bps', s.rv_bps);
+        kv('return w1 / w5 / w20', [s.ret_bps && s.ret_bps.w1, s.ret_bps && s.ret_bps.w5, s.ret_bps && s.ret_bps.w20].map((v) => v === null || v === undefined ? '–' : v).join(' / '));
+        kv('inventory', s.inv + ' (' + fmtUsd(s.inv_usd) + ')'); kv('drawdown bps', s.dd_bps + ' (day ' + s.dd_day_bps + ')'); kv('ticks used', s.n);
+        if (st.desk) kv('round-trip cost bps', st.desk.cost_bps); if (st.pos) kv('open position', st.pos.side + ' ' + st.pos.qty + ' at ' + st.pos.entry + ', ' + fmtSigned(st.pos.upnl_bps, 1) + ' bps, ' + st.pos.age_blocks + ' blocks');
+        kv('tokens', det.snapshot.tokens); snap.append(dl);
+      } else snap.append(el('div', { class: 'muted', text: S.mode === 'live' && m.decision_id ? 'Loading…' : 'Not available.' }));
+      cols.append(snap);
+    } else {
+      const box = el('div', {}, el('h3', { text: m.kind.replace('_', ' ') })); const dl = el('dl', { class: 'kv' });
+      const flat = (obj, prefix) => { for (const [k, v] of Object.entries(obj || {})) { if (v && typeof v === 'object' && !Array.isArray(v)) flat(v, prefix + k + '.'); else dl.append(el('dt', { text: prefix + k }), el('dd', { text: v === null || v === undefined ? '–' : Array.isArray(v) ? JSON.stringify(v) : String(v) })); } };
+      flat(m.data, ''); if (!dl.children.length) dl.append(el('dt', { text: 'detail' }), el('dd', { text: m.detail || '–' }));
+      box.append(dl); cols.append(box);
+    }
+    return el('tr', { class: 'detail' }, td);
+  }
+
+  function renderCalibration() {
+    const host = $('#cal-chart'); host.replaceChildren(); const c = S.data.calibration || { n: 0, buckets: [] };
+    $('#cal-sub').textContent = c.n ? 'Brier ' + num(c.brier, 4) + ' on ' + c.n + ' forecasts' + (c.base_rate !== null && c.base_rate !== undefined ? ', base rate ' + num(c.base_rate, 2) : '') : '';
+    const pts = c.buckets.filter((b) => b.n > 0);
+    if (!pts.length) { host.append(el('div', { class: 'empty', text: 'No resolved outcomes yet. Grading starts after each question’s horizon passes.' })); return; }
+    const W = Math.max(240, host.getBoundingClientRect().width || 300), H = Math.min(280, W), m = { l: 40, r: 14, t: 10, b: 30 };
+    const X = (p) => m.l + p * (W - m.l - m.r), Y = (p) => m.t + (1 - p) * (H - m.t - m.b);
+    const root = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, role: 'img', 'aria-label': 'Reliability diagram' }); const grid = svg('g', { class: 'grid' }), axis = svg('g', { class: 'axis' });
+    for (let k = 0; k <= 4; k++) { const p = k / 4; grid.append(svg('line', { x1: X(0), x2: X(1), y1: Y(p), y2: Y(p) }), svg('line', { x1: X(p), x2: X(p), y1: Y(0), y2: Y(1) })); axis.append(svg('text', { x: X(p), y: H - m.b + 16, 'text-anchor': 'middle', text: p.toFixed(2) }), svg('text', { x: m.l - 6, y: Y(p) + 4, 'text-anchor': 'end', text: p.toFixed(2) })); }
+    root.append(grid, axis, svg('line', { class: 'ref', x1: X(0), y1: Y(0), x2: X(1), y2: Y(1) }));
+    const maxN = Math.max(...pts.map((b) => b.n));
+    for (const b of pts) { const r = 4 + 8 * Math.sqrt(b.n / maxN); const dot = svg('circle', { class: 'mark', cx: X(b.mean_p), cy: Y(b.observed), r }); dot.append(svg('title', { text: 'predicted ' + num(b.mean_p, 2) + ', observed ' + num(b.observed, 2) + ', n=' + b.n })); root.append(dot); }
+    root.append(svg('text', { class: 'label2', x: X(0.5), y: H - 2, 'text-anchor': 'middle', text: 'predicted probability' }));
+    host.append(root);
+  }
+
+  function renderTrials() {
+    const t = S.data.trials || { rows: [] }; const tbody = $('#trials tbody'); tbody.replaceChildren();
+    $('#trials-sub').textContent = t.n_registered ? t.n_registered + ' registered, N = ' + t.n_used : 'none registered';
+    if (!t.rows.length) { tbody.append(el('tr', {}, el('td', { colspan: '8', class: 'empty', text: 'No trials registered yet.' }))); }
+    for (const r of t.rows) {
+      const verdict = r.passes_95 === true ? ['good', 'passes 95%'] : r.passes_95 === false ? ['critical', 'fails 95%'] : ['neutral', r.note || 'not evaluated'];
+      tbody.append(el('tr', {}, el('td', { class: 'mono', text: r.trial_id.slice(0, 8) }), el('td', { text: r.bot }), el('td', { class: 'num r', text: r.runs }), el('td', { class: 'num r', text: r.n_obs }), el('td', { class: 'num r', text: num(r.sharpe_annual, 2) }), el('td', { class: 'num r', text: num(r.noise_max_annual, 2) }), el('td', { class: 'num r', text: num(r.dsr, 3) }), el('td', {}, el('span', { class: 'status' }, el('span', { class: 'dot ' + verdict[0] }), verdict[1]))));
+    }
+    const mb = t.min_backtest_years || {}; const keys = Object.keys(mb);
+    $('#trials-note').textContent = keys.length ? 'Sharpe is annualized. Best noise: expected maximum Sharpe of N noise trials. Minimum backtest for a true Sharpe of ' + keys.map((k) => k + ': ' + mb[k] + ' y').join(', ') + '.' : '';
+  }
+
+  function renderBenchJudge() {
+    const s = S.data.summary; const bench = $('#bench'); bench.replaceChildren();
+    const entries = s.benched || []; $('#bench-sub').textContent = entries.length ? entries.length + ' benched' : 'empty';
+    if (!entries.length) bench.append(el('div', { class: 'muted', text: 'No symbols benched.' }));
+    else bench.append(el('ul', { class: 'list' }, ...entries.map((e) => el('li', {}, el('b', { text: e.sym + ' ' }), e.reason + (e.forever ? ', until restart' : e.until_block !== null && e.until_block !== undefined ? ', until block ' + e.until_block : e.until_ms ? ', until ' + fmtStamp(e.until_ms) : '')))));
+    const j = S.data.judge || {}; const dl = $('#judge'); dl.replaceChildren();
+    const kv = (k, v) => dl.append(el('dt', { text: k }), el('dd', { text: v }));
+    kv('calls', j.calls || 0); kv('models seen', Object.entries(j.models || {}).map(([m, n]) => m + ' ×' + n).join(', ') || '–');
+    kv('mean latency', s.judge_latency_ms_mean !== null && s.judge_latency_ms_mean !== undefined ? s.judge_latency_ms_mean + ' ms' : '–');
+    kv('timeouts / rate limited / unavailable', (j.timeouts || 0) + ' / ' + (j.rate_limited || 0) + ' / ' + (j.unavailable || 0)); kv('pending outcomes', s.pending_outcomes || 0);
+  }
+
+  for (const b of document.querySelectorAll('[data-range]')) b.addEventListener('click', () => { S.range = b.dataset.range; S.limit = PAGE; for (const o of document.querySelectorAll('[data-range]')) o.setAttribute('aria-pressed', o === b ? 'true' : 'false'); if (S.data) render(); });
+  for (const b of document.querySelectorAll('[data-show]')) b.addEventListener('click', () => { S.show[b.dataset.show] = !S.show[b.dataset.show]; S.limit = PAGE; b.setAttribute('aria-pressed', String(S.show[b.dataset.show])); if (S.data) renderMoves(); });
+  $('#sym-filter').addEventListener('change', (ev) => { S.sym = ev.target.value; S.limit = PAGE; if (S.data) renderMoves(); });
+  $('#moves-more').addEventListener('click', () => { S.limit += PAGE; renderMoves(); });
+  let resizeTimer = null; window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (S.data) { renderEquity(); renderFunnel(); renderCalibration(); } }, 150); });
+  load();
+  setInterval(() => { if (S.mode === 'live' || S.failed) load(); }, 3000);
+  setInterval(renderLive, 1000);
+})();
+</script>

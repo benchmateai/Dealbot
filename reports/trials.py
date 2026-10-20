@@ -103,12 +103,17 @@ class Report:
     rows: list[Row]
 
 
-def evaluate(registry: TrialRegistry, log_dir: str | Path, *, min_obs: int = DEFAULT_MIN_OBS, effective_trials: int | None = None, target_sharpes: tuple[float, ...] = (0.5, 1.0, 2.0), now_ms: int | None = None) -> Report:
+def evaluate(registry: TrialRegistry, log_dir: str | Path, *, min_obs: int = DEFAULT_MIN_OBS, effective_trials: int | None = None, target_sharpes: tuple[float, ...] = (0.5, 1.0, 2.0), now_ms: int | None = None, persist: bool = True) -> Report:
+    """Evaluate every registered trial. With persist=False nothing is written to the registry file."""
     now = int(time.time() * 1000) if now_ms is None else now_ms
     specs, points = collect(log_dir)
     for entry in registry.entries():
         spec = specs.get(entry.trial_id) or entry.spec
-        registry.record_evaluation(entry.trial_id, evaluate_trial(spec, points.get(entry.trial_id, []), min_obs=min_obs, now_ms=now))
+        evaluation = evaluate_trial(spec, points.get(entry.trial_id, []), min_obs=min_obs, now_ms=now)
+        if persist:
+            registry.record_evaluation(entry.trial_id, evaluation)
+        else:
+            entry.evaluation = evaluation
     n_trials = max(1, effective_trials if effective_trials is not None else registry.count())
     sharpes = registry.sharpes()
     var_sharpe = statistics.variance(sharpes) if len(sharpes) >= 2 else None
