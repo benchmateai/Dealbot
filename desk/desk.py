@@ -161,7 +161,11 @@ class Desk:
         if seed is not None:
             for sym, ticks in (data.get("feed") or {}).items():
                 seed(sym, [Tick(**t) for t in ticks])
-        self._log.write("error" if self._fault else "heartbeat", {"where": "desk", "blk": self._last_block, "detail": f"resumed with fault: {self._fault}"} if self._fault else {"blk": self._last_block, "resumed": True, "saved_ms": data.get("saved_ms"), "position": data["book"].get("position"), "equity_usd": data["book"].get("equity")})
+        saved_ms = data.get("saved_ms")
+        if self._fault:
+            self._log.write("error", {"where": "desk", "blk": self._last_block, "detail": f"resumed with fault: {self._fault}"}, ts_ms=saved_ms)
+        else:
+            self._log.write("heartbeat", {"blk": self._last_block, "resumed": True, "saved_ms": saved_ms, "position": data["book"].get("position"), "equity_usd": data["book"].get("equity")}, ts_ms=saved_ms)
 
     @property
     def book(self) -> Book:

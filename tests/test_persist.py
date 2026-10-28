@@ -61,7 +61,11 @@ def test_question_text_is_logged_once_per_battery_version(tmp_path):
     log.close()
     questions = list(read_events(cfg.log_dir, kinds=("question",)))
     assert len(questions) == 6 and questions[0]["questions"] and all(q["questions"] is None for q in questions[1:])
-    assert all(q["battery_version"] == questions[0]["battery_version"] and q["question_ids"] == list(questions[0]["questions"]) for q in questions)
+    from questions import load_battery
+
+    battery_order = [q.id for q in load_battery("gambler").questions]
+    assert all(q["battery_version"] == questions[0]["battery_version"] and q["question_ids"] == battery_order for q in questions)
+    assert set(questions[0]["questions"]) == set(battery_order)  # the JSON writer sorts keys; question_ids keeps the order
 
 
 def test_newest_pinned_model_skips_aliases():
