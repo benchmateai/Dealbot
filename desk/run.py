@@ -36,7 +36,9 @@ def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None) -> tuple[Desk, Log
     """Wire every component. `judge` can be injected (tests); by default it comes from JUDGE_URL."""
     assert_desk_cannot_see_jev_key(os.environ)
     log = LogWriter(cfg.log_dir, Redactor([cfg.desk_secret]))
-    feed = make_feed(cfg.feed, cfg.symbols, start_ms=start_ms - cfg.warmup_blocks * cfg.block_ms, replay_path=cfg.replay_path, seed=cfg.synthetic_seed, tick_ms=cfg.synthetic_tick_ms)
+    feed = make_feed(cfg.feed, cfg.symbols, start_ms=start_ms - cfg.warmup_blocks * cfg.block_ms, replay_path=cfg.replay_path, seed=cfg.synthetic_seed, tick_ms=cfg.synthetic_tick_ms, base_url=cfg.feed_base_url, poll_ms=cfg.feed_poll_ms)
+    if hasattr(feed, "start"):
+        feed.start()
     battery = load_battery(cfg.bot)
     registry = TrialRegistry(cfg.trials_file)
     spec = strategy_spec(cfg, battery)
@@ -68,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--env-file", help="KEY=VALUE file; real environment variables take precedence")
     parser.add_argument("--mode", choices=("shadow", "paper"))
     parser.add_argument("--bot", choices=("gambler", "house", "spy"))
-    parser.add_argument("--feed", choices=("synthetic", "replay"))
+    parser.add_argument("--feed", choices=("synthetic", "replay", "coinbase"))
     parser.add_argument("--symbols", help="comma separated")
     parser.add_argument("--judge-url")
     parser.add_argument("--blocks", type=int, default=None, help="stop after N blocks (default: run forever)")
@@ -83,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
     overrides = {"DESK_MODE": args.mode, "DESK_BOT": args.bot, "FEED": args.feed, "DESK_SYMBOLS": args.symbols, "JUDGE_URL": args.judge_url}
     try:
         cfg = DeskConfig.from_env(env, overrides)
+        if cfg.feed == "coinbase" and args.fast:
+            raise ConfigError("--fast makes no sense with a live feed; the block clock must run in real time")
         if args.start_ms is not None:
             start_ms = args.start_ms
         else:
@@ -112,6 +116,8 @@ def main(argv: list[str] | None = None) -> int:
                 print("desk: stop requested, finished the current block")
                 break
     finally:
+        if hasattr(desk.feed, "close"):
+            desk.feed.close()
         log.close()
     print(f"desk: {blocks_done} blocks, fault={desk.fault!r}, position={None if desk.book.position is None else desk.book.position.to_dict()}")
     return 0

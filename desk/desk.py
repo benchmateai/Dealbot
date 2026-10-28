@@ -110,6 +110,10 @@ class Desk:
         return self._trial_id
 
     @property
+    def feed(self) -> MarketFeed:
+        return self._feed
+
+    @property
     def book(self) -> Book:
         return self._book
 

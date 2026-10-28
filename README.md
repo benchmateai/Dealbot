@@ -5,7 +5,7 @@ and no code path that can place a live order. Jev (TypeSafe's System One decisio
 judge; code owns every decision.
 
 ```
-feed/       raw ticks (synthetic random walk, or JSONL replay)            -> never decides anything
+feed/       raw ticks: synthetic random walk, JSONL replay, Coinbase public book -> never decides anything
 state/      deterministic snapshot, < 400 tokens, point-in-time safe      -> what Jev sees
 questions/  one battery per bot (gambler, house, spy), one judgment each  -> what Jev is asked
 judge/      the only process holding the Jev key; returns raw answers     -> never decides anything
@@ -105,6 +105,31 @@ State sent with every battery:
   compares with round-trip cost. Market orders (gambler, spy) pay `FEE_BPS`; resting limit orders (house)
   pay `MAKER_FEE_BPS`; `GAS_USD` is charged per transaction either way.
 
+## A week of paper trading on real data
+
+Still paper, still no exchange key: the Coinbase Exchange level-1 book is public. On a machine that stays up:
+
+```bash
+# judge (holds the TypeSafe key; verify the pinned model on start)
+python -m judge.service --env-file .env.judge
+
+# desk: real quotes, real Jev, paper broker, real block clock (never --fast with a live feed)
+python -m desk.run --env-file .env.desk --feed coinbase --mode shadow     # first: shadow, until calibration has data
+python -m desk.run --env-file .env.desk --feed coinbase --mode paper
+
+# watch it
+python -m dashboard.serve --log-dir logs/data
+
+# after the week
+python -m reports.weekly --log-dir logs/data --days 7
+```
+
+`FEED=coinbase` polls each product id every `FEED_POLL_MS` (default two seconds) and stamps ticks with the
+exchange's time. The first twenty blocks hold while history accumulates. Set `FEE_BPS` and `MAKER_FEE_BPS` to
+your actual fee tier and `GAS_USD=0` for a centralized venue. The weekly report prints the money line last on
+purpose: a week is far below the minimum backtest length for any Sharpe worth having, so the calibration table
+and the trial verdict are the evidence, the PnL is noise until they say otherwise.
+
 ## The visual desk
 
 ```bash
@@ -151,6 +176,7 @@ carry the predicted probabilities and the realized label, so calibration needs n
   (predicted vs observed per bucket, Brier overall and per question).
 - `python -m reports.daily --date D` -> decisions, trades, PnL after fees and gas, every veto, rejections by check.
 - `python -m reports.trials` -> `reports/out/trials.md`, every trial with its deflated Sharpe.
+- `python -m reports.weekly --days 7` -> the daily figures for a window, its calibration, and the trial verdict.
 
 ## Rules this repository follows
 

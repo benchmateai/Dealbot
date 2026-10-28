@@ -14,7 +14,7 @@ from risk.limits import RiskLimits
 
 MODES = ("shadow", "paper")
 BOTS = ("gambler", "house", "spy")
-FEEDS = ("synthetic", "replay")
+FEEDS = ("synthetic", "replay", "coinbase")
 MIN_DESK_SECRET_CHARS = 32
 
 
@@ -67,6 +67,8 @@ class DeskConfig:
     block_seconds: float
     feed: str
     replay_path: str | None
+    feed_base_url: str | None
+    feed_poll_ms: int
     judge_url: str
     desk_secret: str = field(repr=False)
     jev_model: str
@@ -173,6 +175,8 @@ class DeskConfig:
             block_seconds=block_seconds,
             feed=feed,
             replay_path=replay_path,
+            feed_base_url=_get(env, "FEED_BASE_URL", "") or None,
+            feed_poll_ms=_int(env, "FEED_POLL_MS", "2000"),
             judge_url=judge_url,
             desk_secret=desk_secret,
             jev_model=jev_model,
