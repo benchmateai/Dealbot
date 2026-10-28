@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dealbot-desk"
+version = "0.1.0"
+description = "24/7 AI trading desk skeleton. Paper trading only. Jev (TypeSafe) is the judge, code owns every decision."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+# Only the judge process needs the TypeSafe SDK. Bots never import it.
+judge = ["typesafe-sdk>=0.7.5,<0.8"]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["desk", "state", "feed", "questions", "policy", "risk", "broker", "filter", "book", "logs", "judge", "outcomes", "reports", "trials", "dashboard"]
+
+[tool.setuptools.package-data]
+dashboard = ["static/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
