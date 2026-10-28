@@ -6,7 +6,7 @@ from collections.abc import Mapping
 
 KINDS: dict[str, tuple[str, ...]] = {
     "snapshot": ("decision_id", "sym", "snapshot"),
-    "question": ("decision_id", "questions"),
+    "question": ("decision_id", "battery_version"),
     "answer": ("decision_id", "model", "answers"),
     "decision": ("decision_id", "action", "approved"),
     "veto": ("decision_id", "check"),

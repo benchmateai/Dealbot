@@ -116,3 +116,9 @@ class Bench:
 
     def entries(self) -> list[BenchEntry]:
         return list(self._entries.values())
+
+    def to_state(self) -> list[dict]:
+        return [e.to_dict() for e in self._entries.values()]
+
+    def restore_state(self, data: list[dict]) -> None:
+        self._entries = {e["sym"]: BenchEntry(**e) for e in data}

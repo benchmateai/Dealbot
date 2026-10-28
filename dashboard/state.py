@@ -109,8 +109,8 @@ class DeskState:
 
     def _on_question(self, rec: Mapping) -> None:
         version = rec.get("battery_version")
-        if version and version not in self.batteries:
-            self.batteries[version] = rec.get("questions") or {}
+        if version and rec.get("questions") and version not in self.batteries:
+            self.batteries[version] = rec["questions"]
         detail = self._detail(rec.get("decision_id"))
         if detail is not None:
             detail["battery_version"] = version

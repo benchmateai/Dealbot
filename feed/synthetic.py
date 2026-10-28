@@ -57,6 +57,11 @@ class SyntheticFeed:
     def history(self, sym: str) -> list[Tick]:
         return self._hist[sym]
 
+    def seed_history(self, sym: str, ticks: list[Tick]) -> None:
+        """Restore a tail of ticks from a checkpoint so the first blocks after a restart are not blind."""
+        if sym in self._hist and ticks:
+            self._hist[sym] = sorted(ticks, key=lambda t: t.ts)
+
     def last_tick_age_ms(self, sym: str, now_ms: int) -> int | None:
         hist = self._hist.get(sym)
         return None if not hist else now_ms - hist[-1].ts

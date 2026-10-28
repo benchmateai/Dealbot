@@ -130,6 +130,16 @@ your actual fee tier and `GAS_USD=0` for a centralized venue. The weekly report 
 purpose: a week is far below the minimum backtest length for any Sharpe worth having, so the calibration table
 and the trial verdict are the evidence, the PnL is noise until they say otherwise.
 
+## Unattended runs
+
+`python -m desk.run --state-file logs/data/state.json` checkpoints the paper account, the book, the bench,
+pending outcomes, the block counter and a tail of recent ticks after every block, and resumes from the file
+on the next start, so a run can be split into chunks on a machine that restarts. `ops/paper_chunk.sh` wraps
+one chunk for a scheduler: pull the run branch, start the judge, run the desk for `CHUNK_BLOCKS`, commit the
+logs and the checkpoint to the run branch and push. The judge reads the TypeSafe key from the environment;
+the desk is started with that variable removed. `python -m judge.pin_model` chooses the pinned Jev version
+once, from the models the account offers, and the chunk runner keeps it fixed for the whole run.
+
 ## The visual desk
 
 ```bash

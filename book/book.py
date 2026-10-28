@@ -97,6 +97,22 @@ class Book:
         current = self.equity if equity is None else equity
         return 0.0 if current is None else current - self.day_start_equity
 
+    def to_state(self) -> dict:
+        return {
+            "position": None if self.position is None else {k: v for k, v in self.position.__dict__.items()},
+            "pending": None if self.pending is None else {"order": self.pending.order.to_dict(), "placed_block": self.pending.placed_block},
+            "equity": self.equity, "peak_equity": self.peak_equity, "day_start_equity": self.day_start_equity, "day_peak_equity": self.day_peak_equity, "day": self._day,
+        }
+
+    def restore_state(self, data: dict) -> None:
+        self.position = None if data.get("position") is None else OpenPosition(**data["position"])
+        self.pending = None if data.get("pending") is None else PendingOrder(Order(**data["pending"]["order"]), int(data["pending"]["placed_block"]))
+        self.equity = data.get("equity")
+        self.peak_equity = data.get("peak_equity")
+        self.day_start_equity = data.get("day_start_equity")
+        self.day_peak_equity = data.get("day_peak_equity")
+        self._day = data.get("day")
+
     def account_state(self, inventory: float) -> AccountState:
         equity = self.equity or 0.0
         return AccountState(

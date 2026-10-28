@@ -78,6 +78,22 @@ class PaperBroker:
                 value += pos.qty * marks.get(sym, pos.avg_price)
         return value
 
+    def to_state(self) -> dict:
+        return {
+            "cash": self.cash,
+            "starting_cash": self.starting_cash,
+            "positions": {s: p.to_dict() for s, p in self._positions.items()},
+            "resting": [o.to_dict() for o in self._resting.values()],
+            "last": {s: t.__dict__ for s, t in self._last.items()},
+        }
+
+    def restore_state(self, data: dict) -> None:
+        self.cash = float(data["cash"])
+        self.starting_cash = float(data.get("starting_cash", self.starting_cash))
+        self._positions = {s: Position(**p) for s, p in data.get("positions", {}).items()}
+        self._resting = {o["id"]: Order(**o) for o in data.get("resting", [])}
+        self._last = {s: Tick(**t) for s, t in data.get("last", {}).items()}
+
     def _apply_fill(self, order: Order, px: float, ts: int, *, maker: bool = False) -> Fill:
         qty, signed = order.qty, order.signed_qty
         notional = qty * px

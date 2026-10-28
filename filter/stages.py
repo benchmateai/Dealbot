@@ -144,6 +144,7 @@ class JevStage:
         self._battery_version = battery.version()
         self._backoff = backoff
         self._max = max_candidates
+        self._logged_versions: set[str] = set()
 
     def run(self, candidates: list[Candidate], ctx: FunnelContext) -> tuple[list[Candidate], list[Rejection]]:
         kept, rejected = [], []
@@ -163,7 +164,9 @@ class JevStage:
             decision_id = ctx.decision_id(c.sym)
             if ctx.log is not None:
                 ctx.log.write("snapshot", {"decision_id": decision_id, "bot": ctx.bot, "phase": ctx.phase, "sym": c.sym, "blk": ctx.block, "snapshot": c.snapshot.to_dict(), "tokens": c.snapshot.tokens(), "state": c.state}, ts_ms=ctx.now_ms)
-                ctx.log.write("question", {"decision_id": decision_id, "bot": ctx.bot, "battery_version": self._battery_version, "questions": self._questions}, ts_ms=ctx.now_ms)
+                first_time = self._battery_version not in self._logged_versions
+                self._logged_versions.add(self._battery_version)
+                ctx.log.write("question", {"decision_id": decision_id, "bot": ctx.bot, "battery_version": self._battery_version, "questions": self._questions if first_time else None, "question_ids": list(self._questions)}, ts_ms=ctx.now_ms)
             try:
                 answer = self._judge.ask(decision_id=decision_id, bot=ctx.bot, state=c.state, questions=self._questions, deadline_ms=ctx.deadline_ms, now_ms=ctx.now_ms)
             except JudgeTimeout as exc:

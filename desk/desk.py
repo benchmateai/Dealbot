@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import statistics
+import time
 from collections.abc import Sequence
 
 from book.bench import Bench
@@ -14,6 +15,7 @@ from book.book import Book, OpenPosition
 from broker.base import Broker, Fill, Order
 from desk.clock import Block
 from desk.config import DeskConfig
+from desk.persist import save_checkpoint
 from desk.modes import Executor
 from feed.base import MarketFeed, Tick
 from filter.funnel import Candidate, Funnel, FunnelContext, Rejection
@@ -85,6 +87,8 @@ class Desk:
         self._fault: str | None = None
         self._order_seq = 0
         self._trial_id = trial_id
+        self._state_file: str | None = None
+        self._last_block: int | None = None
         self._order_type = "limit" if cfg.bot == "house" else "market"
         self._bot_fee_bps = cfg.limits.fee_bps_for(self._order_type)
         free_cut = dict(max_spread_bps=cfg.max_spread_bps, rv_min_bps=cfg.rv_min_bps, rv_max_bps=cfg.rv_max_bps, min_ticks=cfg.min_ticks, max_stale_ms=cfg.max_stale_ms)
@@ -114,6 +118,52 @@ class Desk:
         return self._feed
 
     @property
+    def last_block(self) -> int | None:
+        return self._last_block
+
+    # ---- checkpoints --------------------------------------------------------------------------
+
+    def enable_checkpoints(self, path: str) -> None:
+        self._state_file = path
+
+    def checkpoint(self) -> dict:
+        tail_ms = (self._cfg.rv_window_blocks + 5) * self._cfg.block_ms
+        feed_tail = {}
+        for sym in self._cfg.symbols:
+            hist = self._feed.history(sym)
+            if hist:
+                cutoff = hist[-1].ts - tail_ms
+                feed_tail[sym] = [t.__dict__ for t in hist if t.ts >= cutoff]
+        return {
+            "saved_ms": int(time.time() * 1000),
+            "trial_id": self._trial_id,
+            "mode": self._cfg.mode,
+            "bot": self._cfg.bot,
+            "last_block": self._last_block,
+            "order_seq": self._order_seq,
+            "fault": self._fault,
+            "broker": self._broker.to_state(),
+            "book": self._book.to_state(),
+            "bench": self._bench.to_state(),
+            "outcomes": self._resolver.to_state(),
+            "feed": feed_tail,
+        }
+
+    def restore(self, data: dict) -> None:
+        self._broker.restore_state(data["broker"])
+        self._book.restore_state(data["book"])
+        self._bench.restore_state(data.get("bench", []))
+        self._resolver.restore_state(data.get("outcomes", []))
+        self._order_seq = int(data.get("order_seq", 0))
+        self._last_block = data.get("last_block")
+        self._fault = data.get("fault")
+        seed = getattr(self._feed, "seed_history", None)
+        if seed is not None:
+            for sym, ticks in (data.get("feed") or {}).items():
+                seed(sym, [Tick(**t) for t in ticks])
+        self._log.write("error" if self._fault else "heartbeat", {"where": "desk", "blk": self._last_block, "detail": f"resumed with fault: {self._fault}"} if self._fault else {"blk": self._last_block, "resumed": True, "saved_ms": data.get("saved_ms"), "position": data["book"].get("position"), "equity_usd": data["book"].get("equity")})
+
+    @property
     def book(self) -> Book:
         return self._book
 
@@ -136,6 +186,9 @@ class Desk:
                 self._manage(block, equity)
         if block.number % self._cfg.heartbeat_every_blocks == 0 or self._fault is not None:
             self._heartbeat(block, equity)
+        self._last_block = block.number
+        if self._state_file:
+            save_checkpoint(self._state_file, self.checkpoint())
 
     def _ingest(self, new_ticks: dict[str, list[Tick]], block: Block | None) -> None:
         for sym, ticks in new_ticks.items():

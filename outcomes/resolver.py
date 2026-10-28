@@ -48,6 +48,12 @@ class OutcomeResolver:
     def pending_count(self) -> int:
         return len(self._pending)
 
+    def to_state(self) -> list[dict]:
+        return [dict(p.__dict__) for p in self._pending]
+
+    def restore_state(self, data: list[dict]) -> None:
+        self._pending = [Pending(**p) for p in data]
+
     def register(self, *, decision_id: str, bot: str, sym: str, block: int, snapshot: dict, state: dict, battery: Battery, answers: dict, ts_ms: int | None = None) -> int:
         cost_bps = float((state.get("desk") or {}).get("cost_bps") or 0.0)
         rv_bps = snapshot.get("rv_bps")

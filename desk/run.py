@@ -21,6 +21,7 @@ from desk.clock import BlockClock
 from desk.config import ConfigError, DeskConfig, assert_desk_cannot_see_jev_key, load_env_file
 from desk.desk import Desk
 from desk.modes import make_executor
+from desk.persist import load_checkpoint
 from feed import make_feed
 from judge.client import Backoff, make_judge
 from logs.redact import Redactor
@@ -76,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--blocks", type=int, default=None, help="stop after N blocks (default: run forever)")
     parser.add_argument("--fast", action="store_true", help="do not wait for wall-clock blocks (dev and replay)")
     parser.add_argument("--start-ms", type=int, default=None, help="first block timestamp (default: now, aligned)")
+    parser.add_argument("--state-file", default=None, help="checkpoint after every block and resume from it (default: off)")
+    parser.add_argument("--no-resume", action="store_true", help="with --state-file: start fresh, overwriting the checkpoint")
     args = parser.parse_args(argv)
 
     env: dict[str, str] = {}
@@ -93,6 +96,14 @@ def main(argv: list[str] | None = None) -> int:
             now = int(time.time() * 1000)
             start_ms = now - now % cfg.block_ms + cfg.block_ms
         desk, log = build_desk(cfg, start_ms=start_ms)
+        start_number = 0
+        if args.state_file:
+            checkpoint = None if args.no_resume else load_checkpoint(args.state_file)
+            if checkpoint is not None:
+                desk.restore(checkpoint)
+                start_number = int(checkpoint.get("last_block") or -1) + 1
+                print(f"desk: resumed from {args.state_file} (saved block {checkpoint.get('last_block')}, position={checkpoint['book'].get('position')})")
+            desk.enable_checkpoints(args.state_file)
     except (ConfigError, ValueError, OSError) as exc:
         print(f"desk: {exc}", file=sys.stderr)
         return 2
@@ -106,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         signal.signal(sig, request_stop)
 
     print(f"desk: mode={cfg.mode} bot={cfg.bot} symbols={','.join(cfg.symbols)} feed={cfg.feed} judge={cfg.judge_url} model={cfg.jev_model} log_dir={cfg.log_dir} trial={desk.trial_id}")
-    clock = BlockClock(cfg.block_ms, start_ms, realtime=not args.fast)
+    clock = BlockClock(cfg.block_ms, start_ms, realtime=not args.fast, start_number=start_number)
     blocks_done = 0
     try:
         for block in clock.blocks(args.blocks):
