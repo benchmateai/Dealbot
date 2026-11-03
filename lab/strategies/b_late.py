@@ -22,7 +22,8 @@ from pathlib import Path
 
 from kalshi.api import taker_fee_usd
 from lab.model import EwmaVol, p_contract
-from lab.strategies.maker_common import best, load, min_edge, outcomes
+from lab.replay import live_records, settled_outcomes
+from lab.strategies.maker_common import best, min_edge
 
 REGISTERED_MS = 1_793_743_200_000  # 2026-11-03T22:00:00Z
 P_MIN = 0.95
@@ -32,14 +33,13 @@ INDEX_FOR = {"KXBTC15M": "BRTI", "KXETH15M": "ETHUSD_RTI"}
 
 
 def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REGISTERED_MS) -> dict:
-    recs = load(lab_dir, since_ms=since_ms)
-    result = outcomes(recs)
+    result = settled_outcomes(lab_dir, since_ms=since_ms)
     vols: dict[str, EwmaVol] = defaultdict(lambda: EwmaVol(half_life_s=1800.0))
     last_index: dict[str, tuple[int, float]] = {}
     window: dict[str, list[float]] = defaultdict(list)  # ticker -> log index prints inside its last minute
     active: dict[str, tuple[str, int]] = {}  # ticker -> (index symbol, close)
     entries: dict[str, dict] = {}
-    for r in recs:
+    for r in live_records(lab_dir, since_ms=since_ms, kinds=("book", "index")):
         if r["kind"] == "index":
             sym = r.get("symbol")
             if r.get("value"):

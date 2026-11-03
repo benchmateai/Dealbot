@@ -19,8 +19,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from lab.fills import EPS, apply_trade, markouts, place
-from lab.strategies.maker_common import books_by_ticker, load, outcomes
+from lab.fills import EPS, apply_trade, place
+from lab.replay import Markouts, live_records, settled_outcomes
 
 REGISTERED_MS = 1_793_743_200_000  # 2026-11-03T22:00:00Z
 SERIES = ("KXETH15M",)
@@ -30,18 +30,22 @@ PULL_LEFT_S = 60
 
 
 def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REGISTERED_MS) -> dict:
-    recs = load(lab_dir, since_ms=max(since_ms, registered_ms), kinds=("book", "trade", "settled"))
-    result = outcomes(recs)
+    start = max(since_ms, registered_ms)
+    result = settled_outcomes(lab_dir, since_ms=start)
+    marks = Markouts()
     live: dict[str, dict[str, object]] = defaultdict(dict)  # ticker -> side -> resting order
-    every: dict[str, list] = defaultdict(list)               # ticker -> all orders ever placed
     inv: dict[str, float] = defaultdict(float)               # ticker -> net YES contracts
-    for r in recs:
+    orders = 0
+    for r in live_records(lab_dir, since_ms=start, kinds=("book", "trade")):
         if r["kind"] == "trade":
             for side, o in list(live.get(r["ticker"], {}).items()):
                 q = apply_trade(o, {**r, "ts": r.get("trade_ts") or r["ts"]})
-                inv[r["ticker"]] += q if side == "yes" else -q
+                if q:
+                    inv[r["ticker"]] += q if side == "yes" else -q
+                    marks.fill(o.ticker, o.side, o.fills[-1])
             continue
-        if r["kind"] != "book" or r.get("series") not in SERIES or not r.get("close_ms"):
+        marks.book(r["ticker"], r["ts"], r)
+        if r.get("series") not in SERIES or not r.get("close_ms"):
             continue
         t = r["ticker"]
         if (r["close_ms"] - r["ts"]) / 1000.0 <= PULL_LEFT_S:
@@ -59,24 +63,21 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
             if room <= 0:
                 live[t].pop(side, None)
                 continue
-            new = place(t, side, best_price, min(QUOTE, room), r["ts"], r)
-            live[t][side] = new
-            every[t].append(new)
-    books = books_by_ticker(recs)
-    fills, pnl, marks = 0.0, 0.0, []
-    for t, orders in every.items():
-        payout = result.get(t, (None, None))[0]
-        for o in orders:
-            for f in o.fills:
-                fills += f["qty"]
-                if payout is not None:
-                    own = payout if o.side == "yes" else 1.0 - payout
-                    pnl += f["qty"] * (own - f["price"])  # no maker fee in these series
-            marks += markouts(o, books.get(t, []), payout)
+            live[t][side] = place(t, side, best_price, min(QUOTE, room), r["ts"], r)
+            orders += 1
+    rows = marks.settle(result)
+    fills = sum(m["qty"] for m in rows)
+    pnl = 0.0
+    for m in rows:
+        payout = result.get(m["ticker"], (None, None))[0]
+        if payout is not None:
+            own = payout if m["side"] == "yes" else 1.0 - payout
+            pnl += m["qty"] * (own - m["price"])  # no maker fee in these series
+
     def avg(k):
-        xs = [(m[k], m["qty"]) for m in marks if m.get(k) is not None]
+        xs = [(m[k], m["qty"]) for m in rows if m.get(k) is not None]
         return None if not xs else round(sum(v * q for v, q in xs) / sum(q for _, q in xs) * 100, 3)
-    summary = {"contracts_filled": fills, "orders": sum(len(v) for v in every.values()), "pnl_usd_upper_bound": round(pnl, 2),
+    summary = {"contracts_filled": fills, "orders": orders, "pnl_usd_upper_bound": round(pnl, 2),
                "markout_cents": {"1m": avg("m60"), "5m": avg("m300"), "settle": avg("settle")}}
     return {"summary": summary}
 

@@ -458,3 +458,31 @@ def test_ws_feed_rewrites_an_unchanged_book_only_on_its_heartbeat(tmp_path):
     store.close()
     written = [(r["ts"] - T0) // 1000 for r in read_lab(tmp_path) if r["kind"] == "book"]
     assert written == [0, 30, 90]  # first sight, the change (15 s cadence passed), then the 60 s heartbeat
+
+
+def test_streamed_markouts_match_markouts_with_every_book_in_hand():
+    import random
+
+    from lab.fills import Resting, markouts
+    from lab.replay import Markouts
+
+    rng = random.Random(7)
+    books, t = [], 0
+    for _ in range(400):
+        t += rng.choice([2_000, 10_000, 60_000, 400_000])
+        bid = round(rng.uniform(0.05, 0.9), 2)
+        books.append((t, {"yes": [[bid, 1.0]], "no": [[round(1 - bid - 0.02, 2), 1.0]]}))
+    fill_times = sorted(rng.randrange(0, t) for _ in range(150))
+    for side, payout in (("yes", 1.0), ("no", 1.0), ("yes", None)):
+        order = Resting("M", side, 0.5, 1e9, 0, 0.0, filled=150.0, fills=[{"ts": f, "qty": 1.0, "price": 0.5} for f in fill_times])
+        expected = markouts(order, books, payout)
+        tracker = Markouts()
+        events = sorted([(f, 0, i) for i, f in enumerate(fill_times)] + [(bt, 1, i) for i, (bt, _) in enumerate(books)])
+        for ts, is_book, i in events:
+            if is_book:
+                tracker.book("M", ts, books[i][1])
+            else:
+                tracker.fill("M", side, order.fills[i])
+        got = tracker.settle({"M": (payout, None)} if payout is not None else {})
+        assert [{k: r.get(k) for k in ("ts", "m60", "m300", "settle")} for r in got] == [{k: r.get(k) for k in ("ts", "m60", "m300", "settle")} for r in expected]
+        assert any(r["m300"] is None for r in got) and any(r["m300"] is not None for r in got)

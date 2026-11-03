@@ -1,31 +1,26 @@
-"""Shared replay pieces for the lab's live-feed strategies (B, C, E, F): the normalized records they read.
+"""Shared pieces for the lab's live-feed strategies (B, C, E, F): the normalized records they read, and the
+desk's edge bar. lab/replay.py streams the records.
 
 The live-feed recorder writes, in lab/data:
-  book     {ticker, series, close_ms, strike, strike_type, yes: [[price, size], ...], no: [[price, size], ...]}
-           YES bids and NO bids, best first, dollars and contracts (a YES ask is 1 - the best NO bid)
-  trade    {ticker, yes_price, count, taker_side, trade_ts}
-  index    {symbol, value}                        the CF Benchmarks index, about once a second
-  settled  {series, event, rows: [[ticker, result, settlement value], ...]}
+  book        {ticker, series, event, close_ms, strike, strike_type, set, yes: [[price, size], ...], no: [[price, size], ...]}
+              YES bids and NO bids, best first, dollars and contracts (a YES ask is 1 - the best NO bid);
+              set is "15m", "E" or "F"
+  trade       {ticker, yes_price, count, taker_side, trade_ts}
+  index       {symbol, value, avg60, qavg, qn}     the CF Benchmarks index, about once a second
+  incentives  {programs: [...]}                    Kalshi's active liquidity-incentive programs
+  settled     {series, event, rows: [[ticker, result, settlement value], ...]}   (both recorders)
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
-from pathlib import Path
+from collections.abc import Iterable
 
 from kalshi.api import taker_fee_usd
-from lab.store import read_lab
 
 MARGIN = 0.5
 
 
-def load(lab_dir: str | Path, *, since_ms: int = 0, kinds=("book", "trade", "index", "settled")) -> list[dict]:
-    recs = list(read_lab(lab_dir, since_ms=since_ms, kinds=kinds))
-    recs.sort(key=lambda r: (r["ts"], 0 if r["kind"] == "settled" else 1))
-    return recs
-
-
-def outcomes(recs: list[dict]) -> dict[str, tuple[float, float | None]]:
+def outcomes(recs: Iterable[dict]) -> dict[str, tuple[float, float | None]]:
     """ticker -> (YES payout, settlement value) from every settled record."""
     out = {}
     for r in recs:
@@ -47,11 +42,3 @@ def best(book: dict) -> tuple[float | None, float | None, float, float]:
 def min_edge(price: float, spread: float) -> float:
     """The paper desk's bar: 1.5 x (Kalshi's taker fee on one contract + half the spread)."""
     return (1 + MARGIN) * (taker_fee_usd(1, price) + max(spread, 0.0) / 2)
-
-
-def books_by_ticker(recs: list[dict]) -> dict[str, list[tuple[int, dict]]]:
-    out: dict[str, list[tuple[int, dict]]] = defaultdict(list)
-    for r in recs:
-        if r["kind"] == "book":
-            out[r["ticker"]].append((r["ts"], r))
-    return out

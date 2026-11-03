@@ -29,9 +29,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from lab.fills import EPS, apply_trade, markouts, place
+from lab.fills import EPS, apply_trade, place
 from lab.recorder import _ts
-from lab.strategies.maker_common import books_by_ticker, load
+from lab.replay import Markouts, live_records
 
 REGISTERED_MS = 1_793_743_200_000  # 2026-11-03T22:00:00Z
 QUOTE_FRACTION = 0.1
@@ -77,15 +77,15 @@ def _per_side_per_s(p: dict) -> float:
 
 
 def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REGISTERED_MS) -> dict:
-    recs = load(lab_dir, since_ms=max(since_ms, registered_ms), kinds=("book", "trade", "incentives"))
     programs: dict[str, list[dict]] = {}
+    marks = Markouts()
     live: dict[str, dict] = defaultdict(dict)        # ticker -> side -> resting order
-    every: dict[str, list] = defaultdict(list)       # ticker -> every order placed
+    quoted: set[str] = set()                         # markets E placed an order in
     inv: dict[str, float] = defaultdict(float)       # ticker -> net YES contracts
     standing: dict[str, tuple[int, dict[str, float]]] = {}  # ticker -> (book time, program id -> reward a second)
     earned: dict[str, float] = defaultdict(float)    # program id -> USD
     samples = paying = 0
-    for r in recs:
+    for r in live_records(lab_dir, since_ms=max(since_ms, registered_ms), kinds=("book", "trade", "incentives")):
         if r["kind"] == "incentives":
             programs = defaultdict(list)
             for p in r.get("programs") or []:
@@ -95,9 +95,14 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
         if r["kind"] == "trade":
             for side, o in live.get(r["ticker"], {}).items():
                 q = apply_trade(o, {**r, "ts": r.get("trade_ts") or r["ts"]})
-                inv[r["ticker"]] += q if side == "yes" else -q
+                if q:
+                    inv[r["ticker"]] += q if side == "yes" else -q
+                    marks.fill(o.ticker, o.side, o.fills[-1])
             continue
-        if r["kind"] != "book" or r.get("set") != "E":
+        if r["kind"] != "book":
+            continue
+        marks.book(r["ticker"], r["ts"], r)
+        if r.get("set") != "E":
             continue
         t, ts = r["ticker"], r["ts"]
         if t in standing:  # the previous book, and E's orders against it, stood until now
@@ -121,7 +126,7 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
             if o is None or abs(o.price - ref) > EPS or o.remaining <= 0:
                 o = place(t, side, ref, min(QUOTE_FRACTION * target, room), ts, r)
                 live[t][side] = o
-                every[t].append(o)
+                quoted.add(t)
             mine[side] = (o.price, o.remaining)
         rates = {}
         for p in active:
@@ -133,17 +138,14 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
             paying += 1
             rates[p["id"]] = _per_side_per_s(p) * sum(shares)
         standing[t] = (ts, rates)
-    books = books_by_ticker(recs)
     filled = markout = 0.0
-    for t, orders in every.items():
-        for o in orders:
-            for m in markouts(o, books.get(t, []), None):
-                filled += m["qty"]
-                if m.get("m300") is not None:
-                    markout += m["qty"] * m["m300"]
+    for m in marks.rows:
+        filled += m["qty"]
+        if m.get("m300") is not None:
+            markout += m["qty"] * m["m300"]
     reward = sum(earned.values())
     payable = sum(math.floor(v * 100) / 100 for v in earned.values() if v >= MIN_PAYOUT_USD)
-    summary = {"markets": len(every), "programs": len(earned), "samples": samples, "paying_samples": paying,
+    summary = {"markets": len(quoted), "programs": len(earned), "samples": samples, "paying_samples": paying,
                "reward_usd": round(reward, 2), "payable_usd": round(payable, 2), "contracts_filled": filled,
                "markout_usd": round(markout, 2), "net_usd_upper_bound": round(payable + markout, 2)}
     return {"summary": summary, "by_program": {k: round(v, 4) for k, v in sorted(earned.items(), key=lambda kv: -kv[1])}}
