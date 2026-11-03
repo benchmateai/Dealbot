@@ -1,67 +1,69 @@
 {
  "decisions": {
-  "enter_long": 1,
-  "enter_short": 1,
-  "hold": 46
+  "enter_long": 2,
+  "enter_short": 4,
+  "exit": 1,
+  "hold": 132
  },
- "equity_end": 9950.8995,
+ "equity_end": 9947.8968,
  "equity_start": 9954.8701,
- "executed": 1,
+ "executed": 5,
  "feed": {
-  "errors": 3,
-  "polls": 168,
-  "rate_limits": 3
+  "errors": 33,
+  "polls": 528,
+  "rate_limits": 33
  },
  "fills": {
-  "sell": 1,
-  "settle": 1
+  "buy": 1,
+  "sell": 4,
+  "settle": 3
  },
  "first_ts": 1793737944000,
- "judge_calls": 48,
+ "judge_calls": 139,
  "judge_failures": {
-  "jev_budget": 1
+  "jev_budget": 4
  },
- "last_ts": 1793738832000,
+ "last_ts": 1793740644000,
  "models": {
-  "jev-1.14.0": 48
+  "jev-1.14.0": 139
  },
- "positions_closed": 1,
- "positions_opened": 1,
- "realized_pnl_usd": -3.9706,
+ "positions_closed": 4,
+ "positions_opened": 4,
+ "realized_pnl_usd": -6.9733,
  "records": {
-  "answer": 48,
-  "decision": 48,
-  "fill": 2,
-  "heartbeat": 8,
-  "order": 1,
-  "outcome": 240,
-  "position_closed": 1,
-  "position_opened": 1,
-  "question": 48,
-  "rejection": 103,
-  "settlement": 2,
-  "snapshot": 48,
-  "tape": 75,
+  "answer": 139,
+  "decision": 139,
+  "fill": 8,
+  "heartbeat": 23,
+  "order": 5,
+  "outcome": 695,
+  "position_closed": 4,
+  "position_opened": 4,
+  "question": 139,
+  "rejection": 322,
+  "settlement": 6,
+  "snapshot": 139,
+  "tape": 226,
   "trial": 1,
-  "veto": 1
+  "veto": 2
  },
  "rejections": {
-  "below_threshold": 46,
-  "benched": 8,
-  "insufficient_data": 2,
-  "jev_budget": 1,
-  "no_contract": 2,
-  "outside_trade_window": 44
+  "below_threshold": 132,
+  "benched": 42,
+  "insufficient_data": 6,
+  "jev_budget": 4,
+  "no_contract": 3,
+  "outside_trade_window": 135
  },
  "settlements": {
-  "official": 2,
+  "official": 6,
   "provisional": 0
  },
  "since_ms": 1793737940000,
- "span_minutes": 14.8,
+ "span_minutes": 45.0,
  "stalled": false,
- "until_ms": 1793738842560,
+ "until_ms": 1793740644522,
  "vetoes": {
-  "fees_plus_gas": 1
+  "fees_plus_gas": 2
  }
 }
