@@ -63,3 +63,14 @@ def test_an_exit_fill_counts_for_the_position_it_closes_and_the_window_starts_cl
     sold = trades[0]
     assert (sold["bet"], sold["price_cents"], sold["result"], sold["fees_usd"], sold["pnl_usd"]) == ("NO", 3.2, "sold", 0.15, 7.53)
     assert summary["start_usd"] == 9_994.0 and summary["net_pnl_usd"] == 9.43 and summary["wins"] == 1 and summary["win_rate"] == 1.0
+
+
+def test_the_shadow_rows_count_only_bets_after_the_rules_were_registered(tmp_path):
+    from reports.shadow import REGISTERED_MS
+
+    write(tmp_path, [{"kind": "heartbeat", "ts": REGISTERED_MS - 60_000, "equity_usd": 9_990.0}])
+    rows = build(tmp_path, now_ms=REGISTERED_MS, since_ms=REGISTERED_MS - 120_000)
+    shadows = {r["id"]: r for r in rows if r["table"] == "shadow"}
+    assert set(shadows) == {"desk", "capped", "capped_exit"}
+    assert shadows["capped"]["cap_points"] == 10 and shadows["capped_exit"]["exit_minutes"] == 3
+    assert shadows["desk"]["test_trades"] == 0 and shadows["desk"]["registered_ms"] == REGISTERED_MS

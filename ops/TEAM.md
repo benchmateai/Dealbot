@@ -77,6 +77,14 @@ The coordinator then:
 3. Tell the owner in two or three lines only what was wrong and what changed, or what is theirs to
    decide.
 
+## Shadow strategies
+
+On 2026-11-03 the owner chose to keep the live test unchanged and judge the analyst's proposal beside
+it. `reports/shadow.py` replays the desk's own log under two rules registered at 15:15Z that day:
+`capped` (skip entries more than 10 points from the market's mid) and `capped_exit` (capped, and sell
+3 minutes before the close). Their results before 15:15Z were known when they were chosen; only trades
+opened after it test them. The rules are not retuned during the week.
+
 ## During the paper week
 
 BUG fixes (wrong behaviour) go in as soon as they are found. TUNING (thresholds, sizes, filter

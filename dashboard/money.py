@@ -9,6 +9,8 @@ Every row carries a `table` column, so one file feeds the whole page:
            position is "NO at 21c", its stake is what the bet cost, its result won, lost, sold or open
   equity   the equity curve, the last reading in each 10-minute slot
   day      one row per UTC day: change in equity, trades closed, wins, fees
+  shadow   one row per strategy in reports.shadow (the live desk and the two shadow rules), counted
+           only over bets placed after the rules were registered, with the rules' own numbers
 Numbers come straight from the desk's own log; nothing here trades or decides. Only events from
 `since_ms` on count (by default WEEK_START_MS, the start of the measured week): the bankroll is the
 first equity reading from then, and a position carried in from before shows in equity, not as a bet.
@@ -134,6 +136,15 @@ def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | No
         rows.append({k: v for k, v in t.items() if k != "gross_usd"})
     for slot, (ts, eq) in equity.items():
         rows.append({"table": "equity", "id": f"e{slot}", "t_ms": ts, "equity_usd": round(eq, 2)})
+    from reports.shadow import CAP, EXIT_BEFORE_S, REGISTERED_MS, evaluate  # here: reports.shadow imports this module
+
+    for name, st in evaluate(log_dir, since_ms=since_ms).get("strategies", {}).items():
+        test = st["test"]
+        rows.append({
+            "table": "shadow", "id": name, "test_pnl_usd": test["pnl_usd"], "test_trades": test["trades"], "test_won": test["won"],
+            "test_skipped": test["skipped"], "test_open": test["open"], "in_sample_pnl_usd": st["in_sample"]["pnl_usd"],
+            "cap_points": round(CAP * 100), "exit_minutes": EXIT_BEFORE_S // 60, "registered_ms": REGISTERED_MS,
+        })
     for day in sorted(day_last):
         closed_today = [t for t in closed if _day(t["closed_ms"]) == day]
         rows.append({
