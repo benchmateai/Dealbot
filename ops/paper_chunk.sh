@@ -75,13 +75,13 @@ sync_run() {
 sync_run
 
 # True when the change from the merged base ($1) to a newer base ($2) can alter what the running desk
-# does: anything but docs, ops scripts, tests, reports and dashboards (those run fresh at every
-# publish or chunk; no desk module imports them). An unreadable diff counts as a change.
+# does: anything but docs, ops scripts, tests, reports, dashboards and the shadow lab (those run fresh at
+# every publish or chunk; no desk module imports them). An unreadable diff counts as a change.
 desk_code_changed() {
   local files
   files=$(git diff --name-only "$1" "$2" 2>/dev/null) || return 0
   [ -n "$files" ] || return 1
-  printf '%s\n' "$files" | grep -qvE '^(ops/|tests/|dashboard/|reports/|docs/)|\.md$'
+  printf '%s\n' "$files" | grep -qvE '^(ops/|tests/|dashboard/|reports/|docs/|lab/|research_notes/)|\.md$'
 }
 
 # ---- 2. python and the judge -----------------------------------------------------------------
