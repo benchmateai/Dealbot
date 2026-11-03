@@ -462,6 +462,7 @@ async def run(feed: Feed, until_ms: int, sign, key_id: str, *, stop: asyncio.Eve
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Record Kalshi market data over the authenticated WebSocket (read-only)")
     parser.add_argument("--minutes", type=float, default=110.0)
+    parser.add_argument("--until", type=float, default=None, help="stop at this Unix time (seconds) instead of after --minutes")
     parser.add_argument("--data", default="lab/data")
     parser.add_argument("--rate", type=float, default=0.2, help="average public REST requests a second, for market discovery")
     args = parser.parse_args(argv)
@@ -486,7 +487,7 @@ def main(argv: list[str] | None = None) -> int:
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, stop.set)
-        await run(feed, int(now + args.minutes * 60_000), sign, key_id, stop=stop, refreshed_ms=now)
+        await run(feed, int(args.until * 1000) if args.until else int(now + args.minutes * 60_000), sign, key_id, stop=stop, refreshed_ms=now)
 
     try:
         asyncio.run(go())

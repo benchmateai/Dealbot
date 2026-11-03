@@ -16,7 +16,8 @@ T0 = 1_793_736_000_000  # 2026-11-03T20:00:00Z
 def test_store_seals_each_finished_hour_and_reads_back_in_order(tmp_path):
     store = LabStore(tmp_path)
     store.write("x", {"n": 1}, ts_ms=T0 + 1)
-    store.write("x", {"n": 2}, ts_ms=T0 + H + 1)  # a new hour seals the old one
+    store.write("x", {"n": 2}, ts_ms=T0 + H + 1)  # a new hour seals the old one, in a thread
+    store.wait_sealed()
     assert (tmp_path / "2026-11-03" / "20.jsonl.gz").exists() and (tmp_path / "2026-11-03" / "21.jsonl").exists()
     store.close()
     store = LabStore(tmp_path)  # a restart inside hour 21 appends, then sealing adds a second gzip member
@@ -338,6 +339,7 @@ def test_two_recorders_write_and_seal_only_their_own_hour_files(tmp_path):
     rest_store.write("book_top", {"n": 1}, ts_ms=T0)
     ws_store.write("book", {"n": 2}, ts_ms=T0 + 1)
     ws_store.write("book", {"n": 3}, ts_ms=T0 + H)  # the ws stream rolls over and seals its own 20:00 file only
+    ws_store.wait_sealed()
     names = sorted(p.name for p in (tmp_path / "2026-11-03").iterdir())
     assert names == ["20.jsonl", "20.ws.jsonl.gz", "21.ws.jsonl"]
     rest_store.close()
@@ -490,3 +492,67 @@ def test_streamed_markouts_match_markouts_with_every_book_in_hand():
         got = tracker.settle({"M": (payout, None)} if payout is not None else {})
         assert [{k: r.get(k) for k in ("ts", "m60", "m300", "settle")} for r in got] == [{k: r.get(k) for k in ("ts", "m60", "m300", "settle")} for r in expected]
         assert any(r["m300"] is None for r in got) and any(r["m300"] is not None for r in got)
+
+
+def test_store_survives_a_kill_mid_line_and_mid_seal(tmp_path):
+    import gzip as gz
+
+    from lab.store import seal
+
+    day = tmp_path / "2026-11-03"
+    store = LabStore(tmp_path)
+    store.write("x", {"n": 1}, ts_ms=T0)
+    store.close()
+    with open(day / "20.jsonl", "a") as fh:
+        fh.write('{"ts":1793736000001,"kind":"x","n":')  # a kill cut this line off
+    again = LabStore(tmp_path)
+    again.write("x", {"n": 2}, ts_ms=T0 + 2)  # the cut line is ended first, so this record survives
+    again.close()
+    assert [r["n"] for r in read_lab(tmp_path)] == [1, 2]
+    seal(day / "20.jsonl")
+    (day / "20.jsonl.gz.tmp").write_bytes(b"half a member")  # a seal killed before its swap leaves only a temp file
+    assert [r["n"] for r in read_lab(tmp_path)] == [1, 2]
+    with open(day / "20.jsonl.gz", "ab") as fh:  # an older, non-atomic seal could leave a cut member: readers carry on
+        fh.write(gz.compress(b'{"ts":1793736000003,"kind":"x","n":3}\n')[:-9])
+    (day / "21.jsonl").write_text('{"ts":1793739600000,"kind":"x","n":4}\n')
+    assert [r["n"] for r in read_lab(tmp_path)][-1] == 4
+
+
+def test_lab_rest_counts_network_failures_instead_of_raising():
+    import http.client
+
+    class Flaky:
+        def __init__(self):
+            self.errors = [TimeoutError("read timed out"), http.client.RemoteDisconnected("closed"), http.client.IncompleteRead(b""), ValueError("not JSON")]
+
+        def get(self, path, params=None):
+            if self.errors:
+                raise self.errors.pop(0)
+            return {"ok": True}
+
+    rest = LabRest(Flaky(), Budget(1e9, 1e9))
+    assert [rest.get("/x") for _ in range(5)] == [None, None, None, None, {"ok": True}]
+    assert rest.counters()["network_errors"] == 4 and rest.counters()["errors"] == 4
+
+
+def test_recorder_carries_on_after_a_poll_that_raises(tmp_path):
+    now = {"ms": T0 + 50 * 60_000}
+    rec = Recorder(LabRest(FakeKalshi(now), Budget(1e9, 1e9)), LabStore(tmp_path), now_ms=lambda: now["ms"])
+    calls = {"n": 0}
+    real = rec.snapshot
+
+    def snapshot(ts):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+        real(ts)
+
+    rec.snapshot = snapshot
+
+    def sleep(s):
+        now["ms"] += int(s * 1000) or 1000
+
+    rec.run(now["ms"] + 3 * 60_000, sleep=sleep)
+    rec.store.close()
+    assert rec.poll_errors == 1 and calls["n"] >= 3
+    assert any(r["kind"] == "book_top" for r in read_lab(tmp_path))

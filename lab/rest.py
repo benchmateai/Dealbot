@@ -1,8 +1,10 @@
 """Public Kalshi REST for the lab, under a strict request budget so it never crowds the live desk, which
-shares this network address and Kalshi's per-address limit. GET only; a 429 pauses every request."""
+shares this network address and Kalshi's per-address limit. GET only; a 429 pauses every request, and a
+failed request (rate limit, timeout, dropped connection, a body that is not JSON) returns None, counted."""
 
 from __future__ import annotations
 
+import http.client
 import time
 from collections.abc import Callable, Mapping
 
@@ -39,7 +41,7 @@ class LabRest:
     def __init__(self, client: KalshiClient | None = None, budget: Budget | None = None) -> None:
         self.client = client or KalshiClient()
         self.budget = budget or Budget(0.25, 2.0)
-        self.requests = self.errors = self.rate_limited = 0
+        self.requests = self.errors = self.rate_limited = self.network_errors = 0
         self._backoff = 30.0
 
     def get(self, path: str, params: Mapping[str, object] | None = None) -> dict | None:
@@ -54,8 +56,12 @@ class LabRest:
                 self.budget.pause(max(self._backoff, exc.retry_after_s or 0.0))
                 self._backoff = min(self._backoff * 2, 300.0)
             return None
+        except (OSError, http.client.HTTPException, ValueError):  # a timeout, a dropped connection, a non-JSON body
+            self.errors += 1
+            self.network_errors += 1
+            return None
         self._backoff = 30.0
         return payload
 
     def counters(self) -> dict:
-        return {"requests": self.requests, "errors": self.errors, "rate_limited": self.rate_limited}
+        return {"requests": self.requests, "errors": self.errors, "rate_limited": self.rate_limited, "network_errors": self.network_errors}
