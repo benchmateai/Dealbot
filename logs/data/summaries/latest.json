@@ -1,67 +1,67 @@
 {
  "decisions": {
-  "enter_long": 2,
-  "enter_short": 2,
+  "enter_long": 3,
+  "enter_short": 3,
   "exit": 1,
-  "hold": 128
+  "hold": 224
  },
- "equity_end": 9957.9762,
+ "equity_end": 9953.84,
  "equity_start": 9954.8881,
- "executed": 5,
+ "executed": 7,
  "feed": {
-  "errors": 32,
-  "polls": 528,
-  "rate_limits": 32
+  "errors": 49,
+  "polls": 888,
+  "rate_limits": 49
  },
  "fills": {
-  "buy": 3,
-  "sell": 2,
-  "settle": 3
+  "buy": 4,
+  "sell": 3,
+  "settle": 5
  },
  "first_ts": 1793727672000,
- "judge_calls": 133,
+ "judge_calls": 231,
  "judge_failures": {
-  "jev_budget": 3
+  "jev_budget": 5
  },
- "last_ts": 1793730360000,
+ "last_ts": 1793732160000,
  "models": {
-  "jev-1.14.0": 133
+  "jev-1.14.0": 231
  },
- "positions_closed": 4,
- "positions_opened": 4,
- "realized_pnl_usd": 4.7874,
+ "positions_closed": 6,
+ "positions_opened": 6,
+ "realized_pnl_usd": 2.6262,
  "records": {
-  "answer": 133,
-  "decision": 133,
-  "fill": 8,
-  "heartbeat": 23,
-  "order": 5,
-  "outcome": 653,
-  "position_closed": 4,
-  "position_opened": 4,
-  "question": 133,
-  "rejection": 308,
-  "settlement": 6,
-  "snapshot": 133,
+  "answer": 231,
+  "decision": 231,
+  "fill": 12,
+  "heartbeat": 38,
+  "order": 7,
+  "outcome": 1139,
+  "position_closed": 6,
+  "position_opened": 6,
+  "question": 231,
+  "rejection": 512,
+  "settlement": 10,
+  "snapshot": 231,
   "trial": 1
  },
  "rejections": {
-  "below_threshold": 128,
-  "benched": 20,
+  "below_threshold": 224,
+  "benched": 32,
   "feed_lagging": 1,
-  "insufficient_data": 4,
+  "insufficient_data": 7,
   "insufficient_ticks": 12,
-  "jev_budget": 3,
-  "no_contract": 10,
-  "outside_trade_window": 130
+  "jev_budget": 5,
+  "no_contract": 15,
+  "outside_trade_window": 216
  },
  "settlements": {
-  "official": 6,
+  "official": 10,
   "provisional": 0
  },
  "since_ms": 1793727660000,
- "span_minutes": 44.8,
+ "span_minutes": 74.8,
  "stalled": false,
- "until_ms": 1793730361671,
+ "until_ms": 1793732161665,
  "vetoes": {}
 }
