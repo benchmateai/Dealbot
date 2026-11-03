@@ -48,6 +48,7 @@ class ScenarioResult:
     blockers: dict[str, int]
     benign: dict[str, int]
     details: dict[str, str] = field(default_factory=dict)
+    events: list[dict] = field(default_factory=list, repr=False, compare=False)
 
     def summary(self) -> str:
         head = "PASS" if self.ok else "FAIL"
@@ -133,7 +134,7 @@ def run_scenario(env: Mapping[str, str], *, blocks: int | None = None) -> Scenar
     blockers = {c: n for c, n in checks.items() if c not in BENIGN_CHECKS}
     benign = {c: n for c, n in checks.items() if c in BENIGN_CHECKS}
     opened, would = kinds.get("position_opened", 0), kinds.get("would_execute", 0)
-    return ScenarioResult(opened > 0 or would > 0, opened, would, len(judge.calls), n_blocks, dict(decisions), blockers, benign, {c: details[c] for c in blockers})
+    return ScenarioResult(opened > 0 or would > 0, opened, would, len(judge.calls), n_blocks, dict(decisions), blockers, benign, {c: details[c] for c in blockers}, events)
 
 
 @dataclass
