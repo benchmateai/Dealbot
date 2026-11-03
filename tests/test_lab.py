@@ -354,9 +354,13 @@ def test_ws_signer_handles_rsa_and_ed25519_keys_from_the_environment():
     assert load_signer({}) is None
     for key in (rsa.generate_private_key(public_exponent=65537, key_size=2048), ed25519.Ed25519PrivateKey.generate()):
         pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
-        key_id, sign = load_signer({KEY_ID_ENV: "kid", KEY_ENV: pem})
-        h = ws_headers(key_id, sign, now_ms=1_700_000_000_000)
-        assert h["KALSHI-ACCESS-KEY"] == "kid" and h["KALSHI-ACCESS-TIMESTAMP"] == "1700000000000" and len(h["KALSHI-ACCESS-SIGNATURE"]) > 40
+        import base64
+
+        # as pasted: the PEM itself, folded onto one line, with literal backslash-n, or the base64 of the file
+        for raw in (pem, " ".join(pem.split("\n")), pem.replace("\n", "\\n"), base64.b64encode(pem.encode()).decode()):
+            key_id, sign = load_signer({KEY_ID_ENV: "kid", KEY_ENV: raw})
+            h = ws_headers(key_id, sign, now_ms=1_700_000_000_000)
+            assert h["KALSHI-ACCESS-KEY"] == "kid" and h["KALSHI-ACCESS-TIMESTAMP"] == "1700000000000" and len(h["KALSHI-ACCESS-SIGNATURE"]) > 40
 
 
 def test_report_waits_for_the_live_feed_then_scores_b_c_e_f(tmp_path):

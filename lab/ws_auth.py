@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import time
 from collections.abc import Callable, Mapping
 
@@ -16,6 +17,16 @@ from kalshi.auth import load_private_key_bytes
 KEY_ID_ENV = "KALSHI_PROD_API_KEY_ID"
 KEY_ENV = "KALSHI_PROD_PRIVATE_KEY"
 WS_PATH = "/trade-api/ws/v2"
+
+
+def _pem_lines(data: bytes) -> bytes:
+    """PEM text whose line breaks a settings box turned into spaces or into literal backslash-n, back into lines."""
+    text = data.decode("ascii", "ignore").replace("\\n", "\n").strip()
+    m = re.match(r"^(-----BEGIN [A-Z0-9 ]+-----)\s*(.*?)\s*(-----END [A-Z0-9 ]+-----)$", text, re.S)
+    if not m:
+        return data
+    body = "".join(m.group(2).split())
+    return ("\n".join([m.group(1), *(body[i:i + 64] for i in range(0, len(body), 64)), m.group(3)]) + "\n").encode()
 
 
 def load_signer(env: Mapping[str, str] = os.environ) -> tuple[str, Callable[[bytes], bytes]] | None:
@@ -27,7 +38,10 @@ def load_signer(env: Mapping[str, str] = os.environ) -> tuple[str, Callable[[byt
     from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 
     data = load_private_key_bytes(raw)
-    key = serialization.load_pem_private_key(data, password=None) if data.lstrip().startswith(b"-----BEGIN") else serialization.load_der_private_key(data, password=None)
+    if data.lstrip().startswith(b"-----BEGIN"):
+        key = serialization.load_pem_private_key(_pem_lines(data), password=None)
+    else:
+        key = serialization.load_der_private_key(data, password=None)
     if isinstance(key, ed25519.Ed25519PrivateKey):
         return key_id, key.sign
     if isinstance(key, rsa.RSAPrivateKey):
