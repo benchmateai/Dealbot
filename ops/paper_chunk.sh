@@ -2,8 +2,9 @@
 # One unattended chunk of the paper desk: pull the run branch, resume from its checkpoint, run the
 # judge and the desk for CHUNK_BLOCKS blocks, then commit the logs and the checkpoint and push.
 # Paper only. The TypeSafe key is read from the environment by the judge (JUDGE_AUTH=env) or injected
-# by the environment's proxy (JUDGE_AUTH=proxy); it is removed from the desk's environment either way.
-# Nothing secret is written to the branch. The judge gets its own .venv with the SDK when needed.
+# by the environment's proxy (JUDGE_AUTH=proxy); the desk itself runs without it and without any
+# Kalshi credentials (paper needs only public market data). Nothing secret is written to the branch.
+# The judge gets its own .venv with the SDK when needed.
 #
 #   RUN_BRANCH=paper-run FEED=coinbase DESK_SYMBOLS=ETH-USD CHUNK_BLOCKS=570 bash ops/paper_chunk.sh
 set -euo pipefail
@@ -50,8 +51,13 @@ if [ "$JUDGE_BACKEND" = "typesafe" ]; then
   export JUDGE_URL="http://127.0.0.1:$JUDGE_PORT"
   JUDGE_BACKEND=typesafe JUDGE_PORT=$JUDGE_PORT "$PY" -m judge.service > "$LOG_DIR/judge.log" 2>&1 &
   JUDGE_PID=$!
-  for _ in $(seq 1 30); do curl -sf --noproxy '*' "http://127.0.0.1:$JUDGE_PORT/healthz" >/dev/null 2>&1 && break; sleep 1; done
   trap 'kill $JUDGE_PID 2>/dev/null || true' EXIT
+  for _ in $(seq 1 30); do curl -sf --noproxy '*' "http://127.0.0.1:$JUDGE_PORT/healthz" >/dev/null 2>&1 && break; sleep 1; done
+  if ! curl -sf --noproxy '*' "http://127.0.0.1:$JUDGE_PORT/healthz" >/dev/null 2>&1; then
+    echo "paper_chunk: the judge did not come up; last lines of $LOG_DIR/judge.log:" >&2
+    tail -n 20 "$LOG_DIR/judge.log" >&2
+    exit 3
+  fi
 elif [ "$JUDGE_BACKEND" = "demo" ]; then
   export JUDGE_URL="stub://demo"
 else
@@ -59,7 +65,7 @@ else
 fi
 
 echo "paper_chunk: branch=$RUN_BRANCH mode=$DESK_MODE bot=$DESK_BOT feed=$FEED judge=$JUDGE_URL model=${JEV_MODEL:-stub} blocks=$CHUNK_BLOCKS"
-env -u TYPESAFE_API_KEY "$PY" -m desk.run --blocks "$CHUNK_BLOCKS" --state-file "$LOG_DIR/state.json" ${DESK_FAST:+--fast} ${DESK_START_MS:+--start-ms "$DESK_START_MS"}
+env -u TYPESAFE_API_KEY -u KALSHI_API_KEY_ID -u KALSHI_PRIVATE_KEY "$PY" -m desk.run --blocks "$CHUNK_BLOCKS" --state-file "$LOG_DIR/state.json" ${DESK_FAST:+--fast} ${DESK_START_MS:+--start-ms "$DESK_START_MS"}
 
 python3 -m reports.daily --log-dir "$LOG_DIR" --date "$(date -u +%F)" --out "$LOG_DIR/reports" >/dev/null 2>&1 || true
 git add -f "$LOG_DIR"/events-*.jsonl "$LOG_DIR/state.json" "$LOG_DIR/trials.json" 2>/dev/null || true

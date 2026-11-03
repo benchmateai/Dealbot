@@ -251,3 +251,37 @@ def test_desk_buys_a_contract_in_the_window_and_settles_it(tmp_path):
     outcomes = [e for e in events if e["kind"] == "outcome"]
     assert outcomes and any(o["qid"] == "settles_yes" and o["status"] == "resolved" and o["realized"] is True for o in outcomes)
     assert any(o["qid"] == "momentum" and o["sym"] == "ETH-USD" for o in outcomes)
+
+
+def test_market_reads_are_never_signed_and_the_paper_feed_carries_no_credentials(monkeypatch):
+    pytest.importorskip("cryptography")
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    from feed import make_feed
+    from kalshi.api import KalshiApiError, KalshiClient
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption())
+    seen: list[tuple[str, dict]] = []
+
+    def fetch(url, headers):
+        seen.append((url, dict(headers)))
+        if url.endswith("/portfolio/balance"):
+            return {"balance": 10000}
+        return {"markets": [], "market": {"ticker": "T"}, "orderbook": {"yes": [], "no": []}}
+
+    client = KalshiClient("https://demo-api.kalshi.co", auth=KalshiAuth("key-123", pem), fetch=fetch)
+    client.markets("KXETH15M")
+    client.orderbook("KXETH15M-X")
+    assert all(KEY_HEADER not in headers for _, headers in seen), "public market data must never be signed"
+    assert client.balance() == {"balance": 10000}
+    assert KEY_HEADER in seen[-1][1] and SIGNATURE_HEADER in seen[-1][1]
+    with pytest.raises(KalshiApiError):
+        KalshiClient("https://demo-api.kalshi.co", fetch=fetch).balance()
+
+    # A half-set credential pair would raise if the feed looked at it; the paper feed never does.
+    monkeypatch.setenv("KALSHI_API_KEY_ID", "only-id")
+    monkeypatch.delenv("KALSHI_PRIVATE_KEY", raising=False)
+    feed = make_feed("kalshi", ("KXETH15M",), start_ms=0, kalshi={"underlying": {"KXETH15M": "ETH-USD"}})
+    assert feed._client.authenticated is False

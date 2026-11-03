@@ -188,12 +188,17 @@ class KalshiClient:
     def authenticated(self) -> bool:
         return self._auth is not None
 
-    def get(self, path: str, params: Mapping[str, object] | None = None) -> dict:
+    def get(self, path: str, params: Mapping[str, object] | None = None, *, signed: bool = False) -> dict:
+        """GET an API path. Market data is public on every Kalshi host and is never signed, so a key
+        issued for one host (the demo) cannot break reads from another (production); only the
+        account endpoints ask for a signature."""
         api_path = API_PREFIX + path
         query = urllib.parse.urlencode({k: v for k, v in (params or {}).items() if v is not None})
         url = f"{self._base}{api_path}" + (f"?{query}" if query else "")
         headers = {"Accept": "application/json", "User-Agent": USER_AGENT}
-        if self._auth is not None:
+        if signed:
+            if self._auth is None:
+                raise KalshiApiError(f"{path} needs credentials")
             headers.update(self._auth.headers("GET", api_path))
         payload = self._fetch(url, headers)
         if not isinstance(payload, dict):
@@ -212,6 +217,4 @@ class KalshiClient:
         return parse_orderbook(self.get(f"/markets/{ticker}/orderbook", {"depth": depth}))
 
     def balance(self) -> dict:
-        if self._auth is None:
-            raise KalshiApiError("balance needs credentials")
-        return self.get("/portfolio/balance")
+        return self.get("/portfolio/balance", signed=True)
