@@ -1,0 +1,341 @@
+<meta name="dash-one-writer">
+<style>
+/* Layout: one narrow column that reads on a phone first. The result after fees is the hero, then the
+   figures that explain it, the equity curve, every bet, and the days. Paper money, said plainly. */
+.pm { max-width: 46rem; margin-inline: auto; display: grid; gap: var(--cds-gap-lg); font-family: var(--font-anthropic-sans); color: var(--color-fg); }
+.pm-head { display: grid; gap: var(--cds-gap-xs); }
+.pm-eyebrow { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.pm-title { margin: 0; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); text-wrap: balance; }
+.pm-lede { margin: 0; font-size: var(--cds-font-size-body); color: var(--color-fg-muted); max-width: 38rem; }
+.pm .pm-lede b, .pm .pm-foot b, .pm .pm-hero-sub b, .pm .pm-tile-sub b { font-weight: var(--cds-font-weight-medium); color: var(--color-fg); font-variant-numeric: tabular-nums; }
+.pm-card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); min-width: 0; }
+.pm-card h2 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); }
+.pm-note { margin: var(--cds-gap-xs) 0 var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.pm-hero { display: grid; gap: var(--cds-gap-sm); }
+.pm-hero-label { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.pm-hero-value { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: calc(var(--cds-font-size-title) * 2.4); line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; min-height: 1em; }
+.pm-hero-sub { font-size: var(--cds-font-size-body); color: var(--color-fg-muted); }
+.pm .pm-up { color: var(--color-ok); }
+.pm .pm-down { color: var(--color-bad); }
+.pm-chart { position: relative; min-height: 150px; margin-top: var(--cds-gap-sm); }
+.pm-days { position: relative; min-height: 140px; }
+.pm-chart-note { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.pm-fail { display: flex; align-items: center; justify-content: center; gap: var(--cds-gap-xs); min-height: inherit; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.pm-fail i { width: 0.375rem; height: 0.375rem; border-radius: 50%; background: var(--color-bad); display: inline-block; }
+.pm-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); gap: var(--cds-gap-md); }
+.pm-tile { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-md); display: grid; gap: var(--cds-gap-xs); align-content: start; min-width: 0; }
+.pm-tile-label { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.pm-tile-value { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-tile-sub { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.pm-table-wrap { overflow-x: auto; max-height: 28rem; overflow-y: auto; }
+.pm-table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+.pm-table th { position: sticky; top: 0; background: var(--color-panel); text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
+.pm-table td { padding: var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
+.pm-table .pm-r { text-align: right; }
+.pm-result { text-transform: capitalize; }
+.pm-result.pm-won { color: var(--color-ok); }
+.pm-result.pm-lost { color: var(--color-bad); }
+.pm-result.pm-open { color: var(--color-fg-muted); }
+.pm-empty { margin: 0; font-size: var(--cds-font-size-body); color: var(--color-fg-muted); }
+.pm-foot { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); text-align: center; }
+.pm-axis text { fill: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+.pm-grid line { stroke: var(--cds-chart-grid); stroke-width: 1; }
+.pm-tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); white-space: nowrap; }
+.pm-tip .pm-tip-when { color: var(--cds-text-secondary); }
+.pm [data-dash-source-state=empty] { color: transparent; }
+.pm [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+</style>
+
+<div class="pm">
+  <header class="pm-head" id="top">
+    <p class="pm-eyebrow">Paper money · Kalshi 15-minute crypto · no real orders</p>
+    <h1 class="pm-title">Dealbot paper money</h1>
+    <p class="pm-lede">After fees the desk stands at <b data-draw="net-lede" data-source="paper" data-field="net_pnl_usd" data-where="table=summary" class="dash-skeleton">—</b>, with <b data-draw="closed-lede" data-source="paper" data-field="trades_closed" data-where="table=summary" class="dash-skeleton">—</b> bets settled and <b data-draw="open-lede" data-source="paper" data-field="trades_open" data-where="table=summary" class="dash-skeleton">—</b> open.</p>
+  </header>
+
+  <section class="pm-card pm-hero" id="result" aria-labelledby="result-label">
+    <div class="pm-hero-label" id="result-label">Net result after fees</div>
+    <div class="pm-hero-value" data-draw="net" data-source="paper" data-field="net_pnl_usd" data-where="table=summary" class="dash-skeleton">—</div>
+    <div class="pm-hero-sub">Equity <b data-draw="equity" data-source="paper" data-field="equity_usd" data-where="table=summary" class="dash-skeleton">—</b> from a <b data-draw="start" data-source="paper" data-field="start_usd" data-where="table=summary" class="dash-skeleton">—</b> paper bankroll</div>
+    <div class="pm-chart dash-skeleton" id="equity-chart" data-draw="equity-chart" data-source="equity"></div>
+  </section>
+
+  <section class="pm-tiles" id="figures" aria-label="Key figures">
+    <div class="pm-tile">
+      <div class="pm-tile-label">Today, UTC</div>
+      <div class="pm-tile-value" data-draw="today" data-source="paper" data-field="today_pnl_usd" data-where="table=summary" class="dash-skeleton">—</div>
+      <div class="pm-tile-sub">change in equity since midnight UTC</div>
+    </div>
+    <div class="pm-tile">
+      <div class="pm-tile-label">Win rate</div>
+      <div class="pm-tile-value" data-draw="winrate" data-source="paper" data-field="win_rate" data-where="table=summary" class="dash-skeleton">—</div>
+      <div class="pm-tile-sub"><b data-draw="wins" data-source="paper" data-field="wins" data-where="table=summary">—</b> won, <b data-draw="losses" data-source="paper" data-field="losses" data-where="table=summary">—</b> lost</div>
+    </div>
+    <div class="pm-tile">
+      <div class="pm-tile-label">Best bet</div>
+      <div class="pm-tile-value" data-draw="best" data-source="paper" data-field="best_pnl_usd" data-where="table=summary" class="dash-skeleton">—</div>
+      <div class="pm-tile-sub">worst <b data-draw="worst" data-source="paper" data-field="worst_pnl_usd" data-where="table=summary">—</b></div>
+    </div>
+    <div class="pm-tile">
+      <div class="pm-tile-label">Kalshi fees paid</div>
+      <div class="pm-tile-value" data-draw="fees" data-source="paper" data-field="fees_usd" data-where="table=summary" class="dash-skeleton">—</div>
+      <div class="pm-tile-sub">already taken out of the result</div>
+    </div>
+    <div class="pm-tile">
+      <div class="pm-tile-label">Jev cost</div>
+      <div class="pm-tile-value" data-draw="jevcost" data-source="paper" data-field="jev_cost_usd" data-where="table=summary" class="dash-skeleton">—</div>
+      <div class="pm-tile-sub"><b data-draw="jevcalls" data-source="paper" data-field="jev_calls" data-where="table=summary">—</b> judge calls, real TypeSafe spend</div>
+    </div>
+  </section>
+
+  <section class="pm-card" id="bets" aria-labelledby="bets-title">
+    <h2 id="bets-title">Every bet</h2>
+    <p class="pm-note">Newest first. Each contract pays $1 if its side is right at the 15-minute close; the stake is what the side cost. Profit or loss is after the Kalshi fee.</p>
+    <p class="pm-empty" id="no-bets" hidden>No bets yet. They appear here as soon as the desk places one.</p>
+    <span data-draw="bets-state" data-source="trades"></span>
+    <div class="pm-table-wrap">
+      <table class="pm-table" data-source="trades" data-row-key="id">
+        <thead><tr><th data-field="opened_ms">Placed</th><th data-field="market">Market</th><th data-field="bet">Side</th><th data-field="price_cents" class="pm-r">Price</th><th data-field="stake_usd" class="pm-r">Stake</th><th data-field="result">Result</th><th data-field="pnl_usd" class="pm-r">Profit</th></tr></thead>
+        <tbody data-draw="bet-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="pm-card" id="days" aria-labelledby="days-title">
+    <h2 id="days-title">By day</h2>
+    <p class="pm-note">Change in equity per UTC day, after fees.</p>
+    <div class="pm-days dash-skeleton" data-draw="day-chart" data-source="days"></div>
+  </section>
+
+  <p class="pm-foot">Day <b data-draw="weekday" data-source="paper" data-field="week_day" data-where="table=summary">—</b> of the 7-day paper test · updated <b data-draw="updated" data-source="paper" data-field="updated_ms" data-where="table=summary">—</b></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const usd = d3.format('$,.2f');
+  const signed = d3.format('+$,.2f');
+  const pct = d3.format('.0%');
+  const count = d3.format(',');
+  const whole = d3.format('$,.0f');
+  const cents = (v) => d3.format('.1~f')(v) + '¢';
+  const small = (v) => (Math.abs(v) < 0.1 ? d3.format('$,.3f')(v) : usd(v));
+  const when = (ms) => new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const dayLabel = d3.utcFormat('%b %-d');
+
+  dash.calc('trades', {
+    inputs: ['paper'],
+    title: 'Bets',
+    description: 'The bet rows of the paper run file, newest first.',
+    fn: (paper) => paper.filter((r) => r.table === 'trade'),
+  });
+  dash.calc('equity', {
+    inputs: ['paper'],
+    title: 'Equity curve',
+    description: 'Paper equity, the last reading in each 10-minute slot.',
+    fn: (paper) => paper.filter((r) => r.table === 'equity'),
+  });
+  dash.calc('days', {
+    inputs: ['paper'],
+    title: 'Days',
+    description: 'Change in paper equity per UTC day, with bets settled and won.',
+    fn: (paper) => paper.filter((r) => r.table === 'day'),
+  });
+
+  const summary = () => {
+    const d = dash.data('paper');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return null;
+    return d.data.find((r) => r.table === 'summary') || null;
+  };
+  const failLine = (el) => {
+    const box = document.createElement('div');
+    box.className = 'pm-fail';
+    const dot = document.createElement('i');
+    const words = document.createElement('span');
+    words.textContent = 'Failed to load';
+    box.append(dot, words);
+    el.append(box);
+  };
+
+  const figure = (name, field, fmt, sign) => dash.draw(name, (el) => {
+    const d = dash.data('paper');
+    const s = summary();
+    const v = s ? s[field] : null;
+    el.classList.remove('pm-up', 'pm-down');
+    if (d.status === 'ok' || d.status === 'error') el.classList.remove('dash-skeleton');
+    if (v === null || v === undefined || !Number.isFinite(Number(v))) { el.textContent = '—'; return; }
+    const n = Number(v);
+    el.textContent = fmt(n);
+    if (sign) { el.classList.toggle('pm-up', n > 0); el.classList.toggle('pm-down', n < 0); }
+  });
+  figure('net', 'net_pnl_usd', signed, true);
+  figure('net-lede', 'net_pnl_usd', signed, true);
+  figure('closed-lede', 'trades_closed', count);
+  figure('open-lede', 'trades_open', count);
+  figure('equity', 'equity_usd', usd);
+  figure('start', 'start_usd', whole);
+  figure('today', 'today_pnl_usd', signed, true);
+  figure('winrate', 'win_rate', pct);
+  figure('wins', 'wins', count);
+  figure('losses', 'losses', count);
+  figure('best', 'best_pnl_usd', signed, true);
+  figure('worst', 'worst_pnl_usd', signed, true);
+  figure('fees', 'fees_usd', usd);
+  figure('jevcost', 'jev_cost_usd', small);
+  figure('jevcalls', 'jev_calls', count);
+  figure('weekday', 'week_day', count);
+  figure('updated', 'updated_ms', when);
+
+  dash.draw('bets-state', () => {
+    const d = dash.data('trades');
+    const none = d.status === 'ok' && d.data.length === 0;
+    for (const p of document.querySelectorAll('#no-bets')) p.hidden = !none;
+  });
+
+  dash.draw('bet-rows', (tbody) => {
+    tbody.replaceChildren();
+    const d = dash.data('trades');
+    if (d.status !== 'ok') return;
+    for (const t of d.data) {
+      const tr = document.createElement('tr');
+      tr.dataset.key = String(t.id);
+      const pnl = t.pnl_usd === null || t.pnl_usd === undefined ? null : Number(t.pnl_usd);
+      const cells = [
+        [when(Number(t.opened_ms)), ''],
+        [String(t.market), ''],
+        [String(t.bet), ''],
+        [cents(Number(t.price_cents)), 'pm-r'],
+        [usd(Number(t.stake_usd)), 'pm-r'],
+        [String(t.result), 'pm-result pm-' + String(t.result)],
+        [pnl === null ? '' : signed(pnl), 'pm-r' + (pnl === null ? '' : pnl > 0 ? ' pm-up' : pnl < 0 ? ' pm-down' : '')],
+      ];
+      for (const [text, cls] of cells) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        if (cls) td.className = cls;
+        tr.append(td);
+      }
+      tbody.append(tr);
+    }
+  });
+
+  const measure = (svg, texts) => {
+    const probe = svg.append('g').attr('class', 'pm-axis');
+    let w = 0;
+    for (const t of texts) w = Math.max(w, probe.append('text').text(t).node().getComputedTextLength());
+    probe.remove();
+    return Math.ceil(w);
+  };
+
+  dash.draw('equity-chart', (el) => {
+    el.replaceChildren();
+    const d = dash.data('equity');
+    if (d.status === 'error') { el.classList.remove('dash-skeleton'); failLine(el); return; }
+    if (d.status !== 'ok') return;
+    el.classList.remove('dash-skeleton');
+    const pts = d.data
+      .map((r) => ({ t: new Date(Number(r.t_ms)), v: Number(r.equity_usd) }))
+      .filter((p) => Number.isFinite(p.v) && !Number.isNaN(p.t.getTime()))
+      .sort((a, b) => a.t - b.t);
+    if (pts.length < 2) {
+      const p = document.createElement('p');
+      p.className = 'pm-chart-note';
+      p.textContent = 'The curve appears once two readings are in.';
+      el.append(p);
+      return;
+    }
+    const s = summary();
+    const start = s && Number.isFinite(Number(s.start_usd)) ? Number(s.start_usd) : null;
+    const W = Math.max(260, el.clientWidth || 320);
+    const H = W < 480 ? 150 : 190;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', 'Paper equity over time');
+    const vals = pts.map((p) => p.v).concat(start === null ? [] : [start]);
+    let lo = d3.min(vals), hi = d3.max(vals);
+    if (hi - lo < 2) { const mid = (hi + lo) / 2; lo = mid - 1; hi = mid + 1; }
+    const padY = (hi - lo) * 0.18; lo -= padY; hi += padY;
+    const tickFmt = hi - lo < 20 ? d3.format('$,.2f') : whole;
+    const yTicks = d3.scaleLinear([lo, hi], [0, 1]).ticks(3);
+    const last = pts[pts.length - 1];
+    const endText = usd(last.v);
+    const left = measure(svg, yTicks.map(tickFmt)) + 8;
+    const right = measure(svg, [endText]) + 14;
+    const top = 10, bottom = 22;
+    const x = d3.scaleTime([pts[0].t, last.t], [left, W - right]);
+    const y = d3.scaleLinear([lo, hi], [H - bottom, top]);
+    const grid = svg.append('g').attr('class', 'pm-grid');
+    for (const v of yTicks) grid.append('line').attr('x1', left).attr('x2', W - right).attr('y1', y(v)).attr('y2', y(v));
+    const axis = svg.append('g').attr('class', 'pm-axis');
+    for (const v of yTicks) axis.append('text').attr('x', left - 8).attr('y', y(v) + 4).attr('text-anchor', 'end').text(tickFmt(v));
+    const xTicks = x.ticks(W < 480 ? 3 : 5);
+    const xFmt = x.tickFormat(W < 480 ? 3 : 5);
+    xTicks.forEach((t, i) => axis.append('text').attr('x', x(t)).attr('y', H - 6).attr('text-anchor', i === 0 && x(t) - left < 20 ? 'start' : 'middle').text(xFmt(t)));
+    if (start !== null) {
+      svg.append('line').attr('x1', left).attr('x2', W - right).attr('y1', y(start)).attr('y2', y(start))
+        .attr('stroke', 'var(--cds-chart-reference)').attr('stroke-width', 1).attr('stroke-dasharray', '4 4');
+    }
+    const gid = 'pm-eq-fade';
+    const grad = svg.append('defs').append('linearGradient').attr('id', gid).attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', 1);
+    [[0, 0.26], [0.25, 0.16], [0.5, 0.08], [0.75, 0.03], [1, 0]].forEach(([o, a]) => grad.append('stop').attr('offset', o).attr('style', `stop-color: ${dash.colors[0]}; stop-opacity: ${a}`));
+    svg.append('path').datum(pts).attr('fill', `url(#${gid})`).attr('d', d3.area().x((p) => x(p.t)).y0(H - bottom).y1((p) => y(p.v)));
+    svg.append('path').datum(pts).attr('fill', 'none').attr('stroke', dash.colors[0]).attr('stroke-width', 2).attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round')
+      .attr('d', d3.line().x((p) => x(p.t)).y((p) => y(p.v)));
+    svg.append('circle').attr('cx', x(last.t)).attr('cy', y(last.v)).attr('r', 4).attr('fill', dash.colors[0]);
+    svg.append('text').attr('class', 'pm-axis').attr('x', x(last.t) + 8).attr('y', y(last.v) + 4).text(endText);
+    const hoverDot = svg.append('circle').attr('r', 4).attr('fill', dash.colors[0]).attr('visibility', 'hidden');
+    const tip = document.createElement('div');
+    tip.className = 'pm-tip';
+    tip.hidden = true;
+    el.append(tip);
+    const bis = d3.bisector((p) => p.t).center;
+    svg.append('rect').attr('x', left).attr('y', top).attr('width', Math.max(0, W - left - right)).attr('height', H - top - bottom).attr('fill', 'transparent')
+      .on('pointermove', (event) => {
+        const [mx] = d3.pointer(event);
+        const p = pts[bis(pts, x.invert(mx))];
+        hoverDot.attr('cx', x(p.t)).attr('cy', y(p.v)).attr('visibility', 'visible');
+        tip.replaceChildren();
+        const a = document.createElement('div'); a.className = 'pm-tip-when'; a.textContent = when(p.t.getTime());
+        const b = document.createElement('div'); b.textContent = usd(p.v);
+        tip.append(a, b);
+        tip.hidden = false;
+        const box = el.getBoundingClientRect();
+        const px = (x(p.t) / W) * box.width;
+        tip.style.left = Math.max(0, Math.min(px + 10, box.width - tip.offsetWidth)) + 'px';
+        tip.style.top = Math.max(0, (y(p.v) / H) * box.height - 44) + 'px';
+      })
+      .on('pointerleave', () => { hoverDot.attr('visibility', 'hidden'); tip.hidden = true; });
+  });
+
+  dash.draw('day-chart', (el) => {
+    el.replaceChildren();
+    const d = dash.data('days');
+    if (d.status === 'error') { el.classList.remove('dash-skeleton'); failLine(el); return; }
+    if (d.status !== 'ok') return;
+    el.classList.remove('dash-skeleton');
+    const rows = d.data.map((r) => ({ day: new Date(String(r.day) + 'T00:00:00Z'), pnl: Number(r.pnl_usd), trades: Number(r.trades) }))
+      .filter((r) => Number.isFinite(r.pnl) && !Number.isNaN(r.day.getTime()));
+    if (!rows.length) {
+      const p = document.createElement('p');
+      p.className = 'pm-chart-note';
+      p.textContent = 'Days appear as the test runs.';
+      el.append(p);
+      return;
+    }
+    const W = Math.max(260, el.clientWidth || 320), H = 140, top = 22, bottom = 22;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', 'Change in paper equity per day');
+    const x = d3.scaleBand(rows.map((r) => r.day.getTime()), [8, W - 8]).padding(0.35);
+    const ext = Math.max(1, d3.max(rows, (r) => Math.abs(r.pnl)));
+    const y = d3.scaleLinear([-ext, ext], [H - bottom, top]);
+    svg.append('line').attr('x1', 8).attr('x2', W - 8).attr('y1', y(0)).attr('y2', y(0)).attr('stroke', 'var(--cds-chart-axis)').attr('stroke-width', 1);
+    const bw = Math.min(32, x.bandwidth());
+    const axis = svg.append('g').attr('class', 'pm-axis');
+    for (const r of rows) {
+      const cx = x(r.day.getTime()) + x.bandwidth() / 2;
+      const y0 = y(Math.max(0, r.pnl)), y1 = y(Math.min(0, r.pnl));
+      svg.append('rect').attr('x', cx - bw / 2).attr('width', bw).attr('y', y0).attr('height', Math.max(1, y1 - y0)).attr('rx', 3)
+        .attr('fill', r.pnl < 0 ? 'var(--cds-chart-status-critical)' : dash.colors[0]);
+      axis.append('text').attr('x', cx).attr('y', r.pnl < 0 ? y1 + 14 : y0 - 6).attr('text-anchor', 'middle').text(signed(r.pnl));
+      axis.append('text').attr('x', cx).attr('y', H - 6).attr('text-anchor', 'middle').text(dayLabel(r.day));
+    }
+  });
+})();
+</script>
