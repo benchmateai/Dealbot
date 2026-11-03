@@ -1,69 +1,56 @@
 {
  "decisions": {
-  "enter_long": 2,
-  "enter_short": 5,
-  "exit": 1,
-  "hold": 170
+  "hold": 60
  },
- "equity_end": 9947.036,
- "equity_start": 9954.8701,
- "executed": 6,
+ "equity_end": 9945.901,
+ "equity_start": 9948.636,
+ "executed": 0,
  "feed": {
-  "errors": 40,
-  "polls": 672,
-  "rate_limits": 40
+  "errors": 7,
+  "polls": 144,
+  "rate_limits": 7
  },
  "fills": {
-  "buy": 1,
-  "sell": 5,
-  "settle": 3
+  "settle": 1
  },
- "first_ts": 1793737944000,
- "judge_calls": 178,
- "judge_failures": {
-  "jev_budget": 5
- },
- "last_ts": 1793741340000,
+ "first_ts": 1793741448000,
+ "judge_calls": 60,
+ "judge_failures": {},
+ "last_ts": 1793742336000,
  "models": {
-  "jev-1.14.0": 178
+  "jev-1.14.0": 60
  },
- "positions_closed": 4,
- "positions_opened": 5,
- "realized_pnl_usd": -7.0833,
+ "positions_closed": 1,
+ "positions_opened": 0,
+ "realized_pnl_usd": -1.9008,
  "records": {
-  "answer": 178,
-  "decision": 178,
-  "fill": 9,
-  "heartbeat": 29,
-  "order": 6,
-  "outcome": 729,
-  "position_closed": 4,
-  "position_opened": 5,
-  "question": 178,
-  "rejection": 409,
-  "settlement": 6,
-  "snapshot": 178,
-  "tape": 284,
-  "trial": 1,
-  "veto": 2
+  "answer": 60,
+  "decision": 60,
+  "fill": 1,
+  "heartbeat": 7,
+  "outcome": 449,
+  "position_closed": 1,
+  "question": 60,
+  "rejection": 78,
+  "settlement": 2,
+  "snapshot": 60,
+  "tape": 73,
+  "trial": 1
  },
  "rejections": {
-  "below_threshold": 170,
-  "benched": 66,
-  "insufficient_data": 6,
-  "jev_budget": 5,
-  "no_contract": 3,
-  "outside_trade_window": 159
+  "below_threshold": 60,
+  "insufficient_data": 1,
+  "insufficient_ticks": 11,
+  "no_contract": 5,
+  "outside_trade_window": 1
  },
  "settlements": {
-  "official": 6,
+  "official": 2,
   "provisional": 0
  },
- "since_ms": 1793737940000,
- "span_minutes": 56.6,
+ "since_ms": 1793741446000,
+ "span_minutes": 14.8,
  "stalled": false,
- "until_ms": 1793741343505,
- "vetoes": {
-  "fees_plus_gas": 2
- }
+ "until_ms": 1793742347873,
+ "vetoes": {}
 }
