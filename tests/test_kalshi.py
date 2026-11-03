@@ -53,6 +53,11 @@ def test_parse_market_and_orderbook():
     assert dollars.yes_bid == 0.61 and dollars.result == "yes"
     assert parse_orderbook({"orderbook": {"yes": [[58, 40], [60, 100]], "no": [[36, 50], [38, 120]]}}) == (0.60, pytest.approx(0.62), 100.0, 120.0)
     assert parse_orderbook({"orderbook": {"yes": [], "no": []}}) == (None, None, 0.0, 0.0)
+    # The current wire shape: dollar strings under orderbook_fp (seen live on 2026-11-03), fractional counts
+    fp = {"orderbook_fp": {"yes_dollars": [["0.1400", "397.31"], ["0.1200", "50"]], "no_dollars": [["0.8500", "861.17"]]}}
+    assert parse_orderbook(fp) == (0.14, pytest.approx(0.15), 397.31, 861.17)
+    assert parse_orderbook({"orderbook_fp": {"yes_dollars": [], "no_dollars": []}}) == (None, None, 0.0, 0.0)
+    assert parse_orderbook({"orderbook_fp": {"yes_dollars": [["1", "5"]], "no_dollars": []}}) == (1.0, None, 5.0, 0.0)  # a whole-dollar string is dollars, not cents
 
 
 def test_private_key_loading_and_signing():

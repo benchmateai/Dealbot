@@ -144,25 +144,32 @@ def parse_market(market: Mapping) -> ContractInfo:
 
 
 def parse_orderbook(payload: Mapping) -> tuple[float | None, float | None, float, float]:
-    """Best yes bid, best yes ask (1 - best no bid), and their sizes, in dollars and contracts."""
-    book = payload.get("orderbook") or payload
-    yes_levels = book.get("yes") or []
-    no_levels = book.get("no") or []
+    """Best yes bid, best yes ask (1 - best no bid), and their sizes, in dollars and contracts.
 
-    def best(levels: list) -> tuple[float | None, float]:
+    Two wire shapes: the current `orderbook_fp` with `yes_dollars` / `no_dollars` levels of dollar
+    strings (and fractional contract counts), and the older `orderbook` with `yes` / `no` levels in
+    integer cents. Each level is [price, count], best bid first or last; the best is the highest price.
+    """
+    book = payload.get("orderbook_fp") or payload.get("orderbook") or payload
+
+    def best(levels: list, *, cents: bool) -> tuple[float | None, float]:
         parsed = []
-        for level in levels:
+        for level in levels or []:
             try:
-                price, count = level[0], level[1]
-                parsed.append((float(price) / 100.0 if isinstance(price, int) or (isinstance(price, str) and price.isdigit()) else float(price), float(count)))
+                price, count = float(level[0]), float(level[1])
             except (TypeError, ValueError, IndexError):
                 continue
+            parsed.append((price / 100.0 if cents else price, count))
         if not parsed:
             return None, 0.0
         return max(parsed, key=lambda pc: pc[0])
 
-    yes_bid, yes_bid_qty = best(yes_levels)
-    no_bid, no_bid_qty = best(no_levels)
+    if "yes_dollars" in book or "no_dollars" in book:
+        yes_bid, yes_bid_qty = best(book.get("yes_dollars"), cents=False)
+        no_bid, no_bid_qty = best(book.get("no_dollars"), cents=False)
+    else:
+        yes_bid, yes_bid_qty = best(book.get("yes"), cents=True)
+        no_bid, no_bid_qty = best(book.get("no"), cents=True)
     yes_ask = None if no_bid is None else round(1.0 - no_bid, 4)
     return yes_bid, yes_ask, yes_bid_qty, no_bid_qty
 
