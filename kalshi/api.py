@@ -78,6 +78,13 @@ def _price(market: Mapping, key: str) -> float | None:
         return None
 
 
+def _number(value: object) -> float | None:
+    try:
+        return None if value is None else float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 def _strike(market: Mapping) -> tuple[float | None, str]:
     strike_type = str(market.get("strike_type") or "greater").lower()
     for key in ("floor_strike", "cap_strike", "custom_strike"):
@@ -115,8 +122,13 @@ class ContractInfo:
         """Provisional result from the underlying's price at expiry; None when the strike is unknown."""
         if self.strike is None:
             return None
-        if self.strike_type in ("less", "less_than", "below"):
+        kind = self.strike_type
+        if kind in ("less", "less_than", "below"):
             return underlying_price < self.strike
+        if kind in ("less_or_equal", "less_than_or_equal", "at_or_below"):
+            return underlying_price <= self.strike
+        if kind in ("greater_or_equal", "greater_than_or_equal", "at_or_above"):
+            return underlying_price >= self.strike
         return underlying_price > self.strike
 
     def to_dict(self) -> dict:
@@ -138,16 +150,19 @@ def parse_market(market: Mapping) -> ContractInfo:
         yes_bid=_price(market, "yes_bid"),
         yes_ask=_price(market, "yes_ask"),
         last_price=_price(market, "last_price"),
-        volume=float(market["volume"]) if isinstance(market.get("volume"), (int, float)) else None,
+        volume=_number(market.get("volume_fp", market.get("volume"))),
         result=result if result in ("yes", "no") else None,
     )
 
 
 def parse_orderbook(payload: Mapping) -> tuple[float | None, float | None, float, float]:
-    """Best yes bid, best yes ask (1 - best no bid), and their sizes, in dollars and contracts."""
-    book = payload.get("orderbook") or payload
-    yes_levels = book.get("yes") or []
-    no_levels = book.get("no") or []
+    """Best yes bid, best yes ask (1 - best no bid), and their sizes, in dollars and contracts.
+
+    Kalshi serves two shapes: the current one, `orderbook_fp` with fixed-point dollar strings under
+    `yes_dollars` / `no_dollars`, and the older `orderbook` with integer cents under `yes` / `no`."""
+    book = payload.get("orderbook_fp") or payload.get("orderbook") or payload
+    yes_levels = book.get("yes_dollars") or book.get("yes") or []
+    no_levels = book.get("no_dollars") or book.get("no") or []
 
     def best(levels: list) -> tuple[float | None, float]:
         parsed = []

@@ -53,6 +53,15 @@ def test_parse_market_and_orderbook():
     assert dollars.yes_bid == 0.61 and dollars.result == "yes"
     assert parse_orderbook({"orderbook": {"yes": [[58, 40], [60, 100]], "no": [[36, 50], [38, 120]]}}) == (0.60, pytest.approx(0.62), 100.0, 120.0)
     assert parse_orderbook({"orderbook": {"yes": [], "no": []}}) == (None, None, 0.0, 0.0)
+    # The shape Kalshi serves today: fixed-point dollar strings, best bid last in the list.
+    live = {"orderbook_fp": {"no_dollars": [["0.7800", "1247.00"], ["0.7900", "913.29"], ["0.8000", "657.00"]],
+                             "yes_dollars": [["0.1600", "1308.00"], ["0.1700", "966.25"], ["0.1800", "1392.85"]]}}
+    assert parse_orderbook(live) == (0.18, pytest.approx(0.20), 1392.85, 657.0)
+    assert parse_orderbook({"orderbook_fp": {"yes_dollars": [], "no_dollars": []}}) == (None, None, 0.0, 0.0)
+    today = parse_market({"ticker": "KXETH15M-26NOV030045-45", "status": "active", "open_time": "2026-11-03T05:30:00Z", "close_time": "2026-11-03T05:45:00Z",
+                          "strike_type": "greater_or_equal", "floor_strike": 2248.51, "yes_bid_dollars": "0.1600", "yes_ask_dollars": "0.1700",
+                          "last_price_dollars": "0.1700", "volume_fp": "1234.50", "result": ""})
+    assert today.strike == 2248.51 and today.yes_bid == 0.16 and today.yes_ask == 0.17 and today.volume == 1234.5 and today.result is None
 
 
 def test_private_key_loading_and_signing():
