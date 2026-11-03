@@ -36,16 +36,17 @@ def test_a_deciding_chunk_counts_calls_decisions_fills_and_settlements(tmp_path)
     log.write("rejection", {"check": "outside_trade_window"}, ts_ms=T0 - 1)  # before the window: ignored
     log.write("answer", {"model": "jev-1.14.0", "answers": {}}, ts_ms=T0 + 1000)
     log.write("decision", {"action": "enter_long", "executed": True}, ts_ms=T0 + 1000)
-    log.write("fill", {"side": "buy", "qty": 10}, ts_ms=T0 + 1000)
+    log.write("fill", {"side": "buy", "qty": 10, "fee_usd": 0.1, "realized_pnl_usd": 0.0}, ts_ms=T0 + 1000)
     log.write("position_opened", {"sym": "KXETH15M"}, ts_ms=T0 + 1000)
     log.write("rejection", {"check": "jev_timeout"}, ts_ms=T0 + 2000)
     log.write("settlement", {"official": True, "payout": 1.0}, ts_ms=T0 + 900_000)
-    log.write("position_closed", {"realized_pnl_usd": 3.8}, ts_ms=T0 + 900_000)
+    log.write("fill", {"side": "settle", "qty": 10, "fee_usd": 0.0, "realized_pnl_usd": 4.0}, ts_ms=T0 + 900_000)
+    log.write("position_closed", {"realized_pnl_usd": 7.5}, ts_ms=T0 + 900_000)  # the symbol's realized to date: not summed
     log.close()
     s = summarize(tmp_path, since_ms=T0)
     assert not s["stalled"] and s["judge_calls"] == 1 and s["models"] == {"jev-1.14.0": 1}
-    assert s["decisions"] == {"enter_long": 1} and s["executed"] == 1 and s["fills"] == {"buy": 1}
-    assert s["settlements"] == {"official": 1, "provisional": 0} and s["realized_pnl_usd"] == 3.8
+    assert s["decisions"] == {"enter_long": 1} and s["executed"] == 1 and s["fills"] == {"buy": 1, "settle": 1}
+    assert s["settlements"] == {"official": 1, "provisional": 0} and s["realized_pnl_usd"] == 3.9  # 4.00 gross less 0.10 fees
     assert s["judge_failures"] == {"jev_timeout": 1} and "outside_trade_window" not in s["rejections"]
     path = write(s, tmp_path / "summaries")
     assert json.loads(path.read_text())["judge_calls"] == 1 and (tmp_path / "summaries" / "latest.json").exists()

@@ -4,8 +4,9 @@
 
 Counts, over the events with since <= ts < until: records by kind, rejections and vetoes by check,
 judge calls (answer records) and judge failures (jev_* rejections), decisions by action and how many
-executed, fills, positions opened and closed, settlements (official or provisional), realized P&L,
-equity at the start and end, and the feed's poll, error and rate-limit counters from the heartbeats.
+executed, fills, positions opened and closed, settlements (official or provisional), realized P&L
+after fees (from the fills: a position_closed record carries the symbol's realized P&L to date, not
+the trade's), equity at the start and end, and the feed's poll, error and rate-limit counters.
 `stalled` is true when the window spans at least 30 minutes and the judge was never asked: the
 signature of every defect found on 2026-11-03, where commits kept landing while nothing was decided.
 Writes summaries/chunk-<start>.json and summaries/latest.json and prints one line.
@@ -60,11 +61,11 @@ def summarize(log_dir: str | Path, *, since_ms: int, until_ms: int | None = None
             executed += bool(e.get("executed"))
         elif kind == "fill":
             fills[str(e.get("side"))] += 1
+            realized += float(e.get("realized_pnl_usd") or 0.0) - float(e.get("fee_usd") or 0.0) - float(e.get("gas_usd") or 0.0)
         elif kind == "position_opened":
             opened += 1
         elif kind == "position_closed":
             closed += 1
-            realized += float(e.get("realized_pnl_usd") or 0.0)
         elif kind == "settlement":
             settlements["official" if e.get("official") else "provisional"] += 1
         elif kind == "heartbeat":
