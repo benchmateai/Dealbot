@@ -43,7 +43,8 @@ export BLOCK_SECONDS
 export LOG_DIR=logs/data
 
 say() { echo "paper_chunk: $*"; }
-desk_env() { env -u TYPESAFE_API_KEY -u KALSHI_API_KEY_ID -u KALSHI_PRIVATE_KEY "$@"; }
+DESK_ENV=(env -u TYPESAFE_API_KEY -u KALSHI_API_KEY_ID -u KALSHI_PRIVATE_KEY)
+desk_env() { "${DESK_ENV[@]}" "$@"; }
 retry_push() { for delay in 0 2 4 8 16; do [ "$delay" -gt 0 ] && sleep "$delay"; git push -q -u origin "$RUN_BRANCH" && return 0; done; return 1; }
 
 # ---- 1. the run worktree ---------------------------------------------------------------------
@@ -103,7 +104,23 @@ export DESK_SECRET
 DESK_SECRET=$("$PY" -c 'import secrets; print(secrets.token_hex(32))')
 JUDGE_PID=""
 stop_judge() { if [ -n "$JUDGE_PID" ]; then kill "$JUDGE_PID" 2>/dev/null || true; wait "$JUDGE_PID" 2>/dev/null || true; JUDGE_PID=""; fi; }
-trap stop_judge EXIT
+DESK_PID=""
+stop_desk() { if [ -n "$DESK_PID" ] && kill -0 "$DESK_PID" 2>/dev/null; then kill -TERM "$DESK_PID" 2>/dev/null || true; wait "$DESK_PID" 2>/dev/null || true; fi; DESK_PID=""; }
+trap 'stop_desk; stop_judge' EXIT
+
+# One desk per container. Until 2026-11-03 the desk was started through a shell function, so the PID
+# this script killed on a restart was a wrapper shell and the desk itself kept trading next to its
+# replacement, writing every decision twice into the same log. Any desk still running here is stopped
+# (gracefully, then for good after a minute) before a new one starts.
+stop_strays() {
+  local pattern='^[^ ]*python[0-9.]* -m desk[.]run --blocks' pids  # the desk itself, never a shell that names it
+  pids=$(pgrep -f "$pattern" || true)
+  [ -n "$pids" ] || return 0
+  say "stopping stray desk process(es): $(echo $pids)"
+  kill -TERM $pids 2>/dev/null || true
+  for _ in $(seq 1 60); do pgrep -f "$pattern" >/dev/null || return 0; sleep 1; done
+  kill -KILL $pids 2>/dev/null || true
+}
 
 start_judge() {
   if [ "$JUDGE_BACKEND" = "demo" ]; then export JUDGE_URL="stub://demo"; return; fi
@@ -151,6 +168,7 @@ publish() {
 # ---- 3, 4. run until the deadline, restarting on base changes --------------------------------
 START_MS=$(( $(date +%s) * 1000 ))
 DEADLINE=$(( $(date +%s) + CHUNK_SECONDS ))
+stop_strays
 start_judge
 preflight
 say "branch=$RUN_BRANCH base=${BASE_SHA:0:7} mode=$DESK_MODE bot=$DESK_BOT feed=$FEED judge=$JUDGE_URL model=${JEV_MODEL:-stub} until=$(date -u -d "@$DEADLINE" +%H:%M:%SZ)"
@@ -158,7 +176,9 @@ while :; do
   LEFT=$(( DEADLINE - $(date +%s) ))
   [ "$LEFT" -ge 60 ] || break
   SEGMENT_MS=$(( $(date +%s) * 1000 ))
-  desk_env "$PY" -m desk.run --blocks $(( LEFT / BLOCK_SECONDS )) --state-file "$LOG_DIR/state.json" &
+  stop_strays
+  # a plain command, not desk_env: env execs python, so $! is the desk itself and the TERM below reaches it
+  "${DESK_ENV[@]}" "$PY" -m desk.run --blocks $(( LEFT / BLOCK_SECONDS )) --state-file "$LOG_DIR/state.json" &
   DESK_PID=$!
   RESTART=""
   LAST_WATCH=$(date +%s)
@@ -186,6 +206,7 @@ while :; do
   done
   DESK_RC=0
   wait "$DESK_PID" || DESK_RC=$?
+  DESK_PID=""
   publish "$SEGMENT_MS"
   if [ -n "$RESTART" ]; then
     stop_judge
