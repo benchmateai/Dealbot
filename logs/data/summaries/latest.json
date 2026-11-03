@@ -1,70 +1,56 @@
 {
  "decisions": {
-  "enter_long": 5,
-  "enter_short": 5,
-  "exit": 2,
-  "hold": 304
+  "hold": 11
  },
- "equity_end": 9952.9881,
- "equity_start": 9954.8881,
- "executed": 11,
+ "equity_end": 9952.2231,
+ "equity_start": 9956.6731,
+ "executed": 0,
  "feed": {
-  "errors": 70,
-  "polls": 1224,
-  "rate_limits": 70
+  "errors": 3,
+  "polls": 48,
+  "rate_limits": 3
  },
  "fills": {
-  "buy": 6,
-  "sell": 5,
-  "settle": 7
+  "settle": 1
  },
- "first_ts": 1793727672000,
- "judge_calls": 316,
- "judge_failures": {
-  "jev_budget": 8
- },
- "last_ts": 1793733876000,
+ "first_ts": 1793733936000,
+ "judge_calls": 11,
+ "judge_failures": {},
+ "last_ts": 1793734248000,
  "models": {
-  "jev-1.14.0": 316
+  "jev-1.14.0": 11
  },
- "positions_closed": 9,
- "positions_opened": 9,
- "realized_pnl_usd": 0.085,
+ "positions_closed": 1,
+ "positions_opened": 0,
+ "realized_pnl_usd": -1.6008,
  "records": {
-  "answer": 316,
-  "decision": 316,
-  "fill": 18,
-  "heartbeat": 52,
-  "order": 11,
-  "outcome": 1588,
-  "position_closed": 9,
-  "position_opened": 9,
-  "question": 316,
-  "rejection": 720,
-  "settlement": 14,
-  "snapshot": 316,
-  "trial": 1,
-  "veto": 1
+  "answer": 11,
+  "decision": 11,
+  "fill": 1,
+  "heartbeat": 3,
+  "outcome": 147,
+  "position_closed": 1,
+  "question": 11,
+  "rejection": 31,
+  "settlement": 2,
+  "snapshot": 11,
+  "tape": 27,
+  "trial": 1
  },
  "rejections": {
-  "below_threshold": 304,
-  "benched": 63,
-  "feed_lagging": 1,
-  "insufficient_data": 8,
+  "below_threshold": 11,
+  "insufficient_data": 1,
   "insufficient_ticks": 12,
-  "jev_budget": 8,
-  "no_contract": 16,
-  "outside_trade_window": 308
+  "no_contract": 1,
+  "outside_trade_window": 6
  },
  "settlements": {
-  "official": 14,
+  "official": 2,
   "provisional": 0
  },
- "since_ms": 1793727660000,
- "span_minutes": 103.4,
+ "since_ms": 1793733929000,
+ "span_minutes": 5.2,
  "stalled": false,
- "until_ms": 1793733879672,
- "vetoes": {
-  "fees_plus_gas": 1
- }
+ "until_ms": 1793734251950,
+ "vetoes": {}
 }
