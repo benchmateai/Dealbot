@@ -11,6 +11,9 @@ from collections.abc import Mapping
 from reports.calibration import brier, buckets, forecasts_from_outcomes
 
 TRADE_KINDS = frozenset({"fill", "order", "would_execute", "position_opened", "position_closed", "order_expired", "settlement"})
+HOUR_MS = 3_600_000
+# Rejections made after Jev answered; everything else stopped the candidate before an answer.
+AFTER_ANSWER_STAGES = frozenset({"final_pick"})
 MOVE_KINDS = frozenset({"decision", "veto", "trial", "error"}) | TRADE_KINDS
 
 
@@ -37,6 +40,11 @@ class DeskState:
         self.vetoes_by_check: Counter = Counter()
         self.judge: dict = {"calls": 0, "models": Counter(), "latency": deque(maxlen=200), "timeouts": 0, "rate_limited": 0, "unavailable": 0, "backoff": 0}
         self.outcomes: deque = deque(maxlen=max_outcomes)
+        # Pipeline view: per-hour counts and the last candidates, so a desk that decides nothing is visible.
+        self.hourly: OrderedDict[int, Counter] = OrderedDict()
+        self.recent_candidates: deque = deque(maxlen=10)
+        self.last_judge_ms: int | None = None
+        self.last_candidate_ms: int | None = None
         self._max_details = max_details
         self._calibration_cache: tuple[int, dict] | None = None
         self._seq = 0
@@ -51,6 +59,23 @@ class DeskState:
         handler = getattr(self, f"_on_{kind}", None)
         if handler is not None:
             handler(rec)
+
+    def _hour(self, ts) -> Counter | None:
+        if not isinstance(ts, int):
+            return None
+        key = ts - ts % HOUR_MS
+        bucket = self.hourly.get(key)
+        if bucket is None:
+            bucket = self.hourly[key] = Counter()
+            while len(self.hourly) > 48:
+                self.hourly.popitem(last=False)
+        return bucket
+
+    def _candidate(self, rec: Mapping, outcome: str, text: str, detail: str) -> None:
+        ts = rec.get("ts")
+        if isinstance(ts, int) and (self.last_candidate_ms is None or ts >= self.last_candidate_ms):
+            self.last_candidate_ms = ts
+        self.recent_candidates.append({"ts": ts, "blk": rec.get("blk"), "sym": rec.get("sym"), "outcome": outcome, "text": text, "detail": detail, "decision_id": rec.get("decision_id")})
 
     def _detail(self, decision_id: str | None) -> dict | None:
         if not decision_id:
@@ -117,6 +142,11 @@ class DeskState:
 
     def _on_answer(self, rec: Mapping) -> None:
         self.judge["calls"] += 1
+        hour = self._hour(rec.get("ts"))
+        if hour is not None:
+            hour["judge"] += 1
+        if isinstance(rec.get("ts"), int) and (self.last_judge_ms is None or rec["ts"] >= self.last_judge_ms):
+            self.last_judge_ms = rec["ts"]
         self.counts["judge_calls"] += 1
         if rec.get("model"):
             self.judge["models"][rec["model"]] += 1
@@ -132,6 +162,16 @@ class DeskState:
         status_text = rec.get("exec_status") or ("hold" if action == "hold" else "unknown")
         self.counts["decisions"] += 1
         self.decisions_by_action[action] += 1
+        hour = self._hour(rec.get("ts"))
+        if hour is not None and action != "hold":  # a hold is counted through its below_threshold rejection
+            hour["candidates"] += 1
+            hour["entries" if str(action).startswith("enter") else "exits"] += 1
+            hour["executed"] += bool(rec.get("executed"))
+        if action != "hold":
+            verdict = "executed" if rec.get("executed") else ("vetoed" if rec.get("approved") is False else (rec.get("exec_status") or "not executed"))
+            p, t = rec.get("prob"), rec.get("threshold")
+            odds = f"p {p:.2f} vs {t:.2f}" if isinstance(p, (int, float)) and isinstance(t, (int, float)) else ""
+            self._candidate(rec, "decided", f"{action}, {verdict}", odds)
         if action == "hold":
             self.counts["holds"] += 1
             status = "neutral"
@@ -160,6 +200,9 @@ class DeskState:
 
     def _on_veto(self, rec: Mapping) -> None:
         self.counts["vetoes"] += 1
+        hour = self._hour(rec.get("ts"))
+        if hour is not None:
+            hour["vetoes"] += 1
         self.vetoes_by_check[rec.get("check")] += 1
         detail = self._detail(rec.get("decision_id"))
         if detail is not None:
@@ -169,6 +212,16 @@ class DeskState:
     def _on_rejection(self, rec: Mapping) -> None:
         check = str(rec.get("check"))
         self.counts["rejections"] += 1
+        hour = self._hour(rec.get("ts"))
+        stage = str(rec.get("stage"))
+        if hour is not None:
+            hour["candidates"] += 1
+            if stage in AFTER_ANSWER_STAGES:
+                hour["holds" if check == "below_threshold" else "not_chosen"] += 1
+            else:
+                hour["stopped_early"] += 1
+                hour["check:" + check] += 1
+        self._candidate(rec, "held" if check == "below_threshold" else "rejected", f"{stage}: {check}", str(rec.get("detail") or ""))
         self.funnel_by_stage[rec.get("stage")] += 1
         self.funnel_by_check[check] += 1
         if check == "jev_timeout":
@@ -257,6 +310,17 @@ class DeskState:
         questions = self.batteries.get(detail.get("battery_version") or "", {})
         return {**detail, "questions": questions}
 
+    def pipeline(self) -> dict:
+        hours = []
+        for start, c in self.hourly.items():
+            checks = sorted(((k[6:], v) for k, v in c.items() if k.startswith("check:")), key=lambda kv: -kv[1])
+            hours.append({
+                "hour_ms": start, "candidates": c["candidates"], "stopped_early": c["stopped_early"], "judge": c["judge"],
+                "entries": c["entries"], "exits": c["exits"], "holds": c["holds"], "executed": c["executed"], "vetoes": c["vetoes"],
+                "top": checks[:3],
+            })
+        return {"hour_ms": HOUR_MS, "hourly": hours[-24:], "recent": list(self.recent_candidates)[::-1], "last_judge_ms": self.last_judge_ms, "last_candidate_ms": self.last_candidate_ms}
+
     def recent_rejections_by_check(self, since_ms: int | None = None) -> dict[str, int]:
         counter: Counter = Counter()
         for r in self.rejections:
@@ -278,6 +342,7 @@ class DeskState:
             "vetoes_by_check": dict(self.vetoes_by_check.most_common()),
             "judge": {"calls": self.judge["calls"], "models": dict(self.judge["models"]), "latency": latency, "timeouts": self.judge["timeouts"], "rate_limited": self.judge["rate_limited"], "unavailable": self.judge["unavailable"], "backoff": self.judge["backoff"]},
             "calibration": self.calibration(),
+            "pipeline": self.pipeline(),
         }
         if include_details:
             payload["details"] = {did: self.decision_detail(did) for did in self.details}

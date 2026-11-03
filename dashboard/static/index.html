@@ -103,6 +103,13 @@ td.r, th.r { text-align: right; }
 .list { margin: 0; padding-left: 18px; font-size: 13px; }
 .muted { color: var(--muted); }
 .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.flowstate { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--ink2); margin-bottom: 12px; }
+.flowstate b { color: var(--ink); font-weight: 600; }
+.flowstate .dot { flex: none; transform: translateY(-1px); }
+.pipe { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.pipe h3 { font-size: 12px; font-weight: 600; margin: 0 0 6px; color: var(--ink2); text-transform: uppercase; letter-spacing: 0.04em; }
+.pipe td .why { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+.pipe td.reason { color: var(--ink2); font-size: 12px; }
 </style>
 
 <div class="topbar">
@@ -147,6 +154,21 @@ td.r, th.r { text-align: right; }
     <div id="funnel-chart"></div>
     <div id="funnel-checks" class="note"></div>
   </figure>
+</section>
+
+<section class="panel" id="pipeline" style="margin-top:12px">
+  <header><h2>Pipeline</h2><span class="sub" id="pipe-sub">each symbol is a candidate once per block</span></header>
+  <div class="flowstate" id="pipe-state"></div>
+  <div class="pipe">
+    <div class="scroll">
+      <h3>By hour (UTC)</h3>
+      <table id="pipe-hours"><thead><tr><th>Hour</th><th class="r">Candidates</th><th class="r">Stopped before Jev</th><th class="r">Jev calls</th><th class="r">Entries</th><th class="r">Exits</th><th class="r">Holds</th><th class="r">Vetoes</th><th>Main reason stopped</th></tr></thead><tbody></tbody></table>
+    </div>
+    <div class="scroll">
+      <h3>Last ten candidates</h3>
+      <table id="pipe-recent"><thead><tr><th>Time</th><th>Symbol</th><th>Outcome</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
 </section>
 
 <section class="panel" style="margin-top:12px">
@@ -231,7 +253,7 @@ td.r, th.r { text-align: right; }
   function cutoff() { return S.range === 'all' ? -Infinity : latestTs() - Number(S.range); }
 
   function render() {
-    renderLive(); renderHeader(); renderTiles(); renderSymbols(); renderEquity(); renderFunnel(); renderMoves(); renderCalibration(); renderTrials(); renderBenchJudge();
+    renderLive(); renderHeader(); renderTiles(); renderSymbols(); renderEquity(); renderFunnel(); renderPipeline(); renderMoves(); renderCalibration(); renderTrials(); renderBenchJudge();
   }
 
   function renderLive() {
@@ -351,6 +373,50 @@ td.r, th.r { text-align: right; }
     host.append(root);
     const checks = Object.entries(S.data.funnel.recent_by_check || {}).slice(0, 6);
     $('#funnel-checks').textContent = checks.length ? 'Recent checks: ' + checks.map(([k, v]) => k + ' ×' + v).join(', ') : 'No rejections yet.';
+  }
+
+  function renderPipeline() {
+    const p = S.data.pipeline;
+    const state = $('#pipe-state'), hoursBody = $('#pipe-hours tbody'), recentBody = $('#pipe-recent tbody');
+    state.replaceChildren(); hoursBody.replaceChildren(); recentBody.replaceChildren();
+    if (!p) { state.append(el('span', { class: 'dot' }), el('span', { text: 'This snapshot was exported before the pipeline view existed.' })); return; }
+    const hours = (p.hourly || []).slice(-12).reverse();
+    const reasons = {};
+    for (const h of hours.slice(0, 2)) for (const [check, n] of h.top || []) reasons[check] = (reasons[check] || 0) + n;
+    const top = Object.entries(reasons).sort((a, b) => b[1] - a[1])[0];
+    const latest = latestTs();
+    if (!p.last_candidate_ms) {
+      state.append(el('span', { class: 'dot' }), el('span', { text: 'No candidates yet. The desk logs one per symbol per block once it is running.' }));
+    } else if (p.last_judge_ms && latest - p.last_judge_ms < 3600000) {
+      const calls = hours[0] ? hours[0].judge : 0;
+      state.append(el('span', { class: 'dot good' }), el('span', {}, el('b', { text: 'Deciding.' }), ' Jev was last asked at ' + fmtTime(p.last_judge_ms) + 'Z; ' + calls + (calls === 1 ? ' call' : ' calls') + ' this hour.'));
+    } else {
+      const since = p.last_judge_ms ? 'not since ' + fmtStamp(p.last_judge_ms) : 'not once yet';
+      state.append(el('span', { class: 'dot warning' }), el('span', {}, el('b', { text: 'Not reaching Jev' }), ' (' + since + '). ' + (top ? 'Main reason candidates stop: ' + top[0] + ' ×' + top[1] + '.' : '')));
+    }
+    for (const h of hours) {
+      const cls = h.judge > 0 ? 'good' : h.candidates > 0 ? 'warning' : '';
+      const reason = (h.top || [])[0];
+      hoursBody.append(el('tr', {},
+        el('td', { class: 'num' }, el('span', { class: 'status' }, el('span', { class: 'dot ' + cls }), fmtTime(h.hour_ms).slice(0, 5))),
+        el('td', { class: 'r num', text: String(h.candidates) }),
+        el('td', { class: 'r num', text: String(h.stopped_early) }),
+        el('td', { class: 'r num', text: String(h.judge) }),
+        el('td', { class: 'r num', text: String(h.entries) }),
+        el('td', { class: 'r num', text: String(h.exits) }),
+        el('td', { class: 'r num', text: String(h.holds) }),
+        el('td', { class: 'r num', text: String(h.vetoes) }),
+        el('td', { class: 'reason', text: reason ? reason[0] + ' ×' + reason[1] : '–' })));
+    }
+    if (!hours.length) hoursBody.append(el('tr', {}, el('td', { colspan: '9', class: 'muted', text: 'Nothing logged yet.' })));
+    for (const c of p.recent || []) {
+      const cls = c.outcome === 'decided' ? (/executed/.test(c.text) ? 'good' : /vetoed/.test(c.text) ? 'critical' : 'info') : c.outcome === 'held' ? 'neutral' : 'warning';
+      recentBody.append(el('tr', {},
+        el('td', { class: 'num', text: fmtTime(c.ts) }),
+        el('td', { text: c.sym || '–' }),
+        el('td', {}, el('span', { class: 'status' }, el('span', { class: 'dot ' + cls }), c.text), c.detail ? el('span', { class: 'why', text: c.detail }) : null)));
+    }
+    if (!(p.recent || []).length) recentBody.append(el('tr', {}, el('td', { colspan: '3', class: 'muted', text: 'Nothing logged yet.' })));
   }
 
   function group(kind) { return kind === 'decision' ? 'decision' : kind === 'veto' ? 'veto' : kind === 'rejection' ? 'rejection' : TRADE.has(kind) ? 'trade' : SYSTEM.has(kind) ? 'system' : 'system'; }

@@ -160,7 +160,9 @@ def check_live(cfg: DeskConfig, *, client=None, book_fetch: Callable[[str], dict
         client = client or KalshiClient(cfg.kalshi_base_url)  # unsigned: market data is public
         for series in cfg.symbols:
             problem = ""
+            throttled = False
             for attempt in range(attempts):
+                throttled = False
                 try:
                     current = pick_current(client.markets(series), now())
                     if current is None:
@@ -177,11 +179,15 @@ def check_live(cfg: DeskConfig, *, client=None, book_fetch: Callable[[str], dict
                             break
                 except KalshiApiError as exc:
                     problem = f"Kalshi: {exc}"
+                    throttled = exc.rate_limited
                 except (ValueError, TypeError, KeyError) as exc:
                     problem = f"could not parse Kalshi's answer: {type(exc).__name__}: {exc}"
                 if attempt + 1 < attempts:
                     sleep(wait_s)
-            if problem:
+            if problem and throttled:
+                # Rate limits say nothing about parsing; the desk backs off on its own. Warn, do not fail.
+                lines.append(f"{series}: warning, rate limited by Kalshi on every try; parsing not verified this time")
+            elif problem:
                 ok = False
                 lines.append(f"{series}: {problem}")
         products = tuple(sorted(set(cfg.kalshi_underlying[s] for s in cfg.symbols)))

@@ -122,3 +122,27 @@ def test_export_writes_a_static_snapshot(tmp_path):
     assert saved["source"]["mode"] == "snapshot" and saved["source"]["exported_ms"] > 0
     assert saved["details"] and saved["batteries"] and saved["summary"]["trial_id"] == desk.trial_id
     assert payload["moves"] == saved["moves"]
+
+
+def test_pipeline_shows_hourly_flow_and_why_recent_candidates_stopped():
+    from dashboard.state import DeskState
+
+    h0 = 1_793_678_400_000  # 05:00 UTC
+    state = DeskState()
+    for i in range(5):
+        state.ingest({"kind": "rejection", "ts": h0 + i * 1000, "blk": i, "sym": "KXETH15M", "stage": "hard_facts", "check": "risk_precheck:max_position", "detail": "position after fill 10 exceeds 1"})
+    state.ingest({"kind": "rejection", "ts": h0 + 9000, "blk": 9, "sym": "KXBTC15M", "stage": "free_cut", "check": "outside_trade_window", "detail": "expires in 700 s"})
+    h1 = h0 + 3_600_000
+    state.ingest({"kind": "answer", "ts": h1 + 1000, "decision_id": "d1", "model": "jev-1.14.0"})
+    state.ingest({"kind": "decision", "ts": h1 + 1000, "blk": 300, "sym": "KXETH15M", "decision_id": "d1", "action": "hold", "prob": 0.4, "threshold": 0.6})
+    state.ingest({"kind": "rejection", "ts": h1 + 1000, "blk": 300, "sym": "KXETH15M", "stage": "final_pick", "check": "below_threshold", "detail": "best action p=0.400 < threshold 0.600"})
+    state.ingest({"kind": "answer", "ts": h1 + 13000, "decision_id": "d2", "model": "jev-1.14.0"})
+    state.ingest({"kind": "decision", "ts": h1 + 13000, "blk": 301, "sym": "KXETH15M", "decision_id": "d2", "action": "enter_long", "prob": 0.72, "threshold": 0.55, "executed": True, "approved": True})
+    p = state.to_payload()["pipeline"]
+    first, second = p["hourly"]
+    assert first["hour_ms"] == h0 and first["candidates"] == 6 and first["stopped_early"] == 6 and first["judge"] == 0
+    assert first["top"][0] == ["risk_precheck:max_position", 5] or first["top"][0] == ("risk_precheck:max_position", 5)
+    assert second["candidates"] == 2 and second["judge"] == 2 and second["holds"] == 1 and second["entries"] == 1 and second["executed"] == 1
+    assert p["recent"][0]["outcome"] == "decided" and p["recent"][0]["text"] == "enter_long, executed"
+    assert p["recent"][1]["outcome"] == "held" and p["last_judge_ms"] == h1 + 13000
+    assert len(p["recent"]) <= 10
