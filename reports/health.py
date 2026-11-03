@@ -8,7 +8,8 @@ Prints "OK ...", "WARN ..." or "ALERT ..." with the reasons and a few numbers, a
 ALERT means someone should look now: nothing pushed to the run branch for over 75 minutes (the
 chunk script publishes every 30), the desk reporting a fault, no Jev calls for two hours, more than
 a fifth of the last hour's Jev calls failing, a position still open 35 minutes after it was taken
-(a 15-minute contract settles within about 17), or the day's loss at the risk gate's limit.
+(a 15-minute contract settles within about 17), the day's loss at the risk gate's limit, or the same
+decision logged twice in the last two hours (two desks writing to one log, as on 2026-11-03).
 WARN is for the morning report: an hour without Jev calls, positions settled provisionally (worth
 reconciling), most feed polls rate-limited, a day's loss past half the limit, or the bankroll down 2%.
 The windows end at the newest heartbeat, so a stale log reads as stale, not as quiet.
@@ -65,7 +66,14 @@ def check(log_dir: str | Path, *, commit_ms: int | None, now_ms: int | None = No
     entries_1h = sum(1 for e in hour if e.get("kind") == "decision" and e.get("executed") and str(e.get("action", "")).startswith("enter"))
     settled_1h = sum(1 for e in hour if e.get("kind") == "position_closed")
     provisional_24h = sum(1 for e in window(24 * HOUR_MS) if e.get("kind") == "settlement" and e.get("decision_id") and not e.get("official"))
+    seen: dict[str, int] = {}
+    for e in two_hours:
+        if e.get("kind") == "decision" and e.get("decision_id"):
+            seen[str(e["decision_id"])] = seen.get(str(e["decision_id"]), 0) + 1
+    doubled = sum(1 for n in seen.values() if n > 1)
 
+    if doubled:
+        alerts.append(f"{doubled} decisions in the last two hours were logged more than once: more than one desk is writing to the log")
     if last.get("fault"):
         alerts.append(f"the desk reports a fault: {last['fault']}")
     position = last.get("position") or None

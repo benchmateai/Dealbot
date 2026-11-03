@@ -62,3 +62,14 @@ def test_judge_failures_losses_and_provisional_settlements(tmp_path):
 def test_an_empty_log_is_an_alert(tmp_path):
     (tmp_path / "events-2026-11-03.jsonl").write_text("")
     assert check(tmp_path, commit_ms=None, now_ms=T0)["line"] == "ALERT · no heartbeat in the log"
+
+
+def test_two_desks_writing_one_log_is_an_alert(tmp_path):
+    end = T0 + HOUR_MS
+    records = heartbeats(T0, 60) + [{"kind": "answer", "ts": end - MINUTE_MS}]
+    for copy in range(2):  # a second desk makes the same decision in the same block
+        records += [{"kind": "decision", "ts": end - 3 * MINUTE_MS + copy, "decision_id": "kalshi-991-KXETH15M"}]
+    records += [{"kind": "decision", "ts": end - 2 * MINUTE_MS, "decision_id": "kalshi-992-KXETH15M"}]
+    write(tmp_path, records)
+    r = check(tmp_path, commit_ms=end, now_ms=end)
+    assert r["alerts"] == ["1 decisions in the last two hours were logged more than once: more than one desk is writing to the log"]
