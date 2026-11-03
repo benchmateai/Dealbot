@@ -7,6 +7,7 @@ replay; it is logging only and can never change or stop a decision.
 
 from __future__ import annotations
 
+import logging
 import math
 import statistics
 import time
@@ -32,7 +33,9 @@ from risk.gate import RiskContext, RiskGate
 from state.snapshot import InsufficientData, Snapshot, build_snapshot
 
 
-TAPE_FIELDS = ("ticker", "strike", "strike_type", "expires_in_s", "yes_bid", "yes_ask", "spot", "underlying_rv_bps", "model_p_yes", "tradable")
+log = logging.getLogger(__name__)
+
+TAPE_FIELDS = ("ticker", "strike", "strike_type", "expires_in_s", "spot", "underlying_rv_bps", "model_p_yes", "tradable")
 
 
 def round_trip_cost_bps(fee_bps: float, gas_usd: float, notional_usd: float) -> float:
@@ -213,21 +216,43 @@ class Desk:
 
     def _tape(self, block: Block) -> None:
         """Every series' contract and quotes this block, so a shadow strategy can be replayed on every block
-        and not only where this desk asked Jev. Logging only: it reads the feed, changes nothing, and a
-        failure here is swallowed rather than allowed near a decision."""
+        and not only where this desk asked Jev. Logging only: it reads the feed and changes nothing, and a
+        failure is swallowed (with one warning per series) rather than allowed near a decision.
+
+        The quotes are the current contract's own last tick, with its time as quote_ts, or None while
+        that contract has none yet (the series' last tick can still be the expired contract's), so a
+        replay can apply the desk's own staleness rule to every block."""
         extra_state = getattr(self._feed, "extra_state", None)
         if extra_state is None:
             return
-        try:
-            contracts = {}
-            for sym in self._cfg.symbols:
+        snapshot_history = getattr(self._feed, "snapshot_history", None)
+        contracts = {}
+        for sym in self._cfg.symbols:
+            try:
                 c = extra_state(sym, block.ts_ms, block=block.number)
-                if c:
-                    contracts[sym] = {k: c.get(k) for k in TAPE_FIELDS}
-            if contracts:
+                if not c:
+                    continue
+                ticks = snapshot_history(sym) if snapshot_history is not None else []
+                last = ticks[-1] if ticks else None
+                contracts[sym] = {
+                    **{k: c.get(k) for k in TAPE_FIELDS},
+                    "yes_bid": None if last is None else last.bid,
+                    "yes_ask": None if last is None else last.ask,
+                    "quote_ts": None if last is None else last.ts,
+                }
+            except Exception as exc:  # noqa: BLE001 - the tape must never stop the desk
+                self._tape_warn(sym, exc)
+        if contracts:
+            try:
                 self._log.write("tape", {"blk": block.number, "contracts": contracts}, ts_ms=block.ts_ms)
-        except Exception:  # noqa: BLE001 - the tape must never stop the desk
-            pass
+            except Exception as exc:  # noqa: BLE001
+                self._tape_warn("write", exc)
+
+    def _tape_warn(self, what: str, exc: Exception) -> None:
+        failed = self.__dict__.setdefault("_tape_failed", set())
+        if what not in failed:
+            failed.add(what)
+            log.warning("tape: %s failed (%s: %s); later failures of it are not reported", what, type(exc).__name__, exc)
 
     def _ingest(self, new_ticks: dict[str, list[Tick]], block: Block | None) -> None:
         for sym, ticks in new_ticks.items():
