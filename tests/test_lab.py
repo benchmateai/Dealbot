@@ -195,3 +195,235 @@ def test_f_rests_no_bids_only_on_long_shots_and_caps_each_event(tmp_path):
     s = f_fade.evaluate(tmp_path, registered_ms=0)["summary"]
     assert s["markets"] == 3 and s["contracts_filled"] == 10 and s["filled_by_trade_through"] == 10
     assert s["pnl_usd_upper_bound"] == round(10 * (1.0 - 0.95), 2) and s["upset_contracts"] == 0
+
+
+def test_e_side_share_follows_the_documented_scoring():
+    from lab.strategies.e_incentive import reference_price, side_share
+
+    deep = [[0.55, 10.0], [0.50, 300.0], [0.49, 900.0]]
+    assert reference_price(deep, 200) == 0.50  # a small order alone at the top does not set it
+    # ours (100 at 0.50) joins behind the 300 there; the 0.55 order counts in full, the whole 0.49 level at half
+    assert abs(side_share(deep, 1000, 0.5, (0.50, 100.0)) - 100 / (10 + 300 + 100 + 450)) < 1e-12
+    assert side_share(deep, 1000, 0.5, None) == 0.0
+    assert side_share([[0.48, 50.0]], 1000, 0.5, (0.48, 100.0)) is None  # short of the Target Size even with ours
+
+
+def _program(ticker, per_side_per_s, target="1000.00", pid=None):
+    day = 86_400  # 2026-11-03T00:00Z to 2026-11-04T00:00Z
+    return {"id": pid or ticker, "market_ticker": ticker, "incentive_type": "liquidity", "target_size_fp": target, "discount_factor_bps": 5000,
+            "period_reward": round(per_side_per_s * 2 * day * 10_000), "start_date": "2026-11-03T00:00:00Z", "end_date": "2026-11-04T00:00:00Z"}
+
+
+def test_e_pays_each_book_until_the_next_one_and_only_programs_worth_a_dollar(tmp_path):
+    from lab.strategies import e_incentive
+
+    deep = [[0.50, 300.0], [0.49, 900.0]]
+    items = [("incentives", {"programs": [_program("M", 0.5), _program("SMALL", 0.01)]}, T0)]
+    for k in range(5):
+        thin = k == 3
+        items.append(_book(T0 + 1000 + k * 10_000, "M", None, None, yes=deep, no=[[0.48, 50.0]] if thin else deep, set="E"))
+    for k in range(4):
+        items.append(_book(T0 + 1000 + k * 10_000, "SMALL", None, None, yes=deep, no=deep, set="E"))
+    _write(tmp_path, items)
+    report = e_incentive.evaluate(tmp_path, registered_ms=0)
+    s, share = report["summary"], 100 / 850
+    # M: three 10-second intervals after deep books pay 0.5 a second a side times our share; the interval after
+    # the thin book pays nothing, and the last book has no interval after it. SMALL earns 7 cents: not paid.
+    assert abs(report["by_program"]["M"] - 3 * 10 * 0.5 * 2 * share) < 1e-3
+    assert abs(report["by_program"]["SMALL"] - 3 * 10 * 0.01 * 2 * share) < 1e-3
+    assert (s["samples"], s["paying_samples"]) == (9, 8)
+    assert s["payable_usd"] == math.floor(3 * 10 * 0.5 * 2 * share * 100) / 100
+    assert s["contracts_filled"] == 0 and s["net_usd_upper_bound"] == s["payable_usd"]
+
+
+def test_e_charges_fills_their_markout_and_stops_adding_past_its_cap(tmp_path):
+    from lab.strategies import e_incentive
+
+    yes, no = [[0.50, 100.0]], [[0.45, 100.0]]
+    items = [("incentives", {"programs": [_program("M", 0.5, target="100.00")]}, T0)]
+    for k in range(4):
+        items.append(_book(T0 + 1000 + k * 2000, "M", None, None, yes=yes, no=no, set="E"))
+        items.append(("trade", {"ticker": "M", "yes_price": 0.49, "count": 50.0, "taker_side": "no"}, T0 + 2000 + k * 2000))  # through our YES bid
+    items.append(_book(T0 + 400_000, "M", None, None, yes=[[0.40, 100.0]], no=[[0.55, 100.0]], set="E"))  # YES mid 0.425 five minutes on
+    _write(tmp_path, items)
+    s = e_incentive.evaluate(tmp_path, registered_ms=0)["summary"]
+    # 10 contracts a quote (a tenth of the target), refilled after each fill until the net position reaches 30
+    assert s["contracts_filled"] == 30
+    assert abs(s["markout_usd"] - 30 * (0.425 - 0.50)) < 1e-9
+
+
+def test_ws_feed_keeps_books_detects_gaps_and_writes_normalized_records(tmp_path):
+    from lab.ws_recorder import Feed
+
+    store = LabStore(tmp_path)
+    feed = Feed(store, LabRest(FakeKalshi({"ms": T0}), Budget(1e9, 1e9)), now_ms=lambda: T0 + 5_000)
+    feed.meta["ETH-1"] = {"series": "KXETH15M", "event": "E", "close_ms": T0 + 900_000, "strike": 2000.0, "strike_type": "greater_or_equal", "set": "15m"}
+    feed.handle({"type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 2}})
+    feed.handle({"type": "orderbook_snapshot", "sid": 2, "seq": 1, "msg": {"market_ticker": "ETH-1", "yes_dollars_fp": [["0.5000", "100.00"], ["0.4900", "50.00"]], "no_dollars_fp": [["0.4800", "70.00"]]}})
+    feed.handle({"type": "orderbook_delta", "sid": 2, "seq": 2, "msg": {"market_ticker": "ETH-1", "price_dollars": "0.5000", "delta_fp": "-100.00", "side": "yes"}})
+    feed.handle({"type": "orderbook_delta", "sid": 2, "seq": 3, "msg": {"market_ticker": "ETH-1", "price_dollars": "0.5100", "delta_fp": "20.00", "side": "yes"}})
+    assert feed.books["ETH-1"].normalized()["yes"] == [[0.51, 20.0], [0.49, 50.0]]
+    feed.handle({"type": "orderbook_delta", "sid": 2, "seq": 9, "msg": {"market_ticker": "ETH-1", "price_dollars": "0.5100", "delta_fp": "5.00", "side": "yes"}})
+    assert feed.counters["gaps"] == 1 and not feed.books["ETH-1"].ready
+    assert feed.outbox[-1]["params"]["action"] == "get_snapshot" and feed.outbox[-1]["params"]["market_tickers"] == ["ETH-1"]
+    feed.handle({"type": "orderbook_snapshot", "sid": 2, "seq": 10, "msg": {"market_ticker": "ETH-1", "yes_dollars_fp": [["0.5200", "10.00"]], "no_dollars_fp": [["0.4700", "10.00"]]}})
+    feed.handle({"type": "trade", "sid": 3, "seq": 1, "msg": {"market_ticker": "ETH-1", "yes_price_dollars": "0.5200", "count_fp": "3.00", "taker_outcome_side": "no", "ts_ms": T0 + 4_000}})
+    feed.handle({"type": "cfbenchmarks_value", "sid": 1, "seq": 1, "msg": {"index_id": "ETHUSD_RTI", "data": json.dumps({"value": "2001.5"}), "avg_60s_data": {"value": "2001.40000000"}}})
+    feed.write_books(T0 + 5_000)
+    store.close()
+    recs = list(read_lab(tmp_path))
+    book = next(r for r in recs if r["kind"] == "book")
+    assert book["yes"] == [[0.52, 10.0]] and book["no"] == [[0.47, 10.0]] and book["set"] == "15m" and book["strike"] == 2000.0
+    trade = next(r for r in recs if r["kind"] == "trade")
+    assert (trade["yes_price"], trade["count"], trade["taker_side"], trade["trade_ts"]) == (0.52, 3.0, "no", T0 + 4_000)
+    index = next(r for r in recs if r["kind"] == "index")
+    assert (index["symbol"], index["value"], index["avg60"]) == ("ETHUSD_RTI", 2001.5, 2001.4)
+    assert not [c for c in feed.outbox if c["cmd"] not in ("subscribe", "update_subscription", "unsubscribe")]  # market data commands only
+
+
+def test_ws_feed_subscribes_once_tops_up_on_confirmation_and_retries_after_an_error(tmp_path):
+    from lab.ws_recorder import Feed
+
+    feed = Feed(LabStore(tmp_path, stream="ws"), LabRest(FakeKalshi({"ms": T0}), Budget(1e9, 1e9)))
+    meta = {"series": "KXETH15M", "event": "E", "close_ms": T0 + 900_000, "strike": 1.0, "strike_type": "greater_or_equal", "set": "15m"}
+    feed.watch("A", meta)
+    cmds = feed.connected()
+    assert [c["params"]["channels"] for c in cmds] == [["cfbenchmarks_value"], ["orderbook_delta"], ["trade"]]
+    book_sub = next(c for c in cmds if c["params"]["channels"] == ["orderbook_delta"])
+    assert book_sub["params"]["use_yes_price"] is False and book_sub["params"]["market_tickers"] == ["A"]
+    feed.watch("B", meta)  # before Kalshi confirms: no second subscribe
+    assert not [c for c in feed.outbox if c["cmd"] == "subscribe"]
+    feed.handle({"id": book_sub["id"], "type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 7}})
+    assert feed.outbox[-1]["params"] == {"sids": [7], "market_tickers": ["B"], "action": "add_markets"}
+    trade_sub = next(c for c in cmds if c["params"]["channels"] == ["trade"])
+    feed.handle({"id": trade_sub["id"], "type": "error", "msg": {"code": 9, "msg": "nope"}})
+    feed.outbox.clear()
+    feed.watch("C", meta)
+    assert [c["cmd"] for c in feed.outbox] == ["update_subscription", "subscribe"]  # the book adds C; the trade channel is tried again
+    assert feed.outbox[-1]["params"]["market_tickers"] == ["A", "B", "C"]
+    feed.handle({"type": "orderbook_snapshot", "sid": 7, "seq": 1, "msg": {"market_ticker": "A", "yes_dollars_fp": [], "no_dollars_fp": []}})
+    feed.handle({"type": "ok", "id": 50, "sid": 7, "seq": 2, "msg": {"market_tickers": ["A", "B"]}})  # a reply that may or may not take a number
+    feed.handle({"type": "orderbook_delta", "sid": 7, "seq": 2, "msg": {"market_ticker": "A", "price_dollars": "0.5000", "delta_fp": "1.00", "side": "yes"}})
+    feed.handle({"type": "orderbook_delta", "sid": 7, "seq": 3, "msg": {"market_ticker": "A", "price_dollars": "0.5000", "delta_fp": "1.00", "side": "yes"}})
+    assert feed.counters["gaps"] == 0
+
+
+def test_ws_feed_settles_fade_markets_across_a_restart(tmp_path):
+    from lab.ws_recorder import Feed
+
+    class Api:
+        def get(self, path, params=None):
+            return {"market": {"ticker": "F-1", "event_ticker": "F", "result": "no", "expiration_value": None}} if path == "/markets/F-1" else {}
+
+    state = tmp_path / "ws_state.json"
+    close = "2026-11-03T20:01:00Z"
+    feed = Feed(LabStore(tmp_path, stream="ws"), LabRest(Api(), Budget(1e9, 1e9)), state_path=state)
+    feed.apply_fade([{"ticker": "F-1", "event_ticker": "F", "close_time": close}], T0)
+    feed.apply_fade([{"ticker": "F-2", "event_ticker": "F", "close_time": "2026-11-20T00:00:00Z"}], T0 + 1000)  # F-1 dropped from the watch
+    assert "F-1" not in feed.meta and feed.pending_settle == {"F-1": T0 + 60_000}
+    feed.store.close()
+    again = Feed(LabStore(tmp_path, stream="ws"), LabRest(Api(), Budget(1e9, 1e9)), state_path=state)
+    again.settle_due(T0 + 30_000)  # not yet: two minutes after the close
+    assert again.pending_settle
+    again.settle_due(T0 + 200_000)
+    again.store.close()
+    assert again.pending_settle == {} and json.loads(state.read_text()) == {"pending_settle": {}}
+    settled = [r for r in read_lab(tmp_path) if r["kind"] == "settled"]
+    assert settled[0]["rows"] == [["F-1", "no", None]]
+
+
+def test_two_recorders_write_and_seal_only_their_own_hour_files(tmp_path):
+    rest_store, ws_store = LabStore(tmp_path), LabStore(tmp_path, stream="ws")
+    rest_store.write("book_top", {"n": 1}, ts_ms=T0)
+    ws_store.write("book", {"n": 2}, ts_ms=T0 + 1)
+    ws_store.write("book", {"n": 3}, ts_ms=T0 + H)  # the ws stream rolls over and seals its own 20:00 file only
+    names = sorted(p.name for p in (tmp_path / "2026-11-03").iterdir())
+    assert names == ["20.jsonl", "20.ws.jsonl.gz", "21.ws.jsonl"]
+    rest_store.close()
+    ws_store.close()
+    assert sorted(r["n"] for r in read_lab(tmp_path)) == [1, 2, 3]
+
+
+def test_ws_signer_handles_rsa_and_ed25519_keys_from_the_environment():
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
+
+    from lab.ws_auth import KEY_ENV, KEY_ID_ENV, load_signer, ws_headers
+
+    assert load_signer({}) is None
+    for key in (rsa.generate_private_key(public_exponent=65537, key_size=2048), ed25519.Ed25519PrivateKey.generate()):
+        pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
+        key_id, sign = load_signer({KEY_ID_ENV: "kid", KEY_ENV: pem})
+        h = ws_headers(key_id, sign, now_ms=1_700_000_000_000)
+        assert h["KALSHI-ACCESS-KEY"] == "kid" and h["KALSHI-ACCESS-TIMESTAMP"] == "1700000000000" and len(h["KALSHI-ACCESS-SIGNATURE"]) > 40
+
+
+def test_report_waits_for_the_live_feed_then_scores_b_c_e_f(tmp_path):
+    from lab import report
+
+    lab, tape = tmp_path / "lab", tmp_path / "tape"
+    tape.mkdir()
+    store = LabStore(lab)
+    store.write("lab_status", {"rest": {"requests": 3}}, ts_ms=T0)
+    store.close()
+    before = report.build(tape, lab)
+    assert all("waits for the live feed" in before["strategies"][k]["line"] for k in "BCEF") and before["live_feed"] is None
+    ws = LabStore(lab, stream="ws")
+    ws.write("lab_status", {"source": "ws", "ws": {"connects": 1}, "rest": {"requests": 2}}, ts_ms=T0 + 1)
+    ws.close()
+    after = report.build(tape, lab)
+    assert after["live_feed"]["ws"] == {"connects": 1} and after["recorder"]["rest"] == {"requests": 3}
+    assert [after["strategies"][k]["line"].split(" ")[0] for k in "BCEF"] == ["B", "C", "E", "F"]
+    assert not any("waits" in after["strategies"][k]["line"] for k in "BCEF") and after["strategies"]["E"]["summary"]["markets"] == 0
+
+
+def test_ws_run_records_resubscribes_after_a_drop_and_stops_on_time(tmp_path):
+    import asyncio
+
+    import pytest
+
+    websockets = pytest.importorskip("websockets")
+    from websockets.asyncio.server import serve
+
+    from lab import ws_recorder
+    from lab.ws_recorder import Feed
+
+    seen = []  # (connection number, the commands it received, the key header)
+
+    async def kalshi(conn):
+        n = len(seen) + 1
+        cmds = [json.loads(await conn.recv()) for _ in range(3)]
+        seen.append((n, cmds, conn.request.headers.get("KALSHI-ACCESS-KEY")))
+        for c in cmds:
+            channel = c["params"]["channels"][0]
+            await conn.send(json.dumps({"id": c["id"], "type": "subscribed", "msg": {"channel": channel, "sid": {"cfbenchmarks_value": 1, "orderbook_delta": 2, "trade": 3}[channel]}}))
+        await conn.send(json.dumps({"type": "orderbook_snapshot", "sid": 2, "seq": 1, "msg": {"market_ticker": "ETH-1", "yes_dollars_fp": [["0.4000", "5.00"]], "no_dollars_fp": [["0.5500", "6.00"]]}}))
+        await conn.send(json.dumps({"type": "trade", "sid": 3, "seq": 1, "msg": {"market_ticker": "ETH-1", "yes_price_dollars": "0.4000", "count_fp": "1.00", "taker_outcome_side": "no", "ts_ms": 1}}))
+        await conn.send(json.dumps({"type": "cfbenchmarks_value", "sid": 1, "seq": 1, "msg": {"index_id": "ETHUSD_RTI", "data": json.dumps({"value": "2000.0"})}}))
+        if n == 1:
+            await conn.close()  # the first connection drops; the recorder must come back and subscribe again
+            return
+        await conn.wait_closed()
+
+    async def go():
+        async with serve(kalshi, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            ws_recorder.URL = f"ws://127.0.0.1:{port}"
+            store = LabStore(tmp_path, stream="ws")
+            feed = Feed(store, LabRest(FakeKalshi({"ms": T0}), Budget(1e9, 1e9)))
+            feed.watch("ETH-1", {"series": "KXETH15M", "event": "E", "close_ms": feed.now_ms() + 900_000, "strike": 1.0, "strike_type": "greater_or_equal", "set": "15m"})
+            now = feed.now_ms()
+            await ws_recorder.run(feed, now + 5_000, lambda msg: b"signature", "kid", stop=asyncio.Event(), refreshed_ms=now)
+            store.close()
+            return feed
+
+    url = ws_recorder.URL
+    try:
+        feed = asyncio.run(go())
+    finally:
+        ws_recorder.URL = url
+    assert [n for n, _, _ in seen] == [1, 2] and all(key == "kid" for _, _, key in seen)
+    assert seen[1][1][1]["params"]["market_tickers"] == ["ETH-1"]  # the second connection subscribes the book again
+    assert feed.counters["connects"] == 2 and feed.counters["disconnects"] == 1
+    kinds = sorted({r["kind"] for r in read_lab(tmp_path)})
+    assert kinds == ["book", "index", "lab_status", "trade"]

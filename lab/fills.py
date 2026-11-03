@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 MARKOUT_S = (60, 300)
 TICK = 0.01
+EPS = 0.00005  # prices are 4-decimal dollar strings, and some books tick in tenths of a cent: compare tightly
 
 
 @dataclass
@@ -41,7 +42,7 @@ class Resting:
 
 
 def displayed_at(levels: list[list[float]], price: float) -> float:
-    return sum(s for p, s in levels if abs(p - price) < TICK / 2)
+    return sum(s for p, s in levels if abs(p - price) < EPS)
 
 
 def place(ticker: str, side: str, price: float, size: float, ts: int, book: dict) -> Resting:
@@ -57,12 +58,12 @@ def apply_trade(order: Resting, trade: dict) -> float:
     if order.side == "yes":
         if taker != "no":
             return 0.0
-        at_our_price, through = abs(yes_price - order.price) < TICK / 2, yes_price < order.price - TICK / 2
+        at_our_price, through = abs(yes_price - order.price) < EPS, yes_price < order.price - EPS
     else:
         if taker != "yes":
             return 0.0
         our_yes_offer = 1.0 - order.price
-        at_our_price, through = abs(yes_price - our_yes_offer) < TICK / 2, yes_price > our_yes_offer + TICK / 2
+        at_our_price, through = abs(yes_price - our_yes_offer) < EPS, yes_price > our_yes_offer + EPS
     if through:
         qty = min(order.remaining, count)
     elif at_our_price:

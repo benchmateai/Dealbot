@@ -19,7 +19,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from lab.fills import TICK, apply_trade, markouts, place
+from lab.fills import EPS, apply_trade, markouts, place
 from lab.strategies.maker_common import books_by_ticker, load, outcomes
 
 REGISTERED_MS = 1_793_743_200_000  # 2026-11-03T22:00:00Z
@@ -30,7 +30,7 @@ PULL_LEFT_S = 60
 
 
 def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REGISTERED_MS) -> dict:
-    recs = load(lab_dir, since_ms=max(since_ms, registered_ms))
+    recs = load(lab_dir, since_ms=max(since_ms, registered_ms), kinds=("book", "trade", "settled"))
     result = outcomes(recs)
     live: dict[str, dict[str, object]] = defaultdict(dict)  # ticker -> side -> resting order
     every: dict[str, list] = defaultdict(list)               # ticker -> all orders ever placed
@@ -54,7 +54,7 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
             best_price = levels[0][0]
             room = INVENTORY_CAP - inv[t] if side == "yes" else INVENTORY_CAP + inv[t]
             o = live[t].get(side)
-            if o is not None and abs(o.price - best_price) < TICK / 2 and o.remaining > 0:
+            if o is not None and abs(o.price - best_price) < EPS and o.remaining > 0:
                 continue
             if room <= 0:
                 live[t].pop(side, None)

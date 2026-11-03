@@ -1,6 +1,7 @@
 """Hour-sliced JSONL store: lab/data/<YYYY-MM-DD>/<HH>.jsonl while the hour is open, gzipped to <HH>.jsonl.gz
 once it closes, so a committed file never changes again (a restart inside an hour appends a second gzip
-member, which readers handle)."""
+member, which readers handle). A second writer names its own stream (<HH>.<stream>.jsonl), so two
+recorders never append to, or seal, each other's files; readers take every stream."""
 
 from __future__ import annotations
 
@@ -12,19 +13,20 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 
-def _hour_path(root: Path, ts_ms: int) -> Path:
+def _hour_path(root: Path, ts_ms: int, stream: str = "") -> Path:
     t = time.gmtime(ts_ms / 1000)
-    return root / time.strftime("%Y-%m-%d", t) / f"{t.tm_hour:02d}.jsonl"
+    return root / time.strftime("%Y-%m-%d", t) / f"{t.tm_hour:02d}{'.' + stream if stream else ''}.jsonl"
 
 
 class LabStore:
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, stream: str = "") -> None:
         self.root = Path(root)
+        self.stream = stream
         self._fh = None
         self._path: Path | None = None
 
     def write(self, kind: str, record: dict, *, ts_ms: int) -> None:
-        path = _hour_path(self.root, int(ts_ms))
+        path = _hour_path(self.root, int(ts_ms), self.stream)
         if path != self._path:
             previous = self._path
             self._open(path)
@@ -40,9 +42,9 @@ class LabStore:
         self._path = path
 
     def seal_closed_hours(self) -> list[Path]:
-        """Gzip every plain hour file except the one being written; returns the sealed .gz paths."""
+        """Gzip every plain hour file of this stream except the one being written; returns the sealed .gz paths."""
         sealed = []
-        for p in sorted(self.root.glob("*/*.jsonl")):
+        for p in sorted(self.root.glob(f"*/[0-9][0-9]{'.' + self.stream if self.stream else ''}.jsonl")):
             if p != self._path:
                 sealed.append(seal(p))
         return sealed

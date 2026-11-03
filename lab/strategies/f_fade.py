@@ -31,7 +31,7 @@ REPLACE_AFTER_MS = 86_400_000
 
 
 def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REGISTERED_MS) -> dict:
-    recs = load(lab_dir, since_ms=max(since_ms, registered_ms))
+    recs = load(lab_dir, since_ms=max(since_ms, registered_ms), kinds=("book", "trade", "settled"))
     result = outcomes(recs)
     live: dict[str, object] = {}
     every: dict[str, list] = defaultdict(list)

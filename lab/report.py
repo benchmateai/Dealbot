@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from lab.store import read_lab
-from lab.strategies import a_control, d_scanner
+from lab.strategies import a_control, b_late, c_crypto_mm, d_scanner, e_incentive, f_fade
 
 WAITING = {
     "B": "late-window harvest: waits for the live feed (second-by-second books and the settlement index) from the Kalshi key",
@@ -22,6 +22,7 @@ WAITING = {
     "E": "incentive capture: waits for the live feed (full-depth books in incentive markets) from the Kalshi key",
     "F": "maker long-shot fade: waits for the live feed (books and trades in long-dated markets) from the Kalshi key",
 }
+LIVE = {"B": b_late, "C": c_crypto_mm, "E": e_incentive, "F": f_fade}
 
 
 def build(tape_dir: str | Path, lab_dir: str | Path) -> dict:
@@ -30,10 +31,17 @@ def build(tape_dir: str | Path, lab_dir: str | Path) -> dict:
     out["strategies"]["A"] = {"line": a_control.one_line(a["summary"]), "summary": a["summary"]}
     d = d_scanner.scan(lab_dir, since_ms=d_scanner.REGISTERED_MS)
     out["strategies"]["D"] = {"line": d_scanner.one_line(d["summary"]), "summary": d["summary"], "top": d["runs"][:10]}
-    status = [r for r in read_lab(lab_dir, kinds=("lab_status",)) if r.get("rest")]
-    out["recorder"] = status[-1] if status else None
-    for key in ("B", "C", "E", "F"):
-        out["strategies"].setdefault(key, {"line": f"{key} {WAITING[key]}", "summary": None})
+    status = list(read_lab(lab_dir, kinds=("lab_status",)))
+    rest = [r for r in status if r.get("rest") and r.get("source") != "ws"]
+    live = [r for r in status if r.get("source") == "ws"]
+    out["recorder"] = rest[-1] if rest else None
+    out["live_feed"] = live[-1] if live else None
+    for key, strategy in LIVE.items():
+        if not live:
+            out["strategies"][key] = {"line": f"{key} {WAITING[key]}", "summary": None}
+            continue
+        result = strategy.evaluate(lab_dir)
+        out["strategies"][key] = {"line": strategy.one_line(result["summary"]), "summary": result["summary"]}
     return out
 
 
@@ -51,6 +59,9 @@ def main(argv: list[str] | None = None) -> int:
         print(report["strategies"][key]["line"])
     if report["recorder"]:
         print(f"recorder: {report['recorder']['rest']}")
+    if report["live_feed"]:
+        f = report["live_feed"]
+        print(f"live feed: {f.get('ws')} watched {f.get('watched')} errors {f.get('errors')}")
     return 0
 
 
