@@ -259,7 +259,7 @@ def test_ws_feed_keeps_books_detects_gaps_and_writes_normalized_records(tmp_path
 
     store = LabStore(tmp_path)
     feed = Feed(store, LabRest(FakeKalshi({"ms": T0}), Budget(1e9, 1e9)), now_ms=lambda: T0 + 5_000)
-    feed.meta["ETH-1"] = {"series": "KXETH15M", "event": "E", "close_ms": T0 + 900_000, "strike": 2000.0, "strike_type": "greater_or_equal", "set": "15m"}
+    feed.watch("ETH-1", {"series": "KXETH15M", "event": "E", "close_ms": T0 + 900_000, "strike": 2000.0, "strike_type": "greater_or_equal", "set": "15m"})
     feed.handle({"type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 2}})
     feed.handle({"type": "orderbook_snapshot", "sid": 2, "seq": 1, "msg": {"market_ticker": "ETH-1", "yes_dollars_fp": [["0.5000", "100.00"], ["0.4900", "50.00"]], "no_dollars_fp": [["0.4800", "70.00"]]}})
     feed.handle({"type": "orderbook_delta", "sid": 2, "seq": 2, "msg": {"market_ticker": "ETH-1", "price_dollars": "0.5000", "delta_fp": "-100.00", "side": "yes"}})
@@ -283,31 +283,61 @@ def test_ws_feed_keeps_books_detects_gaps_and_writes_normalized_records(tmp_path
     assert not [c for c in feed.outbox if c["cmd"] not in ("subscribe", "update_subscription", "unsubscribe")]  # market data commands only
 
 
-def test_ws_feed_subscribes_once_tops_up_on_confirmation_and_retries_after_an_error(tmp_path):
+def test_ws_feed_subscribes_once_tops_up_on_confirmation_and_finds_a_refused_market_one_at_a_time(tmp_path):
     from lab.ws_recorder import Feed
 
-    feed = Feed(LabStore(tmp_path, stream="ws"), LabRest(FakeKalshi({"ms": T0}), Budget(1e9, 1e9)))
+    clock = {"ms": T0}
+    feed = Feed(LabStore(tmp_path, stream="ws"), LabRest(FakeKalshi({"ms": T0}), Budget(1e9, 1e9)), now_ms=lambda: clock["ms"])
     meta = {"series": "KXETH15M", "event": "E", "close_ms": T0 + 900_000, "strike": 1.0, "strike_type": "greater_or_equal", "set": "15m"}
     feed.watch("A", meta)
+    feed.watch("B", meta)
     cmds = feed.connected()
     assert [c["params"]["channels"] for c in cmds] == [["cfbenchmarks_value"], ["orderbook_delta"], ["trade"]]
-    book_sub = next(c for c in cmds if c["params"]["channels"] == ["orderbook_delta"])
-    assert book_sub["params"]["use_yes_price"] is False and book_sub["params"]["market_tickers"] == ["A"]
-    feed.watch("B", meta)  # before Kalshi confirms: no second subscribe
+    book_sub, trade_sub = cmds[1], cmds[2]
+    assert book_sub["params"]["use_yes_price"] is False and book_sub["params"]["market_tickers"] == ["A", "B"]
+    feed.watch("C", meta)  # before Kalshi confirms: no second subscribe
     assert not [c for c in feed.outbox if c["cmd"] == "subscribe"]
     feed.handle({"id": book_sub["id"], "type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 7}})
-    assert feed.outbox[-1]["params"] == {"sids": [7], "market_tickers": ["B"], "action": "add_markets"}
-    trade_sub = next(c for c in cmds if c["params"]["channels"] == ["trade"])
-    feed.handle({"id": trade_sub["id"], "type": "error", "msg": {"code": 9, "msg": "nope"}})
+    assert feed.outbox[-1]["params"] == {"sids": [7], "market_tickers": ["C"], "action": "add_markets"}
+    # the trade subscribe naming A and B is refused: no reconnect; the next try leads with one market
+    feed.handle({"id": trade_sub["id"], "type": "error", "msg": {"code": 11, "msg": "bad market"}})
     feed.outbox.clear()
-    feed.watch("C", meta)
-    assert [c["cmd"] for c in feed.outbox] == ["update_subscription", "subscribe"]  # the book adds C; the trade channel is tried again
-    assert feed.outbox[-1]["params"]["market_tickers"] == ["A", "B", "C"]
+    clock["ms"] += 5_000
+    feed.tick(clock["ms"])
+    retry = [c for c in feed.outbox if c["cmd"] == "subscribe"]
+    assert len(retry) == 1 and retry[0]["params"]["market_tickers"] == ["A"]
+    feed.outbox.clear()
+    feed.handle({"id": retry[0]["id"], "type": "subscribed", "msg": {"channel": "trade", "sid": 8}})
+    assert [c["params"]["market_tickers"] for c in feed.outbox] == [["B"], ["C"]]  # the rest one at a time
+    b_add = feed.outbox[0]
+    feed.handle({"id": b_add["id"], "type": "error", "msg": {"code": 11, "msg": "no such market"}})
+    assert "B" in feed.meta and feed.outbox[-1]["params"]["market_tickers"] == ["B"]  # refused once: tried once more
+    feed.handle({"id": feed.outbox[-1]["id"], "type": "error", "msg": {"code": 11, "msg": "no such market"}})
+    assert "B" not in feed.meta and feed.counters["markets_dropped"] == 1  # refused twice: dropped, and only B
     feed.handle({"type": "orderbook_snapshot", "sid": 7, "seq": 1, "msg": {"market_ticker": "A", "yes_dollars_fp": [], "no_dollars_fp": []}})
     feed.handle({"type": "ok", "id": 50, "sid": 7, "seq": 2, "msg": {"market_tickers": ["A", "B"]}})  # a reply that may or may not take a number
     feed.handle({"type": "orderbook_delta", "sid": 7, "seq": 2, "msg": {"market_ticker": "A", "price_dollars": "0.5000", "delta_fp": "1.00", "side": "yes"}})
     feed.handle({"type": "orderbook_delta", "sid": 7, "seq": 3, "msg": {"market_ticker": "A", "price_dollars": "0.5000", "delta_fp": "1.00", "side": "yes"}})
-    assert feed.counters["gaps"] == 0
+    asked = feed._command("update_subscription", {"sids": [7], "market_tickers": ["A"], "action": "get_snapshot"})
+    feed.handle({"type": "error", "id": asked, "sid": 7, "seq": 4, "msg": {"code": 11, "msg": "an error reply in sequence"}})
+    feed.handle({"type": "orderbook_delta", "sid": 7, "seq": 5, "msg": {"market_ticker": "A", "price_dollars": "0.5000", "delta_fp": "1.00", "side": "yes"}})
+    assert feed.counters["gaps"] == 0 and feed.counters["replies_in_sequence"] == 2
+
+
+def test_ws_feed_reconnects_when_kalshi_ends_a_subscription_but_not_when_the_index_is_refused(tmp_path):
+    import pytest
+
+    from lab.ws_recorder import Feed, Reconnect
+
+    feed = Feed(LabStore(tmp_path, stream="ws"), LabRest(FakeKalshi({"ms": T0}), Budget(1e9, 1e9)))
+    feed.watch("A", {"series": "KXETH15M", "close_ms": T0 + 900_000, "set": "15m"})
+    cmds = feed.connected()
+    feed.handle({"id": cmds[0]["id"], "type": "error", "msg": {"code": 9, "msg": "no access to the index"}})
+    assert feed.counters["index_refused"] == 1
+    with pytest.raises(Reconnect):
+        feed.handle({"type": "error", "sid": 2, "msg": {"code": 25, "msg": "subscription buffer overflow"}})
+    with pytest.raises(Reconnect):
+        feed.handle({"type": "error", "sid": 2, "msg": {"code": 4, "msg": "something about the subscription"}})
 
 
 def test_ws_feed_settles_fade_markets_across_a_restart(tmp_path):
@@ -322,14 +352,15 @@ def test_ws_feed_settles_fade_markets_across_a_restart(tmp_path):
     feed = Feed(LabStore(tmp_path, stream="ws"), LabRest(Api(), Budget(1e9, 1e9)), state_path=state)
     feed.apply_fade([{"ticker": "F-1", "event_ticker": "F", "close_time": close}], T0)
     feed.apply_fade([{"ticker": "F-2", "event_ticker": "F", "close_time": "2026-11-20T00:00:00Z"}], T0 + 1000)  # F-1 dropped from the watch
-    assert "F-1" not in feed.meta and feed.pending_settle == {"F-1": T0 + 60_000}
+    assert "F-1" not in feed.meta and feed.pending_settle["F-1"][0] == T0 + 60_000
     feed.store.close()
     again = Feed(LabStore(tmp_path, stream="ws"), LabRest(Api(), Budget(1e9, 1e9)), state_path=state)
     again.settle_due(T0 + 30_000)  # not yet: two minutes after the close
     assert again.pending_settle
     again.settle_due(T0 + 200_000)
     again.store.close()
-    assert again.pending_settle == {} and json.loads(state.read_text()) == {"pending_settle": {}}
+    state_now = json.loads(state.read_text())
+    assert again.pending_settle == {} and state_now["pending_settle"] == {} and list(state_now["watched"]) == ["F-2"]
     settled = [r for r in read_lab(tmp_path) if r["kind"] == "settled"]
     assert settled[0]["rows"] == [["F-1", "no", None]]
 
@@ -397,6 +428,10 @@ def test_ws_run_records_resubscribes_after_a_drop_and_stops_on_time(tmp_path):
 
     seen = []  # (connection number, the commands it received, the key header)
 
+    class Quiet:  # market discovery finds nothing new
+        def get(self, path, params=None):
+            return {"markets": [], "incentive_programs": [], "cursor": "", "next_cursor": ""}
+
     async def kalshi(conn):
         n = len(seen) + 1
         cmds = [json.loads(await conn.recv()) for _ in range(3)]
@@ -417,10 +452,10 @@ def test_ws_run_records_resubscribes_after_a_drop_and_stops_on_time(tmp_path):
             port = server.sockets[0].getsockname()[1]
             ws_recorder.URL = f"ws://127.0.0.1:{port}"
             store = LabStore(tmp_path, stream="ws")
-            feed = Feed(store, LabRest(FakeKalshi({"ms": T0}), Budget(1e9, 1e9)))
+            feed = Feed(store, LabRest(Quiet(), Budget(1e9, 1e9)))
             feed.watch("ETH-1", {"series": "KXETH15M", "event": "E", "close_ms": feed.now_ms() + 900_000, "strike": 1.0, "strike_type": "greater_or_equal", "set": "15m"})
             now = feed.now_ms()
-            await ws_recorder.run(feed, now + 5_000, lambda msg: b"signature", "kid", stop=asyncio.Event(), refreshed_ms=now)
+            await ws_recorder.run(feed, now + 5_000, lambda msg: b"signature", "kid", stop=asyncio.Event())
             store.close()
             return feed
 
@@ -432,8 +467,8 @@ def test_ws_run_records_resubscribes_after_a_drop_and_stops_on_time(tmp_path):
     assert [n for n, _, _ in seen] == [1, 2] and all(key == "kid" for _, _, key in seen)
     assert seen[1][1][1]["params"]["market_tickers"] == ["ETH-1"]  # the second connection subscribes the book again
     assert feed.counters["connects"] == 2 and feed.counters["disconnects"] == 1
-    kinds = sorted({r["kind"] for r in read_lab(tmp_path)})
-    assert kinds == ["book", "index", "lab_status", "trade"]
+    kinds = {r["kind"] for r in read_lab(tmp_path)}
+    assert {"book", "index", "lab_status", "trade"} <= kinds
 
 
 def test_markouts_read_the_book_as_it_stood_then():
@@ -460,6 +495,7 @@ def test_ws_feed_rewrites_an_unchanged_book_only_on_its_heartbeat(tmp_path):
         clock["ms"] = T0 + second * 1000
         if second == 30:
             feed.handle({"type": "orderbook_delta", "sid": 2, "seq": 2, "msg": {"market_ticker": "INC", "price_dollars": "0.3000", "delta_fp": "1.00", "side": "yes"}})
+        feed.mark_alive(clock["ms"])  # answered pings
         feed.write_books(clock["ms"])
     store.close()
     written = [(r["ts"] - T0) // 1000 for r in read_lab(tmp_path) if r["kind"] == "book"]
@@ -556,3 +592,198 @@ def test_recorder_carries_on_after_a_poll_that_raises(tmp_path):
     rec.store.close()
     assert rec.poll_errors == 1 and calls["n"] >= 3
     assert any(r["kind"] == "book_top" for r in read_lab(tmp_path))
+
+
+def _feed(tmp_path, clock, api=None, **kw):
+    from lab.ws_recorder import Feed
+
+    return Feed(LabStore(tmp_path, stream="ws"), LabRest(api or FakeKalshi({"ms": T0}), Budget(1e9, 1e9)), now_ms=lambda: clock["ms"], **kw)
+
+
+def _snap(ticker, yes, no, seq=1):
+    return {"type": "orderbook_snapshot", "sid": 2, "seq": seq, "msg": {"market_ticker": ticker, "yes_dollars_fp": yes, "no_dollars_fp": no}}
+
+
+def test_ws_feed_asks_again_for_a_missing_snapshot_then_drops_the_market_and_refreshes_ready_books(tmp_path):
+    from lab.ws_recorder import SNAPSHOT_REFRESH_S, SNAPSHOT_RETRY_S
+
+    clock = {"ms": T0}
+    feed = _feed(tmp_path, clock)
+    for t in ("QUIET", "LIVE"):
+        feed.watch(t, {"set": "E"})
+    feed.connected()
+    feed.handle({"type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 2}})
+    feed.handle(_snap("LIVE", [["0.4000", "10.00"]], [["0.5000", "10.00"]]))
+    asked = []
+    for second in range(0, sum(SNAPSHOT_RETRY_S) + SNAPSHOT_RETRY_S[-1] + 30, 5):  # the last ask gets its wait too
+        clock["ms"] = T0 + second * 1000
+        feed.outbox.clear()
+        feed.tick(clock["ms"])
+        asked += [second for c in feed.outbox if c["params"].get("action") == "get_snapshot" and "QUIET" in c["params"]["market_tickers"]]
+    assert asked == [10, 30, 70, 150, 310, 630] and "QUIET" not in feed.meta and feed.counters["dropped_no_snapshot"] == 1
+    clock["ms"] = T0 + SNAPSHOT_REFRESH_S * 1000 + 5_000
+    feed.outbox.clear()
+    feed.tick(clock["ms"])
+    assert [c["params"]["market_tickers"] for c in feed.outbox if c["params"].get("action") == "get_snapshot"] == [["LIVE"]]
+    feed.handle(_snap("LIVE", [["0.4100", "10.00"]], [["0.5000", "10.00"]], seq=2))  # the refresh disagrees with the book kept
+    assert feed.counters["snapshot_drift"] == 1
+
+
+def test_ws_feed_writes_no_book_while_the_link_is_silent(tmp_path):
+    from lab.ws_recorder import STALE_MS
+
+    clock = {"ms": T0}
+    feed = _feed(tmp_path, clock)
+    feed.watch("M", {"set": "E"})
+    feed.handle(_snap("M", [["0.4000", "10.00"]], [["0.5000", "10.00"]]))
+    feed.write_books(clock["ms"])
+    clock["ms"] += STALE_MS + 60_000  # no message and no answered ping since
+    feed.write_books(clock["ms"])
+    feed.write_books(clock["ms"] + 5_000)
+    feed.mark_alive(clock["ms"] + 10_000)
+    feed.write_books(clock["ms"] + 10_000)
+    feed.store.close()
+    recs = list(read_lab(tmp_path))
+    assert [(r["ts"] - T0) // 1000 for r in recs if r["kind"] == "book"] == [0, (STALE_MS + 70_000) // 1000]
+    notes = [r["note"] for r in recs if r["kind"] == "lab_status"]
+    assert len(notes) == 2 and notes[0].startswith("feed silent") and notes[1].startswith("feed back")
+
+
+def test_ws_feed_fills_in_a_strike_published_after_discovery_and_keeps_one_market_in_two_sets(tmp_path):
+    clock = {"ms": T0}
+    feed = _feed(tmp_path, clock)
+    m = {"ticker": "ETH-Q", "event_ticker": "ETH", "close_time": "2026-11-03T20:15:00Z", "strike_type": "greater_or_equal"}
+    feed.apply_crypto({"KXETH15M": {"markets": [{**m, "floor_strike": None}]}, "KXBTC15M": None}, T0)
+    assert feed.meta["ETH-Q"]["strike"] is None
+    feed.apply_crypto({"KXETH15M": {"markets": [{**m, "floor_strike": 2239.67}]}, "KXBTC15M": None}, T0 + 2_000)
+    assert feed.meta["ETH-Q"]["strike"] == 2239.67
+    feed.watch("BOTH", {"set": "F", "close_ms": T0 + 86_400_000, "event": "EV"})
+    feed.watch("BOTH", {"set": "E"})
+    assert feed.meta["BOTH"]["sets"] == ["E", "F"] and feed.meta["BOTH"]["close_ms"] == T0 + 86_400_000
+    feed.handle(_snap("BOTH", [[f"0.{40 - i:02d}00", "10.00"] for i in range(40)], [["0.5000", "10.00"]]))
+    feed.write_books(clock["ms"])
+    feed.unwatch("BOTH", "F")
+    assert feed.meta["BOTH"]["sets"] == ["E"]
+    feed.connected()
+    feed.handle({"type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 2}})
+    feed.outbox.clear()
+    feed.unwatch("BOTH", "E")
+    assert "BOTH" not in feed.meta and feed.outbox[-1]["params"]["action"] == "delete_markets"
+    feed.store.close()
+    book = next(r for r in read_lab(tmp_path) if r["kind"] == "book")
+    assert book["set"] == "E" and book["sets"] == ["E", "F"] and len(book["yes"]) == 40  # full depth for an incentive market
+
+
+def test_ws_feed_ignores_a_partial_program_list_and_books_of_markets_it_does_not_watch(tmp_path):
+    class Pages:
+        def get(self, path, params=None):
+            if (params or {}).get("cursor"):
+                raise TimeoutError("page two timed out")
+            return {"incentive_programs": [{"market_ticker": "INC-1", "incentive_type": "liquidity", "period_reward": 100, "start_date": "2026-11-03T00:00:00Z",
+                                            "end_date": "2026-11-05T00:00:00Z", "target_size_fp": "100.00"}], "next_cursor": "more"}
+
+    clock = {"ms": T0}
+    feed = _feed(tmp_path, clock, api=Pages())
+    feed.watch("INC-0", {"set": "E"})
+    feed.refresh_incentives(T0)
+    assert "INC-0" in feed.meta and feed.counters["incentive_fetch_failed"] == 1  # nothing written, nothing dropped
+    feed.handle(_snap("STRAY", [["0.4000", "10.00"]], [["0.5000", "10.00"]]))
+    assert "STRAY" not in feed.books
+    feed.handle(_snap("INC-0", [["0.4000", "10.00"]], [["0.5000", "10.00"]]))
+    feed.unwatch("INC-0")
+    feed.watch("INC-0", {"set": "E"})
+    assert "INC-0" not in feed.books  # a book kept from before is stale: it waits for a fresh snapshot
+    feed.store.close()
+    assert not [r for r in read_lab(tmp_path) if r["kind"] == "incentives"]
+
+
+def test_ws_feed_settles_with_growing_waits_and_a_few_at_a_time(tmp_path):
+    from lab.ws_recorder import SETTLE_PER_PASS
+
+    class Unsettled:
+        calls = []
+
+        def get(self, path, params=None):
+            self.calls.append(path)
+            return {"market": {"result": ""}}
+
+    clock = {"ms": T0}
+    api = Unsettled()
+    feed = _feed(tmp_path, clock, api=api)
+    for i in range(5):
+        feed._settle_later(f"F-{i}", T0)
+    tries = []
+    for minute in range(0, 100):
+        now = T0 + minute * 60_000
+        before = len(api.calls)
+        feed.settle_due(now)
+        if len(api.calls) > before:
+            tries.append((minute, len(api.calls) - before))
+    assert all(n <= SETTLE_PER_PASS for _, n in tries)
+    f0 = [m for m, _ in tries]
+    assert f0[:2] == [2, 3]  # three at two minutes after the close, the other two a minute later
+    assert len(api.calls) == 5 * 4  # each tried at +2, then 5, 15 and 60 minutes after each miss: four times in 100 minutes
+
+
+def test_ws_schedule_looks_for_new_contracts_right_after_each_quarter_and_keeps_slow_lookups_away(tmp_path):
+    from lab.ws_recorder import Schedule
+
+    s = Schedule()
+    q = T0 + 900_000  # 20:15:00Z
+    found = {"yes": False}
+    jobs = {}
+    for ms in range(q - 250_000, q + 200_000, 1000):
+        job = s.due(ms, lambda close: found["yes"] and close == q + 900_000)
+        if job:
+            jobs.setdefault(job, []).append((ms - q) // 1000)
+        if job == "crypto" and ms >= q + 10_000:
+            found["yes"] = True  # both new contracts show up on the 10-second look
+    assert [t for t in jobs["crypto"] if t >= 0] == [2, 10]  # no more tries once both are found
+    from lab.ws_recorder import QUIET_S
+
+    assert jobs.get("settle")  # it does run, just never close to the quarter
+    assert not [(job, t) for job in ("settle", "incentives", "fade") for t in jobs.get(job, []) if -QUIET_S[job] < t < 10]
+
+
+def test_ws_book_sizes_are_exact_and_a_crossed_book_is_never_written(tmp_path):
+    from lab.ws_recorder import Book
+
+    b = Book()
+    b.snapshot({"yes_dollars_fp": [["0.0010", "795558.75"]], "no_dollars_fp": [["0.9900", "1.00"]]})
+    for _ in range(3):
+        b.delta({"side": "yes", "price_dollars": "0.0010", "delta_fp": "-265186.25"})
+    assert b.yes == {} and b.normalized()["yes"] == []
+    clock = {"ms": T0}
+    feed = _feed(tmp_path, clock)
+    feed.watch("X", {"set": "E"})
+    feed.handle(_snap("X", [["0.6000", "5.00"]], [["0.5000", "5.00"]]))  # a YES bid above the YES ask
+    feed.write_books(clock["ms"])
+    assert feed.counters["crossed_books"] == 1 and not feed.books["X"].ready
+
+
+def test_ws_exit_code_says_when_it_never_connected_or_went_quiet(tmp_path):
+    from lab.ws_recorder import NO_DATA_EXIT_MS
+
+    clock = {"ms": T0}
+    feed = _feed(tmp_path, clock)
+    assert feed.exit_code(T0 + 60_000, T0) == 3
+    feed.counters["connects"] = 1
+    feed.watch("M", {"set": "E"})
+    assert feed.exit_code(T0 + 60_000, T0) == 0
+    assert feed.exit_code(T0 + NO_DATA_EXIT_MS + 1, T0) == 4
+    clock["ms"] = T0 + NO_DATA_EXIT_MS  # a book message near the end
+    feed.handle(_snap("M", [["0.4000", "10.00"]], [["0.5000", "10.00"]]))
+    assert feed.exit_code(T0 + NO_DATA_EXIT_MS + 1, T0) == 0
+
+
+def test_markouts_use_each_set_s_book_age_and_block_trades_never_fill():
+    from lab.fills import Resting, apply_trade, markouts
+
+    o = Resting("M", "yes", 0.50, 10, 0, 0.0, filled=10, fills=[{"ts": 0, "qty": 10, "price": 0.50}])
+    fast = {"yes": [[0.55, 1.0]], "no": [[0.43, 1.0]], "set": "15m", "sets": ["15m"]}
+    assert markouts(o, [(0, fast), (400_000, fast)], None)[0]["m60"] is None  # a 15-minute book a minute old: the recording missed it
+    slow = {**fast, "set": "F", "sets": ["F"]}
+    assert markouts(o, [(0, slow), (400_000, slow)], None)[0]["m60"] == 0.06  # YES mid 0.56: an unchanged long-shot book is rewritten only every 5 min
+    r = Resting("M", "yes", 0.50, 10, 0, 0.0)
+    assert apply_trade(r, {"ts": 1, "yes_price": 0.40, "count": 5, "taker_side": "no", "block": True}) == 0
+    assert apply_trade(r, {"ts": 1, "yes_price": 0.40, "count": 5, "taker_side": "no"}) == 5

@@ -15,7 +15,9 @@ so E only ever reacts to a book it has seen. Fills come from lab/fills.py's pess
 charged its 5-minute markout (the move of its side's mid against it), because these markets settle long
 after the test. A program's reward below $1 is not paid. Where the rules are silent (whether the order
 that crosses the Target Size counts in full; ticks on a tenth-of-a-cent grid) E takes the reading in the
-reference sketch: whole levels, one-cent ticks. Reward less markouts is an upper bound on what E keeps.
+reference sketch: whole levels, one-cent ticks. The recording does not see a market's open or paused
+state, so E also counts any paused spell Kalshi would exclude. Reward less markouts is an upper bound on
+what E keeps.
 
     python -m lab.strategies.e_incentive --lab lab/data
 """
@@ -36,7 +38,7 @@ from lab.replay import Markouts, live_records
 REGISTERED_MS = 1_793_743_200_000  # 2026-11-03T22:00:00Z
 QUOTE_FRACTION = 0.1
 INVENTORY_CAP_FRACTION = 0.3
-MAX_GAP_S = 60.0
+MAX_GAP_S = 75.0  # the feed's 60 s heartbeat for these books, plus slack: a longer gap is a recording gap
 TICK = 0.01
 MIN_PAYOUT_USD = 1.0
 
@@ -102,7 +104,7 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
         if r["kind"] != "book":
             continue
         marks.book(r["ticker"], r["ts"], r)
-        if r.get("set") != "E":
+        if "E" not in (r.get("sets") or [r.get("set")]):
             continue
         t, ts = r["ticker"], r["ts"]
         if t in standing:  # the previous book, and E's orders against it, stood until now

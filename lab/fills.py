@@ -9,8 +9,10 @@ an upper bound, and this module makes that bound as tight as the data allows:
   through its price (which must have taken it first)
 - a quote touching it never fills it
 - each fill records its markout: the contract's mid 60 and 300 seconds later (the book as it stood then:
-  the last one recorded at or before that moment, no older than MAX_BOOK_AGE_MS, with the recording still
-  running after it), and the settlement, against the fill price, which measures what informed takers took
+  the last one recorded at or before that moment, no older than its set's heartbeat allows, with the
+  recording still running after it), and the settlement, against the fill price, which measures what
+  informed takers took
+- a block trade never fills it (block trades are arranged off the book)
 
 Kalshi's conventions: a trade has a YES price and a taker side. A YES taker buys YES from a resting NO bid
 at 1 - yes_price; a NO taker buys NO from a resting YES bid at yes_price. Books list YES bids and NO bids
@@ -23,7 +25,13 @@ import bisect
 from dataclasses import dataclass, field
 
 MARKOUT_S = (60, 300)
-MAX_BOOK_AGE_MS = 330_000  # the live feed rewrites an unchanged book at least every 5 minutes
+MAX_BOOK_AGE_MS = 330_000  # the live feed rewrites an unchanged book at least every 5 minutes (set F) ...
+BOOK_AGE_MS = {"15m": 25_000, "E": 75_000, "F": MAX_BOOK_AGE_MS}  # ... every 10 s for 15m, every 60 s for E
+
+
+def max_age_ms(book: dict) -> int:
+    """How old a recorded book may be and still stand for the market: an older one means the recording missed it."""
+    return min((BOOK_AGE_MS.get(s, MAX_BOOK_AGE_MS) for s in book.get("sets") or [book.get("set")]), default=MAX_BOOK_AGE_MS)
 TICK = 0.01
 EPS = 0.00005  # prices are 4-decimal dollar strings, and some books tick in tenths of a cent: compare tightly
 
@@ -55,7 +63,7 @@ def place(ticker: str, side: str, price: float, size: float, ts: int, book: dict
 
 def apply_trade(order: Resting, trade: dict) -> float:
     """Fill `order` from one trade print; returns the contracts filled (and records them)."""
-    if order.remaining <= 0 or trade.get("ts", 0) < order.placed_ts:
+    if order.remaining <= 0 or trade.get("ts", 0) < order.placed_ts or trade.get("block"):
         return 0.0
     yes_price, count, taker = float(trade["yes_price"]), float(trade["count"]), trade.get("taker_side")
     if order.side == "yes":
@@ -97,7 +105,7 @@ def book_at(books: list[tuple[int, dict]], times: list[int], ts: int) -> dict | 
     if not times or times[-1] < ts:
         return None
     i = bisect.bisect_right(times, ts) - 1
-    return books[i][1] if i >= 0 and ts - times[i] <= MAX_BOOK_AGE_MS else None
+    return books[i][1] if i >= 0 and ts - times[i] <= max_age_ms(books[i][1]) else None
 
 
 def markouts(order: Resting, books: list[tuple[int, dict]], payout_yes: float | None) -> list[dict]:

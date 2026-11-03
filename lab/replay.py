@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Iterator
 from pathlib import Path
 
-from lab.fills import MARKOUT_S, MAX_BOOK_AGE_MS, side_mid
+from lab.fills import MARKOUT_S, max_age_ms, side_mid
 from lab.store import read_lab
 from lab.strategies.maker_common import outcomes
 
@@ -32,7 +32,7 @@ def settled_outcomes(lab_dir: str | Path, *, since_ms: int = 0) -> dict[str, tup
 
 class Markouts:
     """Each fill's markout: its side's mid MARKOUT_S seconds after the fill, from the book as it stood then
-    (the last one at or before that moment, no older than MAX_BOOK_AGE_MS), once a book at or after the
+    (the last one at or before that moment, no older than its set allows), once a book at or after the
     moment shows the recording ran past it; minus the fill price, so positive is good for the maker."""
 
     def __init__(self) -> None:
@@ -58,7 +58,7 @@ class Markouts:
                     still.append((target, key, row))
                     continue
                 at = (ts, book) if ts == target else before
-                if at is not None and target - at[0] <= MAX_BOOK_AGE_MS:
+                if at is not None and target - at[0] <= max_age_ms(at[1]):
                     mid = side_mid(at[1], row["side"])
                     row[key] = None if mid is None else round(mid - row["price"], 4)
             if still:

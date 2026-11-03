@@ -44,7 +44,7 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
             if o is not None:
                 apply_trade(o, {**r, "ts": r.get("trade_ts") or r["ts"]})
             continue
-        if r["kind"] != "book" or r.get("set") != "F":
+        if r["kind"] != "book" or "F" not in (r.get("sets") or [r.get("set")]):
             continue
         t, event = r["ticker"], r.get("event") or r["ticker"]
         event_of[t] = event
