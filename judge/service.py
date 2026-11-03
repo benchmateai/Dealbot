@@ -25,6 +25,7 @@ from judge.protocol import HEALTH_PATH, JUDGE_PATH, MAX_BODY_BYTES, SECRET_HEADE
 
 log = logging.getLogger("judge")
 MIN_DESK_SECRET_CHARS = 32
+PROXY_PLACEHOLDER_KEY = "injected-by-environment-proxy"
 
 
 class JudgeConfigError(ValueError):
@@ -41,6 +42,7 @@ class JudgeConfig:
     jev_timeout_s: float
     max_retries: int
     verify_model_on_start: bool
+    auth: str = "env"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> JudgeConfig:
@@ -51,6 +53,9 @@ class JudgeConfig:
         backend = get("JUDGE_BACKEND", "typesafe")
         if backend not in ("typesafe", "stub"):
             raise JudgeConfigError("JUDGE_BACKEND must be typesafe or stub")
+        auth = get("JUDGE_AUTH", "env")
+        if auth not in ("env", "proxy"):
+            raise JudgeConfigError("JUDGE_AUTH must be env (key in TYPESAFE_API_KEY) or proxy (the environment's proxy injects the Authorization header)")
         model = get("JEV_MODEL", STUB_MODEL if backend == "stub" else "")
         secret = get("DESK_SECRET")
         if len(secret) < MIN_DESK_SECRET_CHARS:
@@ -65,6 +70,7 @@ class JudgeConfig:
                 jev_timeout_s=float(get("JEV_TIMEOUT_S", "8")),
                 max_retries=int(get("JEV_MAX_RETRIES", "2")),
                 verify_model_on_start=get("JUDGE_VERIFY_MODEL_ON_START", "1") not in ("0", "false", "no"),
+                auth=auth,
             )
         except ValueError as exc:
             raise JudgeConfigError(str(exc)) from exc
@@ -73,9 +79,15 @@ class JudgeConfig:
 def build_backend(cfg: JudgeConfig, env: Mapping[str, str]) -> JevBackend:
     if cfg.backend == "stub":
         return StubBackend(cfg.model)
-    key = (env.get(JEV_KEY_ENV) or "").strip()
-    if not key:
-        raise JudgeConfigError(f"{JEV_KEY_ENV} is not set in the judge's environment (and must never be set in the desk's)")
+    if cfg.auth == "proxy":
+        # The environment's network proxy holds the key and sets the Authorization header on requests to the
+        # TypeSafe host. The SDK insists on a non-empty key, so a placeholder goes in; the proxy replaces it.
+        key = PROXY_PLACEHOLDER_KEY
+        log.info("auth=proxy: the TypeSafe key is injected by the environment proxy; no process holds it")
+    else:
+        key = (env.get(JEV_KEY_ENV) or "").strip()
+        if not key:
+            raise JudgeConfigError(f"{JEV_KEY_ENV} is not set in the judge's environment (and must never be set in the desk's); or set JUDGE_AUTH=proxy when the environment proxy injects it")
     backend = TypeSafeBackend(key, cfg.model, max_retries=cfg.max_retries, retry_budget_s=max(cfg.jev_timeout_s * 2, 10.0), timeout_s=cfg.jev_timeout_s)
     if cfg.verify_model_on_start:
         backend.verify_model()

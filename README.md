@@ -138,7 +138,10 @@ on the next start, so a run can be split into chunks on a machine that restarts.
 one chunk for a scheduler: pull the run branch, start the judge, run the desk for `CHUNK_BLOCKS`, commit the
 logs and the checkpoint to the run branch and push. The judge reads the TypeSafe key from the environment;
 the desk is started with that variable removed. `python -m judge.pin_model` chooses the pinned Jev version
-once, from the models the account offers, and the chunk runner keeps it fixed for the whole run.
+once, from the models the account offers, and the chunk runner keeps it fixed for the whole run. Where the
+hosting environment's proxy holds the key and injects the Authorization header (Claude cloud environments
+do this with a network secret), set `JUDGE_AUTH=proxy`: the judge sends a placeholder and no process in the
+container ever holds the key.
 
 ## The visual desk
 

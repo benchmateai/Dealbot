@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # One unattended chunk of the paper desk: pull the run branch, resume from its checkpoint, run the
 # judge and the desk for CHUNK_BLOCKS blocks, then commit the logs and the checkpoint and push.
-# Paper only. The TypeSafe key is read from the environment by the judge and removed from the
-# desk's environment. Nothing secret is written to the branch.
+# Paper only. The TypeSafe key is read from the environment by the judge (JUDGE_AUTH=env) or injected
+# by the environment's proxy (JUDGE_AUTH=proxy); it is removed from the desk's environment either way.
+# Nothing secret is written to the branch. The judge gets its own .venv with the SDK when needed.
 #
 #   RUN_BRANCH=paper-run FEED=coinbase DESK_SYMBOLS=ETH-USD CHUNK_BLOCKS=570 bash ops/paper_chunk.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 RUN_BRANCH=${RUN_BRANCH:-paper-run}
+BASE_BRANCH=${BASE_BRANCH:-claude/desk-skeleton}   # the first chunk branches the run off this
+JUDGE_AUTH=${JUDGE_AUTH:-env}                    # env: TYPESAFE_API_KEY | proxy: the environment proxy injects the key
 CHUNK_BLOCKS=${CHUNK_BLOCKS:-570}            # 570 blocks of 12 s = 114 minutes
 JUDGE_PORT=${JUDGE_PORT:-8787}
 JUDGE_BACKEND=${JUDGE_BACKEND:-typesafe}      # typesafe | stub | demo (demo and stub need no key)
@@ -17,18 +20,30 @@ export DESK_BOT=${DESK_BOT:-gambler}
 export FEED=${FEED:-coinbase}
 export LOG_DIR=logs/data
 
-git fetch -q origin "$RUN_BRANCH" 2>/dev/null && git checkout -q "$RUN_BRANCH" && git pull -q --ff-only origin "$RUN_BRANCH" || git checkout -q -B "$RUN_BRANCH"
+if git fetch -q origin "$RUN_BRANCH" 2>/dev/null; then
+  git checkout -q "$RUN_BRANCH" && git pull -q --ff-only origin "$RUN_BRANCH"
+else
+  git fetch -q origin "$BASE_BRANCH" && git checkout -q -B "$RUN_BRANCH" "origin/$BASE_BRANCH"
+fi
 mkdir -p "$LOG_DIR"
 
 export DESK_SECRET
 DESK_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 
+PY=python3
 if [ "$JUDGE_BACKEND" = "typesafe" ]; then
-  if [ -z "${TYPESAFE_API_KEY:-}" ]; then echo "paper_chunk: TYPESAFE_API_KEY is not set" >&2; exit 2; fi
-  if [ ! -s "$LOG_DIR/pinned_model.txt" ]; then python3 -m judge.pin_model > "$LOG_DIR/pinned_model.txt"; fi
+  if [ "$JUDGE_AUTH" = "env" ] && [ -z "${TYPESAFE_API_KEY:-}" ]; then echo "paper_chunk: TYPESAFE_API_KEY is not set (or set JUDGE_AUTH=proxy)" >&2; exit 2; fi
+  if ! python3 -c "import typesafe_sdk" 2>/dev/null; then
+    if [ ! -x .venv/bin/python ]; then
+      if command -v uv >/dev/null 2>&1; then uv venv -q .venv && uv pip install -q --python .venv/bin/python "typesafe-sdk>=0.7.5,<0.8"; else python3 -m venv .venv && .venv/bin/pip install -q "typesafe-sdk>=0.7.5,<0.8"; fi
+    fi
+    PY=.venv/bin/python
+  fi
+  export JUDGE_AUTH
+  if [ ! -s "$LOG_DIR/pinned_model.txt" ]; then "$PY" -m judge.pin_model > "$LOG_DIR/pinned_model.txt"; fi
   export JEV_MODEL; JEV_MODEL=$(cat "$LOG_DIR/pinned_model.txt")
   export JUDGE_URL="http://127.0.0.1:$JUDGE_PORT"
-  JUDGE_BACKEND=typesafe JUDGE_PORT=$JUDGE_PORT python3 -m judge.service > "$LOG_DIR/judge.log" 2>&1 &
+  JUDGE_BACKEND=typesafe JUDGE_PORT=$JUDGE_PORT "$PY" -m judge.service > "$LOG_DIR/judge.log" 2>&1 &
   JUDGE_PID=$!
   for _ in $(seq 1 30); do curl -sf --noproxy '*' "http://127.0.0.1:$JUDGE_PORT/healthz" >/dev/null 2>&1 && break; sleep 1; done
   trap 'kill $JUDGE_PID 2>/dev/null || true' EXIT

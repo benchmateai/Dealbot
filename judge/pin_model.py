@@ -3,7 +3,8 @@
     JEV_MODEL=$(python -m judge.pin_model)
 
 Prefers the newest name that carries a version number; aliases such as jev-latest are never chosen.
-Needs TYPESAFE_API_KEY in the environment, so run it where the judge runs, never where the desk runs.
+Needs TYPESAFE_API_KEY in the environment, or JUDGE_AUTH=proxy where the environment proxy injects the key;
+run it where the judge runs, never where the desk runs.
 """
 
 from __future__ import annotations
@@ -30,7 +31,10 @@ def main() -> int:
         print("typesafe-sdk is not installed", file=sys.stderr)
         return 2
     try:
-        with TypeSafeClient(model="jev-latest") as client:  # the alias is only used to list models, never to answer
+        import os
+
+        api_key = "injected-by-environment-proxy" if os.environ.get("JUDGE_AUTH") == "proxy" else None
+        with TypeSafeClient(api_key=api_key, model="jev-latest") as client:  # the alias is only used to list models, never to answer
             names = [m.name for m in client.models.list().models]
     except Exception as exc:  # noqa: BLE001 - report and fail, never guess a version
         print(f"could not list models: {type(exc).__name__}", file=sys.stderr)

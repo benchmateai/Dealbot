@@ -111,3 +111,19 @@ def test_real_backend_refuses_an_alias_before_touching_the_network():
 
     with pytest.raises(ModelNotPinnedError):
         TypeSafeBackend("not-a-real-key", "jev-latest")
+
+
+def test_proxy_auth_builds_the_backend_without_a_key(monkeypatch):
+    pytest.importorskip("typesafe_sdk")
+    from judge.service import PROXY_PLACEHOLDER_KEY, build_backend
+
+    cfg = JudgeConfig.from_env({"JUDGE_BACKEND": "typesafe", "DESK_SECRET": SECRET, "JEV_MODEL": "jev-1.13.0", "JUDGE_AUTH": "proxy", "JUDGE_VERIFY_MODEL_ON_START": "0"})
+    assert cfg.auth == "proxy"
+    backend = build_backend(cfg, {})
+    assert backend.name == "typesafe" and backend.model == "jev-1.13.0"
+    assert backend._client._config.api_key == PROXY_PLACEHOLDER_KEY
+    backend.close()
+    with pytest.raises(JudgeConfigError, match="JUDGE_AUTH"):
+        JudgeConfig.from_env({"JUDGE_BACKEND": "typesafe", "DESK_SECRET": SECRET, "JEV_MODEL": "jev-1.13.0", "JUDGE_AUTH": "magic"})
+    with pytest.raises(JudgeConfigError, match="TYPESAFE_API_KEY"):
+        build_backend(JudgeConfig.from_env({"JUDGE_BACKEND": "typesafe", "DESK_SECRET": SECRET, "JEV_MODEL": "jev-1.13.0"}), {})
