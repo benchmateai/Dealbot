@@ -1,55 +1,69 @@
 {
  "decisions": {
-  "enter_short": 1,
-  "hold": 16
+  "enter_long": 8,
+  "enter_short": 14,
+  "exit": 3,
+  "hold": 446
  },
- "equity_end": 9997.9132,
- "equity_start": 9997.7792,
- "executed": 1,
+ "equity_end": 9994.1705,
+ "equity_start": 9997.4832,
+ "executed": 16,
  "feed": {
-  "errors": 7,
-  "polls": 48,
-  "rate_limits": 7
+  "errors": 49,
+  "polls": 986,
+  "rate_limits": 49
  },
  "fills": {
-  "sell": 1
+  "buy": 9,
+  "sell": 7,
+  "settle": 10
  },
- "first_ts": 1793687616000,
- "judge_calls": 17,
- "judge_failures": {},
- "last_ts": 1793687964000,
+ "first_ts": 1793687988000,
+ "judge_calls": 471,
+ "judge_failures": {
+  "jev_budget": 18
+ },
+ "last_ts": 1793692680000,
  "models": {
-  "jev-1.14.0": 17
+  "jev-1.14.0": 471
  },
- "positions_closed": 0,
- "positions_opened": 1,
- "realized_pnl_usd": 0.0,
+ "positions_closed": 13,
+ "positions_opened": 13,
+ "realized_pnl_usd": 12.547,
  "records": {
-  "answer": 17,
-  "decision": 17,
-  "fill": 1,
-  "heartbeat": 3,
-  "order": 1,
-  "outcome": 14,
-  "position_opened": 1,
-  "question": 17,
-  "rejection": 43,
-  "snapshot": 17,
-  "trial": 1
+  "answer": 471,
+  "decision": 471,
+  "fill": 26,
+  "heartbeat": 78,
+  "order": 16,
+  "outcome": 2187,
+  "position_closed": 13,
+  "position_opened": 13,
+  "question": 471,
+  "rejection": 1114,
+  "settlement": 20,
+  "snapshot": 471,
+  "trial": 1,
+  "veto": 9
  },
  "rejections": {
-  "below_threshold": 16,
-  "benched": 8,
-  "insufficient_ticks": 5,
-  "outside_trade_window": 14
+  "below_threshold": 446,
+  "benched": 170,
+  "insufficient_data": 6,
+  "insufficient_ticks": 12,
+  "jev_budget": 18,
+  "no_contract": 19,
+  "outside_trade_window": 443
  },
  "settlements": {
-  "official": 0,
+  "official": 20,
   "provisional": 0
  },
- "since_ms": 1793687607000,
- "span_minutes": 5.8,
+ "since_ms": 1793687979000,
+ "span_minutes": 78.2,
  "stalled": false,
- "until_ms": 1793687974108,
- "vetoes": {}
+ "until_ms": 1793692684781,
+ "vetoes": {
+  "fees_plus_gas": 9
+ }
 }
