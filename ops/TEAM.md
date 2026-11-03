@@ -19,7 +19,8 @@ raises an ALERT if a decision is ever logged twice).
 | Coordinator | Opus 5.5, session `session_01C4NeDS3CKGZfUNrC7ArPuL` | on escalation; supervisor check every 6 h; morning report 06:31 Arizona (13:31Z) | the only writer of code (`claude/desk-skeleton`) and the only voice to the owner; fixes what teammates find; replaces a teammate that stops | live trading; keys without the owner |
 | Runner | Sonnet 5.5, session `session_01JrtRuFoJFvVT79cmMzPuAC` | 110-minute chunks back to back | `ops/paper_chunk.sh` (`ops/runner_prompt.md`): the chunk script pushes logs to `paper-run` every 30 min; the runner republishes the pipeline dashboard after each chunk | edits, commits or pushes by hand |
 | Watchdog | Haiku 5.5, session `session_01JrtRuCP3RKtfhHmsiC3UYw` | hourly at :17 | `ops/watchdog.sh` (`ops/watchdog_prompt.md`): health line, then refreshes the money dashboard | edits code, deletes anything |
-| Lab runner | Haiku 5.5, session `session_01JrtRuC2MxTqb4BE8GVXSXP` | 110-minute chunks back to back | `ops/lab_chunk.sh` (`ops/lab_runner_prompt.md`): records Kalshi market data for the shadow lab (public REST always; the live feed when its session has the market-data key) and pushes each finished hour to `shadow-run` | orders of any kind; edits, commits or pushes by hand |
+| Lab runner (REST) | Haiku 5.5, session `session_01JrtRuC2MxTqb4BE8GVXSXP` | 110-minute chunks back to back | `LAB_FEEDS=rest ops/lab_chunk.sh` (`ops/lab_runner_prompt.md`): records Kalshi's public market data for lab strategies A and D and pushes each finished hour to `shadow-run` | orders of any kind; edits, commits or pushes by hand |
+| Lab runner (live feed) | Haiku 5.5, created once the market-data key is in | 110-minute chunks back to back | `LAB_FEEDS=ws ops/lab_chunk.sh` (`ops/lab_feed_runner_prompt.md`): records the authenticated WebSocket feed for B, C, E and F into the same branch | orders of any kind; reading or printing the key; edits, commits or pushes by hand |
 | Analyst | Sonnet 5.5, session `session_01JrtRuFFYYmFkU2WSWi25VR` | daily 12:41Z | `ops/analyst_prompt.md`: reconciles settlements, studies P&L, Jev's calibration and the filter funnel; one note a day on `paper-notes` | edits the desk's code or the run |
 | Fresh eyes | a review subagent the coordinator starts | before any change to `risk/`, `policy/`, `broker/` or fills | reads the diff cold, without the coordinator's reasoning | |
 
@@ -64,8 +65,8 @@ those pushed a needless notification to the owner's phone), so the old poke-only
 `trig_011Fb7LfMudmP3ipB3cb1Uq5` is disabled.
 
 - Runner: after two failed cycles in a row (pre-flight exit 4 twice, or any other failure twice).
-- Lab runner: after two failed cycles in a row (exit 5: the REST recorder crashed; exit 6: the live
-  feed kept failing).
+- Lab runners: after two failed cycles in a row (exit 5: the REST recorder crashed; exit 2: no key or
+  virtualenv for the live feed; exit 6: the live feed kept failing).
 - Watchdog: when the health line is ALERT (stale pushes, a desk fault, no Jev calls for two hours,
   Jev failing, a stuck position, the daily loss limit), once per problem, again only after 3 hours.
 - Analyst: a position settled the wrong way (reconcile exit 3), a BUG finding, or an ALERT.
@@ -111,9 +112,12 @@ Maker results (C, E, F) are upper bounds: fills are pessimistic, but paper canno
 B, C, E and F say they are waiting until the live feed has run. The live feed needs the market-data
 key the owner adds to the cloud environment (`KALSHI_PROD_API_KEY_ID`, `KALSHI_PROD_PRIVATE_KEY`; it
 signs WebSocket subscriptions and nothing else). A session sees only the environment variables set
-before it was created, so the coordinator replaces the lab runner once the key is in, after telling
-the old one to stop at the end of its chunk (two lab runners would push over each other). The paper
-desk and the REST recorder run with the key removed from their environment.
+before it was created, so once the key is in the coordinator creates the live-feed lab runner
+(`create_session`, source https://github.com/benchmateai/Dealbot at `claude/desk-skeleton`, model
+Haiku 5.5, tags `dealbot-paper-run`, `dealbot-lab`, prompt `ops/lab_feed_runner_prompt.md`) and adds
+its id above. The REST runner carries on unchanged. Each recorder writes its own files and each runner
+merges the other's commits before it pushes. The paper desk and the REST recorder run with the key
+removed from their environment.
 
 ## During the paper week
 
