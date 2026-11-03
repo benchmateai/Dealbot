@@ -127,3 +127,37 @@ def test_proxy_auth_builds_the_backend_without_a_key(monkeypatch):
         JudgeConfig.from_env({"JUDGE_BACKEND": "typesafe", "DESK_SECRET": SECRET, "JEV_MODEL": "jev-1.13.0", "JUDGE_AUTH": "magic"})
     with pytest.raises(JudgeConfigError, match="TYPESAFE_API_KEY"):
         build_backend(JudgeConfig.from_env({"JUDGE_BACKEND": "typesafe", "DESK_SECRET": SECRET, "JEV_MODEL": "jev-1.13.0"}), {})
+
+
+def test_real_backend_verifies_an_unlisted_pin_by_probing_it():
+    pytest.importorskip("typesafe_sdk")
+    from judge.jev import TypeSafeBackend
+
+    class Models:
+        def __init__(self, names):
+            self.models = [type("M", (), {"name": n})() for n in names]
+
+    class FakeClient:
+        def __init__(self, names, answering):
+            self.names, self.answering, self.probes = names, answering, []
+            self.models = type("ModelsApi", (), {"list": lambda _self: Models(names)})()
+
+        def system_one(self, state, questions, *, model, timeout):
+            self.probes.append(model)
+            return type("R", (), {"model": self.answering})()
+
+        def close(self):
+            pass
+
+    backend = TypeSafeBackend("not-a-real-key", "jev-1.14.0")
+    backend._client = FakeClient(["jev-latest", "jev-preview"], "jev-1.14.0")
+    backend.verify_model()
+    assert backend._client.probes == ["jev-1.14.0"]
+
+    backend._client = FakeClient(["jev-latest", "jev-1.14.0"], "jev-9.9.9")
+    backend.verify_model()  # listed: no probe needed
+    assert backend._client.probes == []
+
+    backend._client = FakeClient(["jev-latest"], "jev-1.13.0")
+    with pytest.raises(ModelNotPinnedError, match="jev-1.13.0"):
+        backend.verify_model()

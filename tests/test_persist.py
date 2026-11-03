@@ -72,3 +72,18 @@ def test_newest_pinned_model_skips_aliases():
     assert newest_pinned(["jev-latest", "jev", "jev-1.13.0", "jev-1.14-20261014", "jev-preview"]) == "jev-1.14-20261014"
     assert newest_pinned(["jev-1.13.0", "jev-1.13.2"]) == "jev-1.13.2"
     assert newest_pinned(["jev-latest", "jev"]) is None and newest_pinned([]) is None
+
+
+def test_choose_pinned_resolves_the_alias_only_when_nothing_versioned_is_listed():
+    from judge.pin_model import choose_pinned
+
+    asked = []
+
+    def resolve(alias):
+        asked.append(alias)
+        return "jev-1.14.0"
+
+    assert choose_pinned(["jev-latest", "jev-1.13.0"], resolve) == "jev-1.13.0" and asked == []
+    assert choose_pinned(["jev-latest", "jev-preview"], resolve) == "jev-1.14.0" and asked == ["jev-latest"]
+    assert choose_pinned(["jev-preview"], resolve) is None  # nothing to resolve without the alias
+    assert choose_pinned(["jev-latest"], lambda alias: "jev-latest") is None  # an alias answering as itself is not a pin

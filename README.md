@@ -50,7 +50,8 @@ python -m desk.run --env-file .env.desk --mode paper
 ```
 
 `DESK_SECRET`: `python -c "import secrets; print(secrets.token_hex(32))"`. `JEV_MODEL`: an exact
-pinned name from `GET /v1/models` (the judge verifies it on start). `jev-latest` is refused by both
+pinned name, from `GET /v1/models` or the name `jev-latest` answers as when the list carries only aliases
+(`python -m judge.pin_model` picks it; the judge verifies it on start). `jev-latest` is refused by both
 processes.
 
 ## How a block works
