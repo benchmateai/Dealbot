@@ -43,7 +43,7 @@ export BLOCK_SECONDS
 export LOG_DIR=logs/data
 
 say() { echo "paper_chunk: $*"; }
-DESK_ENV=(env -u TYPESAFE_API_KEY -u KALSHI_API_KEY_ID -u KALSHI_PRIVATE_KEY)
+DESK_ENV=(env -u TYPESAFE_API_KEY -u KALSHI_API_KEY_ID -u KALSHI_PRIVATE_KEY -u KALSHI_PROD_API_KEY_ID -u KALSHI_PROD_PRIVATE_KEY)
 desk_env() { "${DESK_ENV[@]}" "$@"; }
 retry_push() { for delay in 0 2 4 8 16; do [ "$delay" -gt 0 ] && sleep "$delay"; git push -q -u origin "$RUN_BRANCH" && return 0; done; return 1; }
 
