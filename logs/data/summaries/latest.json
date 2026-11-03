@@ -1,65 +1,69 @@
 {
  "decisions": {
   "enter_long": 1,
-  "enter_short": 3,
-  "exit": 1,
-  "hold": 130
+  "enter_short": 8,
+  "exit": 2,
+  "hold": 216
  },
- "equity_end": 9987.9275,
+ "equity_end": 9983.6749,
  "equity_start": 9992.8495,
- "executed": 5,
+ "executed": 9,
  "feed": {
-  "errors": 16,
-  "polls": 528,
-  "rate_limits": 16
+  "errors": 37,
+  "polls": 888,
+  "rate_limits": 37
  },
  "fills": {
-  "buy": 2,
-  "sell": 3,
-  "settle": 3
+  "buy": 3,
+  "sell": 6,
+  "settle": 5
  },
  "first_ts": 1793694228000,
- "judge_calls": 135,
+ "judge_calls": 227,
  "judge_failures": {
-  "jev_budget": 4
+  "jev_budget": 7
  },
- "last_ts": 1793696916000,
+ "last_ts": 1793698728000,
  "models": {
-  "jev-1.14.0": 135
+  "jev-1.14.0": 227
  },
- "positions_closed": 4,
- "positions_opened": 4,
- "realized_pnl_usd": -3.8813,
+ "positions_closed": 7,
+ "positions_opened": 7,
+ "realized_pnl_usd": -7.904,
  "records": {
-  "answer": 135,
-  "decision": 135,
-  "fill": 8,
-  "heartbeat": 23,
-  "order": 5,
-  "outcome": 655,
-  "position_closed": 4,
-  "position_opened": 4,
-  "question": 135,
-  "rejection": 303,
-  "settlement": 6,
-  "snapshot": 135,
-  "trial": 1
+  "answer": 227,
+  "decision": 227,
+  "fill": 14,
+  "heartbeat": 38,
+  "order": 9,
+  "outcome": 1119,
+  "position_closed": 7,
+  "position_opened": 7,
+  "question": 227,
+  "rejection": 516,
+  "settlement": 10,
+  "snapshot": 227,
+  "trial": 1,
+  "veto": 2
  },
  "rejections": {
-  "below_threshold": 130,
-  "benched": 13,
+  "below_threshold": 216,
+  "benched": 41,
+  "insufficient_data": 2,
   "insufficient_ticks": 12,
-  "jev_budget": 4,
-  "no_contract": 7,
-  "outside_trade_window": 137
+  "jev_budget": 7,
+  "no_contract": 12,
+  "outside_trade_window": 226
  },
  "settlements": {
-  "official": 6,
+  "official": 10,
   "provisional": 0
  },
  "since_ms": 1793694219000,
- "span_minutes": 44.8,
+ "span_minutes": 75.0,
  "stalled": false,
- "until_ms": 1793696926455,
- "vetoes": {}
+ "until_ms": 1793698729273,
+ "vetoes": {
+  "fees_plus_gas": 2
+ }
 }
