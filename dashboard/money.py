@@ -9,7 +9,11 @@ Every row carries a `table` column, so one file feeds the whole page:
            position is "NO at 21c", its stake is what the bet cost, its result won, lost, sold or open
   equity   the equity curve, the last reading in each 10-minute slot
   day      one row per UTC day: change in equity, trades closed, wins, fees
-Numbers come straight from the desk's own log; nothing here trades or decides.
+Numbers come straight from the desk's own log; nothing here trades or decides. Only events from
+`since_ms` on count (by default WEEK_START_MS, the start of the measured week): the bankroll is the
+first equity reading from then, and a position carried in from before shows in equity, not as a bet.
+A fill belongs to its own decision's position when that is a position (the opening fill and the
+settlement), otherwise to the position open on that contract (an exit is its own decision).
 """
 
 from __future__ import annotations
@@ -25,7 +29,11 @@ from logs.writer import read_events
 
 JEV_USD_PER_INPUT_TOKEN = 0.042 / 1_000_000  # TypeSafe's price per input token; output tokens are free
 SLOT_MS = 600_000
-FIRST_JUDGED_MS = 1_793_686_824_000  # 2026-11-03T06:20:24Z, the first decision Jev answered
+# The measured week starts with the first chunk after the fix for the doubled desk (1f1a3f4): from
+# 06:42 to 08:23Z on 2026-11-03 two to four desk processes wrote into one log, so that stretch is
+# kept in the record but left out of the results.
+WEEK_START_MS = 1_793_694_300_000  # 2026-11-03T08:25:00Z
+FILL_GRACE_MS = 60_000  # a fill is stamped when it filled, a few seconds before its decision's record
 WEEK_MS = 7 * 86_400_000
 MARKETS = {"KXETH15M": "ETH 15-min", "KXBTC15M": "BTC 15-min"}
 
@@ -34,11 +42,13 @@ def _day(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
-def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | None = None) -> list[dict]:
+def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | None = None, since_ms: int = WEEK_START_MS) -> list[dict]:
     now = now_ms if now_ms is not None else int(time.time() * 1000)
     trades: OrderedDict[str, dict] = OrderedDict()
-    fills: dict[str, list[dict]] = {}  # by decision id; the opening fill is logged before its position
+    fills: dict[str, list[dict]] = {}  # by position; an opening fill waits here under its own decision id
+    open_on: dict[str, str] = {}  # contract series -> the decision id of the position open on it
     closes: dict[str, dict] = {}
+    first_eq = None
     equity: OrderedDict[int, tuple[int, float]] = OrderedDict()
     day_first: dict[str, float] = {}
     day_last: dict[str, float] = {}
@@ -46,10 +56,11 @@ def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | No
     last_eq = None
     for e in read_events(log_dir):
         kind, ts = e.get("kind"), e.get("ts")
-        if not isinstance(ts, int):
+        if not isinstance(ts, int) or ts < since_ms - (FILL_GRACE_MS if kind == "fill" else 0):
             continue
         if kind == "heartbeat" and isinstance(e.get("equity_usd"), (int, float)):
             eq = float(e["equity_usd"])
+            first_eq = eq if first_eq is None else first_eq
             last_eq = eq
             equity[ts - ts % SLOT_MS] = (ts, eq)
             day = _day(ts)
@@ -71,14 +82,19 @@ def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | No
                 "bet": "YES" if long else "NO", "contracts": abs(qty), "price_cents": round(price * 100, 1), "stake_usd": round(abs(qty) * price, 2),
                 "fees_usd": 0.0, "gross_usd": 0.0, "result": "open", "pnl_usd": None, "closed_ms": None, "official": None,
             }
-        elif kind == "fill" and e.get("decision_id"):
-            fills.setdefault(str(e["decision_id"]), []).append(e)
+            open_on[str(e.get("sym"))] = did
+        elif kind == "fill":
+            did, sym = str(e.get("decision_id") or ""), str(e.get("sym") or "")
+            owner = did if did in trades else open_on.get(sym, did)
+            fills.setdefault(owner, []).append(e)
         elif kind == "settlement" and e.get("decision_id"):
             t = trades.get(str(e["decision_id"]))
             if t is not None:
                 t["official"] = bool(e.get("official"))
         elif kind == "position_closed" and e.get("decision_id"):
             closes[str(e["decision_id"])] = e
+            if open_on.get(str(e.get("sym"))) == str(e["decision_id"]):
+                del open_on[str(e.get("sym"))]
     for did, t in trades.items():
         for f in fills.get(did, []):
             t["fees_usd"] = round(t["fees_usd"] + float(f.get("fee_usd") or 0.0) + float(f.get("gas_usd") or 0.0), 4)
@@ -97,20 +113,21 @@ def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | No
     wins = sum(1 for t in closed if (t["pnl_usd"] or 0) > 0)
     fees = round(sum(t["fees_usd"] for t in trades.values()), 2)
     realized = round(sum(t["pnl_usd"] or 0.0 for t in closed), 2)
-    equity_now = last_eq if last_eq is not None else start_cash
+    start = first_eq if first_eq is not None else start_cash
+    equity_now = last_eq if last_eq is not None else start
     today = _day(now)
     best = max(closed, key=lambda t: t["pnl_usd"], default=None)
     worst = min(closed, key=lambda t: t["pnl_usd"], default=None)
     summary = {
         "table": "summary", "id": "summary",
-        "start_usd": start_cash, "equity_usd": round(equity_now, 2), "net_pnl_usd": round(equity_now - start_cash, 2),
+        "start_usd": round(start, 2), "equity_usd": round(equity_now, 2), "net_pnl_usd": round(equity_now - start, 2),
         "realized_pnl_usd": realized, "today_pnl_usd": round(day_last.get(today, equity_now) - day_first.get(today, equity_now), 2),
         "trades_closed": len(closed), "trades_open": len(trades) - len(closed), "wins": wins, "losses": len(closed) - wins,
         "win_rate": round(wins / len(closed), 4) if closed else None, "fees_usd": fees,
         "jev_calls": jev_calls, "jev_cost_usd": round(jev_tokens * JEV_USD_PER_INPUT_TOKEN, 4),
         "best_pnl_usd": None if best is None else best["pnl_usd"], "worst_pnl_usd": None if worst is None else worst["pnl_usd"],
-        "updated_ms": now, "week_started_ms": FIRST_JUDGED_MS, "week_ends_ms": FIRST_JUDGED_MS + WEEK_MS,
-        "week_day": max(1, min(7, (now - FIRST_JUDGED_MS) // 86_400_000 + 1)),
+        "updated_ms": now, "week_started_ms": since_ms, "week_ends_ms": since_ms + WEEK_MS,
+        "week_day": max(1, min(7, (now - since_ms) // 86_400_000 + 1)),
     }
     rows: list[dict] = [summary]
     for t in sorted(trades.values(), key=lambda t: t["opened_ms"], reverse=True):
@@ -131,9 +148,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Write the phone dashboard's data file")
     parser.add_argument("--log-dir", default="logs/data")
     parser.add_argument("--out", default="/tmp/dealbot-dashboard/money.json")
-    parser.add_argument("--start-cash", type=float, default=10_000.0)
+    parser.add_argument("--start-cash", type=float, default=10_000.0, help="bankroll when the log has no equity reading yet")
+    parser.add_argument("--since-ms", type=int, default=WEEK_START_MS, help="start of the measured window (default: the measured week)")
     args = parser.parse_args(argv)
-    rows = build(args.log_dir, start_cash=args.start_cash)
+    rows = build(args.log_dir, start_cash=args.start_cash, since_ms=args.since_ms)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(rows, separators=(",", ":")))

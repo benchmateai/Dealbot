@@ -26,7 +26,7 @@ def test_trades_read_like_kalshi_bets_with_fees_netted(tmp_path):
         {"kind": "position_opened", "ts": T0 + 700_001, "decision_id": d2, "sym": "KXBTC15M", "position": {"qty": 10.0, "entry_price": 0.40}},
         {"kind": "heartbeat", "ts": T0 + 720_000, "equity_usd": 9997.51},
     ])
-    rows = build(tmp_path, now_ms=T0 + 800_000)
+    rows = build(tmp_path, now_ms=T0 + 800_000, since_ms=T0)
     summary = rows[0]
     trades = [r for r in rows if r["table"] == "trade"]
     assert [t["id"] for t in trades] == [d2, d1], "newest first"
@@ -38,3 +38,28 @@ def test_trades_read_like_kalshi_bets_with_fees_netted(tmp_path):
     assert summary["realized_pnl_usd"] == -2.22 and summary["fees_usd"] == 0.29 and summary["net_pnl_usd"] == -2.49
     assert summary["jev_calls"] == 1 and summary["jev_cost_usd"] == round(1500 * 0.042 / 1e6, 4)
     assert [r["table"] for r in rows].count("equity") == 2 and [r for r in rows if r["table"] == "day"][0]["pnl_usd"] == -2.49
+
+
+def test_an_exit_fill_counts_for_the_position_it_closes_and_the_window_starts_clean(tmp_path):
+    carried, bet = "kalshi-900-KXETH15M", "kalshi-950-KXETH15M"
+    write(tmp_path, [
+        # before the window: a position the week inherits (it shows in equity, not as a bet)
+        {"kind": "heartbeat", "ts": T0 - 60_000, "equity_usd": 9_990.0},
+        {"kind": "fill", "ts": T0 - 50_000, "decision_id": carried, "sym": "KXETH15M", "side": "buy", "qty": 10, "fee_usd": 0.1, "realized_pnl_usd": 0.0},
+        {"kind": "position_opened", "ts": T0 - 50_000, "decision_id": carried, "sym": "KXETH15M", "position": {"qty": 10.0, "entry_price": 0.5}},
+        {"kind": "heartbeat", "ts": T0, "equity_usd": 9_994.0},
+        {"kind": "fill", "ts": T0 + 1_000, "decision_id": "kalshi-901-KXETH15M", "sym": "KXETH15M", "side": "sell", "qty": 10, "fee_usd": 0.1, "realized_pnl_usd": 2.0},
+        {"kind": "position_closed", "ts": T0 + 1_000, "decision_id": carried, "sym": "KXETH15M", "settled": False},
+        # in the window: short YES at 96.8c (a NO bet at 3.2c), bought back at 20c by a separate exit decision
+        {"kind": "fill", "ts": T0 + 2_000, "decision_id": bet, "sym": "KXETH15M", "side": "sell", "qty": 10, "price": 0.968, "fee_usd": 0.03, "realized_pnl_usd": 0.0},
+        {"kind": "position_opened", "ts": T0 + 2_000, "decision_id": bet, "sym": "KXETH15M", "position": {"qty": -10.0, "entry_price": 0.968}},
+        {"kind": "fill", "ts": T0 + 400_000, "decision_id": "kalshi-990-KXETH15M", "sym": "KXETH15M", "side": "buy", "qty": 10, "price": 0.20, "fee_usd": 0.12, "realized_pnl_usd": 7.68},
+        {"kind": "position_closed", "ts": T0 + 400_000, "decision_id": bet, "sym": "KXETH15M", "settled": False},
+        {"kind": "heartbeat", "ts": T0 + 400_000, "equity_usd": 10_003.43},
+    ])
+    rows = build(tmp_path, now_ms=T0 + 500_000, since_ms=T0)
+    summary, trades = rows[0], [r for r in rows if r["table"] == "trade"]
+    assert [t["id"] for t in trades] == [bet]
+    sold = trades[0]
+    assert (sold["bet"], sold["price_cents"], sold["result"], sold["fees_usd"], sold["pnl_usd"]) == ("NO", 3.2, "sold", 0.15, 7.53)
+    assert summary["start_usd"] == 9_994.0 and summary["net_pnl_usd"] == 9.43 and summary["wins"] == 1 and summary["win_rate"] == 1.0
