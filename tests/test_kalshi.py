@@ -213,6 +213,14 @@ def test_binary_pick_uses_the_market_price_plus_cost_as_the_threshold():
     assert reversed_long.action == "exit" and [s.action for s in reversed_long.scores] == ["exit", "edge_reversed"]
 
 
+def test_kalshi_defaults_are_contract_sized(tmp_path):
+    env = {"DESK_MODE": "paper", "DESK_BOT": "kalshi", "FEED": "kalshi", "JUDGE_URL": "stub://local", "LOG_DIR": str(tmp_path)}
+    cfg = DeskConfig.from_env(env)
+    assert cfg.order_qty == 10 and cfg.limits.max_position_units >= cfg.order_qty, "a default Kalshi order must pass the position limit"
+    spot = DeskConfig.from_env({**env, "DESK_BOT": "gambler", "FEED": "synthetic"})
+    assert spot.order_qty == 0.2 and spot.limits.max_position_units == 1.0
+
+
 def test_kalshi_config_pairs_bot_and_feed(tmp_path):
     with pytest.raises(ConfigError, match="go together"):
         DeskConfig.from_env({"DESK_BOT": "kalshi", "FEED": "synthetic", "LOG_DIR": str(tmp_path)})
