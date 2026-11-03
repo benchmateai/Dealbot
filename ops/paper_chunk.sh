@@ -10,7 +10,9 @@
 #   3. runs the pre-flight (python -m desk.preflight); a failure stops the chunk with exit 4
 #   4. runs the desk until the chunk deadline, checking the base branch every WATCH_SECONDS: when a
 #      fix lands, the desk stops after its current block, the run merges the fix, passes the
-#      pre-flight again and carries on (so a pushed fix reaches the run within minutes)
+#      pre-flight again and carries on (so a pushed fix reaches the run within minutes). A base
+#      change that only touches docs, ops scripts, tests, reports or dashboards does not stop the
+#      desk; the run picks it up at the next restart or chunk
 #   5. after every desk segment, and every PUBLISH_SECONDS while the desk runs (first after 15
 #      minutes): a summary (reports.chunk_summary) and a commit of logs, checkpoint, trials, reports
 #      and summaries to the run branch, pushed, so health checks and the dashboard never wait long
@@ -66,9 +68,20 @@ sync_run() {
   fi
   git merge -q --no-edit "origin/$BASE_BRANCH"
   BASE_SHA=$(git rev-parse "origin/$BASE_BRANCH")
+  SEEN_SHA=$BASE_SHA
   mkdir -p "$LOG_DIR"
 }
 sync_run
+
+# True when the change from the merged base ($1) to a newer base ($2) can alter what the running desk
+# does: anything but docs, ops scripts, tests, reports and dashboards (those run fresh at every
+# publish or chunk; no desk module imports them). An unreadable diff counts as a change.
+desk_code_changed() {
+  local files
+  files=$(git diff --name-only "$1" "$2" 2>/dev/null) || return 0
+  [ -n "$files" ] || return 1
+  printf '%s\n' "$files" | grep -qvE '^(ops/|tests/|dashboard/|reports/|docs/)|\.md$'
+}
 
 # ---- 2. python and the judge -----------------------------------------------------------------
 NEED="cryptography>=42"
@@ -159,10 +172,15 @@ while :; do
     if [ $(( $(date +%s) - LAST_WATCH )) -ge "$WATCH_SECONDS" ]; then
       LAST_WATCH=$(date +%s)
       REMOTE=$(git ls-remote origin "refs/heads/$BASE_BRANCH" 2>/dev/null | cut -f1)
-      if [ -n "$REMOTE" ] && [ "$REMOTE" != "$BASE_SHA" ] && [ -z "$RESTART" ]; then
-        say "base moved to ${REMOTE:0:7}; stopping the desk after its current block to pick it up"
-        RESTART=1
-        kill -TERM "$DESK_PID" 2>/dev/null || true
+      if [ -n "$REMOTE" ] && [ "$REMOTE" != "$SEEN_SHA" ] && [ -z "$RESTART" ]; then
+        SEEN_SHA=$REMOTE
+        if git fetch -q origin "$BASE_BRANCH" 2>/dev/null && ! desk_code_changed "$BASE_SHA" "$REMOTE"; then
+          say "base moved to ${REMOTE:0:7} (docs, ops, tests, reports or dashboards only); the desk keeps running"
+        else
+          say "base moved to ${REMOTE:0:7}; stopping the desk after its current block to pick it up"
+          RESTART=1
+          kill -TERM "$DESK_PID" 2>/dev/null || true
+        fi
       fi
     fi
   done
