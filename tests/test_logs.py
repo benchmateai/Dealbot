@@ -46,3 +46,18 @@ def test_writer_appends_jsonl_per_day_with_redaction_and_clean_floats(tmp_path):
     assert [e["blk"] for e in events] == [1, 2]
     assert [e["blk"] for e in read_events(tmp_path, date="2023-11-15")] == [2]
     assert list(read_events(tmp_path, kinds=("veto",))) == []
+
+
+def test_a_copy_taken_mid_write_reads_up_to_the_last_complete_line(tmp_path):
+    import json
+
+    import pytest
+
+    from logs.writer import read_events
+
+    path = tmp_path / "events-2026-11-03.jsonl"
+    path.write_text(json.dumps({"kind": "heartbeat", "ts": 1}) + "\n" + '{"kind": "heartbe')
+    assert [e["ts"] for e in read_events(tmp_path)] == [1]
+    path.write_text('{"kind": "heartbe\n' + json.dumps({"kind": "heartbeat", "ts": 2}) + "\n")
+    with pytest.raises(json.JSONDecodeError):
+        list(read_events(tmp_path))  # damage anywhere but the end is still an error

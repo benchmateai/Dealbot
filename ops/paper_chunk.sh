@@ -11,8 +11,9 @@
 #   4. runs the desk until the chunk deadline, checking the base branch every WATCH_SECONDS: when a
 #      fix lands, the desk stops after its current block, the run merges the fix, passes the
 #      pre-flight again and carries on (so a pushed fix reaches the run within minutes)
-#   5. after every desk segment: a chunk summary (reports.chunk_summary) and a commit of logs,
-#      checkpoint, trials, reports and summaries to the run branch, pushed
+#   5. after every desk segment, and every PUBLISH_SECONDS while the desk runs (first after 15
+#      minutes): a summary (reports.chunk_summary) and a commit of logs, checkpoint, trials, reports
+#      and summaries to the run branch, pushed, so health checks and the dashboard never wait long
 #   6. at the end: the daily report and the dashboard snapshot in DASHBOARD_OUT
 # The desk process never sees TYPESAFE_API_KEY or any Kalshi credential.
 #
@@ -30,6 +31,8 @@ JUDGE_BACKEND=${JUDGE_BACKEND:-typesafe}      # typesafe | stub | demo (demo and
 BLOCK_SECONDS=${BLOCK_SECONDS:-12}
 if [ -n "${CHUNK_BLOCKS:-}" ]; then CHUNK_SECONDS=$(( CHUNK_BLOCKS * BLOCK_SECONDS )); else CHUNK_SECONDS=$(( ${CHUNK_MINUTES:-110} * 60 )); fi
 WATCH_SECONDS=${WATCH_SECONDS:-180}
+PUBLISH_SECONDS=${PUBLISH_SECONDS:-1800}
+FIRST_PUBLISH_SECONDS=${FIRST_PUBLISH_SECONDS:-900}
 DASHBOARD_OUT=${DASHBOARD_OUT:-/tmp/dealbot-dashboard/data.json}
 export DESK_MODE=${DESK_MODE:-paper}
 export DESK_BOT=${DESK_BOT:-gambler}
@@ -146,8 +149,13 @@ while :; do
   DESK_PID=$!
   RESTART=""
   LAST_WATCH=$(date +%s)
+  NEXT_PUBLISH=$(( $(date +%s) + FIRST_PUBLISH_SECONDS ))
   while kill -0 "$DESK_PID" 2>/dev/null; do
     sleep 5
+    if [ "$(date +%s)" -ge "$NEXT_PUBLISH" ] && [ -z "$RESTART" ]; then
+      NEXT_PUBLISH=$(( $(date +%s) + PUBLISH_SECONDS ))
+      publish "$SEGMENT_MS"   # the desk keeps running; a line it is writing completes in the next commit
+    fi
     if [ $(( $(date +%s) - LAST_WATCH )) -ge "$WATCH_SECONDS" ]; then
       LAST_WATCH=$(date +%s)
       REMOTE=$(git ls-remote origin "refs/heads/$BASE_BRANCH" 2>/dev/null | cut -f1)
