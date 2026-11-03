@@ -160,7 +160,8 @@ class DeskConfig:
         gas_usd = _float(env, "GAS_USD", "0.05")
         try:
             limits = RiskLimits(
-                max_position_units=_float(env, "MAX_POSITION_UNITS", "1.0"),
+                # one order's worth: 10 contracts on Kalshi, one unit of the spot product otherwise
+                max_position_units=_float(env, "MAX_POSITION_UNITS", "10" if binary else "1.0"),
                 max_notional_usd=_float(env, "MAX_NOTIONAL_USD", "5000"),
                 daily_loss_limit_usd=_float(env, "DAILY_LOSS_LIMIT_USD", "100"),
                 max_leverage=_float(env, "MAX_LEVERAGE", "1.0"),
