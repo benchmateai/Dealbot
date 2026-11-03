@@ -34,7 +34,7 @@ Each teammate does one job on a schedule and hands everything else up. The deter
 | Dealbot analyst (daily) | `trig_012LJKTfeFq9HcsRRwTToX1c` | 12:41Z | the analyst |
 | Dealbot morning report | `trig_01BCqah4duYaj4kiukYhoD6J` | 06:31 Arizona (13:31Z) | the coordinator |
 | Dealbot supervisor check | `trig_01WRrVejPmbJuufYScvmqRsF` | 01:06, 07:06, 19:06Z | the coordinator |
-| Dealbot escalation to the coordinator | `trig_011Fb7LfMudmP3ipB3cb1Uq5` | when a teammate fires it | the coordinator |
+| Dealbot escalation from <role> | one-shot, created by the teammate | two minutes after it is created | the coordinator |
 | Paper run: stop after one week | `trig_01GZynojVUiE1qCcTVikWBML` | 2026-11-10T08:25Z | the coordinator |
 | Paper run: final weekly report and verdict | `trig_0185uWBZUeyYdDopGG326NDd` | 2026-11-10T08:55Z | the coordinator |
 
@@ -53,8 +53,13 @@ Each teammate does one job on a schedule and hands everything else up. The deter
 
 ## Escalation
 
-Any teammate escalates with `fire_trigger` on `trig_011Fb7LfMudmP3ipB3cb1Uq5` and the text
-`"<role>: <what is wrong>"`; that wakes the coordinator, who verifies before acting.
+Any teammate escalates by scheduling a one-shot task into the coordinator's session:
+`create_trigger` with name `Dealbot escalation from <role>`, `run_once_at` two minutes ahead (UTC),
+`persistent_session_id` `session_01C4NeDS3CKGZfUNrC7ArPuL`, and the problem as the prompt. It arrives
+in the coordinator's session like any scheduled task, and the coordinator verifies before acting.
+Never `fire_trigger`: a manual fire starts a fresh session with no repository (on 2026-11-03 one of
+those pushed a needless notification to the owner's phone), so the old poke-only task
+`trig_011Fb7LfMudmP3ipB3cb1Uq5` is disabled.
 
 - Runner: after two failed cycles in a row (pre-flight exit 4 twice, or any other failure twice).
 - Watchdog: when the health line is ALERT (stale pushes, a desk fault, no Jev calls for two hours,
