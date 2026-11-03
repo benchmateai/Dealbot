@@ -285,3 +285,41 @@ def test_market_reads_are_never_signed_and_the_paper_feed_carries_no_credentials
     monkeypatch.delenv("KALSHI_PRIVATE_KEY", raising=False)
     feed = make_feed("kalshi", ("KXETH15M",), start_ms=0, kalshi={"underlying": {"KXETH15M": "ETH-USD"}})
     assert feed._client.authenticated is False
+
+
+def test_a_429_pauses_all_polling_and_backs_off_until_kalshi_answers_again():
+    from kalshi.api import KalshiApiError
+
+    clock = {"now": T0 + 60_000}
+    feed, fake, _ = _kalshi_feed(clock)
+    feed.poll_once()
+    assert fake.calls and feed.rate_limits == 0
+    calls_before = len(fake.calls)
+
+    def limited(ticker, *, depth=1):
+        fake.calls.append(("orderbook", ticker))
+        raise KalshiApiError("HTTP 429 from Kalshi: too many requests", status=429, retry_after_s=None)
+
+    fake.orderbook = limited
+    assert feed.poll_once() == {"KXETH15M": None}
+    assert feed.rate_limits == 1 and len(fake.calls) == calls_before + 1
+    clock["now"] += 1_000  # inside the 2 s pause: no call at all
+    feed.poll_once()
+    assert len(fake.calls) == calls_before + 1
+    clock["now"] += 1_500  # pause over: one more try, still limited, pause doubles to 4 s
+    feed.poll_once()
+    assert feed.rate_limits == 2 and len(fake.calls) == calls_before + 2
+    clock["now"] += 3_000
+    feed.poll_once()
+    assert len(fake.calls) == calls_before + 2
+    clock["now"] += 1_500
+    fake.orderbook = lambda ticker, *, depth=1: (fake.calls.append(("orderbook", ticker)) or fake.book)
+    assert feed.poll_once()["KXETH15M"] is not None and feed._backoff_s == 0.0
+
+    def told_to_wait(ticker, *, depth=1):
+        raise KalshiApiError("HTTP 429", status=429, retry_after_s=20.0)
+
+    fake.orderbook = told_to_wait
+    clock["now"] += 5_000
+    feed.poll_once()
+    assert feed._backoff_until_ms == clock["now"] + 20_000  # Retry-After wins over the 2 s floor
