@@ -136,3 +136,62 @@ def test_control_holds_its_weight_at_zero_and_scores_against_the_market(tmp_path
     s = report["summary"]
     assert s["resolved_forecasts"] == 20 and s["weight"] == 0.0 and not s["weight_active"] and s["trades"] == 0
     assert set(s["scores"]) == {"420", "300", "180", "60"} and s["scores"]["60"]["n"] == 5
+
+
+def _book(ts, ticker, series, close_ms, yes, no, strike=None, **extra):
+    return ("book", {"ticker": ticker, "series": series, "close_ms": close_ms, "strike": strike, "strike_type": "greater_or_equal", "yes": yes, "no": no, **extra}, ts)
+
+
+def _write(tmp_path, items):
+    store = LabStore(tmp_path)
+    for kind, rec, ts in sorted(items, key=lambda x: x[2]):
+        store.write(kind, rec, ts_ms=ts)
+    store.close()
+
+
+def test_b_buys_the_side_the_fixed_average_has_decided_and_scores_the_upset(tmp_path):
+    from lab.strategies import b_late
+
+    close = T0 + 900_000
+    items = []
+    for i in range(400):  # a steady index well above the strike, one print a second
+        items.append(("index", {"symbol": "BRTI", "value": 77600.0 + (i % 3)}, close - 400_000 + i * 1000))
+    # 30 seconds out, the market still offers YES at 90 cents although the average is nearly fixed above
+    items.append(_book(close - 30_000, "BTC-A", "KXBTC15M", close, yes=[[0.88, 50.0]], no=[[0.10, 40.0]], strike=77500.0))
+    items.append(("settled", {"series": "KXBTC15M", "event": "E", "rows": [["BTC-A", "yes", 77601.0]]}, close + 60_000))
+    _write(tmp_path, items)
+    rep = b_late.evaluate(tmp_path, registered_ms=0)
+    t = rep["trades"][0]
+    assert (t["side"], t["price"], t["qty"], t["won"]) == ("YES", 0.9, 40.0, True)
+    assert rep["summary"]["pnl_usd"] == round(40 * 0.1 - taker_fee_usd(40, 0.9), 2)
+
+
+def test_c_quotes_both_sides_fills_only_from_trades_and_respects_its_cap(tmp_path):
+    from lab.strategies import c_crypto_mm
+
+    close = T0 + 900_000
+    items = [
+        _book(T0 + 1000, "ETH-A", "KXETH15M", close, yes=[[0.50, 100.0]], no=[[0.48, 100.0]]),
+        ("trade", {"ticker": "ETH-A", "yes_price": 0.50, "count": 130, "taker_side": "no", "trade_ts": T0 + 2000}, T0 + 2000),  # 100 ahead of our YES bid, then us
+        ("trade", {"ticker": "ETH-A", "yes_price": 0.53, "count": 5, "taker_side": "yes", "trade_ts": T0 + 3000}, T0 + 3000),   # through our NO bid (YES offer at 52)
+        ("settled", {"series": "KXETH15M", "event": "E", "rows": [["ETH-A", "yes", 1.0]]}, close + 60_000),
+    ]
+    _write(tmp_path, items)
+    s = c_crypto_mm.evaluate(tmp_path, registered_ms=0)["summary"]
+    assert s["contracts_filled"] == 15  # 10 on the YES bid (after the queue of 100), 5 on the NO bid
+    assert s["pnl_usd_upper_bound"] == round(10 * (1.0 - 0.50) + 5 * (0.0 - 0.48), 2)
+
+
+def test_f_rests_no_bids_only_on_long_shots_and_caps_each_event(tmp_path):
+    from lab.strategies import f_fade
+
+    items = []
+    for k in range(5):  # five long-shot strikes on one event: the cap of 30 allows three orders of 10
+        items.append(_book(T0 + k, f"EV-{k}", "KXSHOW", None, yes=[[0.02, 50.0]], no=[[0.95, 20.0]], set="F", event="EV"))
+    items.append(_book(T0 + 10, "FAV", "KXSHOW", None, yes=[[0.60, 50.0]], no=[[0.38, 20.0]], set="F", event="OTHER"))  # not a long shot
+    items.append(("trade", {"ticker": "EV-0", "yes_price": 0.06, "count": 12, "taker_side": "yes", "trade_ts": T0 + 100}, T0 + 100))  # through our 5-cent offer
+    items.append(("settled", {"series": "KXSHOW", "event": "EV", "rows": [["EV-0", "no", None]]}, T0 + 200))
+    _write(tmp_path, items)
+    s = f_fade.evaluate(tmp_path, registered_ms=0)["summary"]
+    assert s["markets"] == 3 and s["contracts_filled"] == 10 and s["filled_by_trade_through"] == 10
+    assert s["pnl_usd_upper_bound"] == round(10 * (1.0 - 0.95), 2) and s["upset_contracts"] == 0
