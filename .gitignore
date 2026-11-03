@@ -16,3 +16,5 @@ dist/
 # runtime data
 logs/data/
 reports/out/
+lab/data/
+lab/summaries/
