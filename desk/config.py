@@ -165,8 +165,11 @@ class DeskConfig:
                 max_notional_usd=_float(env, "MAX_NOTIONAL_USD", "5000"),
                 daily_loss_limit_usd=_float(env, "DAILY_LOSS_LIMIT_USD", "100"),
                 max_leverage=_float(env, "MAX_LEVERAGE", "1.0"),
-                range_guard_bps=_float(env, "RANGE_GUARD_BPS", "50"),
-                range_guard_ref_bps=_float(env, "RANGE_GUARD_REF_BPS", "300"),
+                range_guard_bps=_float(env, "RANGE_GUARD_BPS", "300" if binary else "50"),  # binary: 3 cents of the payout
+                # A binary's mid legitimately moves tens of percent in the minutes before expiry, so the
+                # "suspect data" check against the trailing median is effectively off for Kalshi; tick sanity
+                # and the spread cap still reject broken quotes.
+                range_guard_ref_bps=_float(env, "RANGE_GUARD_REF_BPS", "100000" if binary else "300"),
                 fee_bps=fee_bps,
                 maker_fee_bps=maker_fee_bps,
                 gas_usd=gas_usd,
@@ -215,7 +218,7 @@ class DeskConfig:
             max_jev_candidates=_int(env, "MAX_JEV_CANDIDATES", "1"),
             ret_windows_blocks=windows,  # type: ignore[arg-type]
             rv_window_blocks=_int(env, "RV_WINDOW_BLOCKS", "20"),
-            max_spread_bps=_float(env, "MAX_SPREAD_BPS", "1500" if binary else "20"),
+            max_spread_bps=_float(env, "MAX_SPREAD_BPS", "500" if binary else "20"),  # binary: 5 cents of the $1 payout
             rv_min_bps=_float(env, "RV_MIN_BPS", "0" if binary else "1"),
             rv_max_bps=_float(env, "RV_MAX_BPS", "20000" if binary else "500"),
             min_ticks=_int(env, "MIN_TICKS", "30"),

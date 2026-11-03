@@ -50,6 +50,12 @@ class _SeriesState:
         self.last_ts = -1
 
 
+def pick_current(markets: list[ContractInfo], now_ms: int) -> ContractInfo | None:
+    """The live contract that expires first: the one being traded now."""
+    live = [m for m in markets if m.close_ts is not None and m.close_ts > now_ms and m.status not in ("settled", "finalized", "closed")]
+    return min(live, key=lambda m: m.close_ts) if live else None
+
+
 class KalshiFeed:
     def __init__(
         self,
@@ -99,8 +105,7 @@ class KalshiFeed:
     # ---- contract selection and settlement ---------------------------------------------------
 
     def _pick_current(self, markets: list[ContractInfo], now_ms: int) -> ContractInfo | None:
-        live = [m for m in markets if m.close_ts is not None and m.close_ts > now_ms and m.status not in ("settled", "finalized", "closed")]
-        return min(live, key=lambda m: m.close_ts) if live else None
+        return pick_current(markets, now_ms)
 
     # ---- rate limiting ---------------------------------------------------------------------
     # Kalshi answers 429 when the public endpoints are polled too hard (the egress address may be

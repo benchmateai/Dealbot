@@ -33,19 +33,23 @@ from trials.fingerprint import strategy_spec
 from trials.registry import TrialRegistry
 
 
-def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None) -> tuple[Desk, LogWriter]:
-    """Wire every component. `judge` can be injected (tests); by default it comes from JUDGE_URL."""
+def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None, feed=None, trial_id: str | None = None) -> tuple[Desk, LogWriter]:
+    """Wire every component. `judge` and `feed` can be injected (tests, the pre-flight); by default they
+    come from JUDGE_URL and FEED. With `trial_id` given, nothing is written to the trial registry."""
     assert_desk_cannot_see_jev_key(os.environ)
     log = LogWriter(cfg.log_dir, Redactor([cfg.desk_secret]))
     kalshi_opts = {"underlying": cfg.kalshi_underlying, "base_url": cfg.kalshi_base_url, "block_ms": cfg.block_ms, "trade_window_s": cfg.kalshi_trade_window_s, "min_time_left_s": cfg.kalshi_min_time_left_s, "rv_window_blocks": cfg.rv_window_blocks}
-    feed = make_feed(cfg.feed, cfg.symbols, start_ms=start_ms - cfg.warmup_blocks * cfg.block_ms, replay_path=cfg.replay_path, seed=cfg.synthetic_seed, tick_ms=cfg.synthetic_tick_ms, base_url=cfg.feed_base_url, poll_ms=cfg.feed_poll_ms, kalshi=kalshi_opts)
-    if hasattr(feed, "start"):
-        feed.start()
+    if feed is None:
+        feed = make_feed(cfg.feed, cfg.symbols, start_ms=start_ms - cfg.warmup_blocks * cfg.block_ms, replay_path=cfg.replay_path, seed=cfg.synthetic_seed, tick_ms=cfg.synthetic_tick_ms, base_url=cfg.feed_base_url, poll_ms=cfg.feed_poll_ms, kalshi=kalshi_opts)
+        if hasattr(feed, "start"):
+            feed.start()
     battery = load_battery(cfg.bot)
-    registry = TrialRegistry(cfg.trials_file)
-    spec = strategy_spec(cfg, battery)
-    trial = registry.register_run(spec, mode=cfg.mode, ts_ms=start_ms)
-    log.write("trial", {"trial_id": trial.trial_id, "spec": spec, "run": trial.runs, "mode": cfg.mode, "registered_trials": registry.count()}, ts_ms=start_ms)
+    if trial_id is None:
+        registry = TrialRegistry(cfg.trials_file)
+        spec = strategy_spec(cfg, battery)
+        trial = registry.register_run(spec, mode=cfg.mode, ts_ms=start_ms)
+        log.write("trial", {"trial_id": trial.trial_id, "spec": spec, "run": trial.runs, "mode": cfg.mode, "registered_trials": registry.count()}, ts_ms=start_ms)
+        trial_id = trial.trial_id
     gate = RiskGate(cfg.limits)
     if cfg.fee_model == "kalshi":
         broker = make_broker("paper", gate, binary=True, taker_rate=cfg.kalshi_taker_rate, maker_rate=cfg.kalshi_maker_rate, cash_usd=cfg.paper_cash_usd, slippage_bps=cfg.paper_slippage_bps)
@@ -64,7 +68,7 @@ def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None) -> tuple[Desk, Log
         resolver=OutcomeResolver(log, block_ms=cfg.block_ms),
         executor=make_executor(cfg.mode, broker, log),
         log=log,
-        trial_id=trial.trial_id,
+        trial_id=trial_id,
     )
     desk.warmup(start_ms)
     return desk, log

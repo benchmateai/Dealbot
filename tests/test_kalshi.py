@@ -207,18 +207,24 @@ def test_binary_pick_uses_the_market_price_plus_cost_as_the_threshold():
     assert short.action == "enter_short" and short.prob == pytest.approx(0.95)
     assert final_pick_binary("kalshi", "entry", _answers(0.95), snap, {**contract, "model_p_yes": None}, costs).prob == pytest.approx(0.95)
     hold = final_pick_binary("kalshi", "manage", _answers(0.95), snap, contract, costs, position_sign=1)
-    assert hold.is_hold and hold.threshold == pytest.approx(0.25)
-    assert final_pick_binary("kalshi", "manage", _answers(0.95, exit_now=0.9), snap, contract, costs, position_sign=1).action == "exit"
+    assert hold.is_hold and hold.threshold == pytest.approx(1 - (0.60 - min_edge(0.60, 0.02, costs)))
+    # A long entered at p 0.70 has a 0.30 chance of losing; that alone must not sell it (it did under a fixed 0.25 line).
+    still_good = final_pick_binary("kalshi", "manage", _answers(0.70, exit_now=0.9), snap, {**contract, "model_p_yes": 0.70}, costs, position_sign=1)
+    assert still_good.is_hold and still_good.prob == pytest.approx(0.30)
+    assert final_pick_binary("kalshi", "manage", _answers(0.95, exit_now=0.9), snap, contract, costs, position_sign=1).is_hold  # logged, not deciding
     reversed_long = final_pick_binary("kalshi", "manage", _answers(0.10), snap, {**contract, "model_p_yes": 0.10}, costs, position_sign=1)
-    assert reversed_long.action == "exit" and [s.action for s in reversed_long.scores] == ["exit", "edge_reversed"]
+    assert reversed_long.action == "exit" and reversed_long.prob == pytest.approx(0.90) and len(reversed_long.scores) == 2
+    short_exit = final_pick_binary("kalshi", "manage", _answers(0.95), snap, contract, costs, position_sign=-1)
+    assert short_exit.action == "exit" and short_exit.prob == pytest.approx(0.97)
 
 
 def test_kalshi_defaults_are_contract_sized(tmp_path):
     env = {"DESK_MODE": "paper", "DESK_BOT": "kalshi", "FEED": "kalshi", "JUDGE_URL": "stub://local", "LOG_DIR": str(tmp_path)}
     cfg = DeskConfig.from_env(env)
     assert cfg.order_qty == 10 and cfg.limits.max_position_units >= cfg.order_qty, "a default Kalshi order must pass the position limit"
+    assert cfg.limits.range_guard_ref_bps >= 10_000, "a binary that runs from 0.10 to 0.90 before expiry is not suspect data"
     spot = DeskConfig.from_env({**env, "DESK_BOT": "gambler", "FEED": "synthetic"})
-    assert spot.order_qty == 0.2 and spot.limits.max_position_units == 1.0
+    assert spot.order_qty == 0.2 and spot.limits.max_position_units == 1.0 and spot.limits.range_guard_ref_bps == 300
 
 
 def test_kalshi_config_pairs_bot_and_feed(tmp_path):
@@ -226,7 +232,7 @@ def test_kalshi_config_pairs_bot_and_feed(tmp_path):
         DeskConfig.from_env({"DESK_BOT": "kalshi", "FEED": "synthetic", "LOG_DIR": str(tmp_path)})
     cfg = DeskConfig.from_env({"DESK_BOT": "kalshi", "FEED": "kalshi", "LOG_DIR": str(tmp_path)})
     assert cfg.fee_model == "kalshi" and cfg.limits.fee_model == "kalshi" and cfg.symbols == ("KXETH15M",) and cfg.kalshi_underlying["KXETH15M"] == "ETH-USD"
-    assert cfg.order_qty == 10 and cfg.rv_min_bps == 0 and cfg.max_spread_bps == 1500
+    assert cfg.order_qty == 10 and cfg.rv_min_bps == 0 and cfg.max_spread_bps == 500  # 5 cents of the $1 payout
     assert cfg.limits.round_trip_cost_usd(10, 0.62, "market") == pytest.approx(0.34)
     with pytest.raises(ConfigError, match="no product"):
         DeskConfig.from_env({"DESK_BOT": "kalshi", "FEED": "kalshi", "DESK_SYMBOLS": "KXSOL15M", "LOG_DIR": str(tmp_path)})
@@ -340,3 +346,33 @@ def test_a_429_pauses_all_polling_and_backs_off_until_kalshi_answers_again():
     clock["now"] += 5_000
     feed.poll_once()
     assert feed._backoff_until_ms == clock["now"] + 20_000  # Retry-After wins over the 2 s floor
+
+
+def test_binary_spread_and_range_are_measured_in_points_of_the_payout():
+    from filter.funnel import Candidate, FunnelContext
+    from filter.stages import FreeCut
+    from risk.limits import RiskLimits
+    from state.snapshot import Snapshot
+
+    cut = FreeCut(max_spread_bps=500, rv_min_bps=0, rv_max_bps=20000, min_ticks=1, max_stale_ms=60_000, spread_basis="payout")
+    fields = {f: None for f in Snapshot.__dataclass_fields__}
+
+    def candidate(bid: float, ask: float) -> Candidate:
+        mid = (bid + ask) / 2
+        snap = Snapshot(**{**fields, "sym": "KXETH15M", "as_of": T0, "mid": mid, "spr_bps": (ask - bid) / mid * 1e4, "n": 50, "rv_bps": 10.0})
+        return Candidate(sym="KXETH15M", snapshot=snap, state={}, reference_mid=None, cost_bps=0.0)
+
+    ctx = FunnelContext(block=1, now_ms=T0, deadline_ms=T0 + 10_000, bot="kalshi", phase="entry", mode="paper", equity_usd=10_000.0, day_pnl_usd=0.0)
+    kept, rejected = cut.run([candidate(0.04, 0.06), candidate(0.94, 0.96), candidate(0.40, 0.48)], ctx)
+    assert [c.snapshot.mid for c in kept] == [pytest.approx(0.05), pytest.approx(0.95)], "2 cents is 2 cents at 5c and at 95c"
+    assert [r.check for r in rejected] == ["spread_too_wide"]
+    with pytest.raises(ValueError):
+        FreeCut(max_spread_bps=1, rv_min_bps=0, rv_max_bps=1, min_ticks=1, max_stale_ms=1, spread_basis="dollars")
+
+    binary = RiskLimits(**{**LIMITS.__dict__, "fee_model": "kalshi", "range_guard_bps": 300, "range_guard_ref_bps": 100000, "max_position_units": 10})
+    gate = RiskGate(binary)
+    near = Order("o1", "KXETH15M", "buy", 10, "limit", 0.06)
+    far = Order("o2", "KXETH15M", "buy", 10, "limit", 0.10)
+    ctx_b = risk_ctx(mid=0.05, reference_mid=0.05, expected_edge_bps=20000.0)
+    assert all(v.check != "range_guard" for v in gate.evaluate(near, ctx_b)), "1 cent from mid is inside 3 cents"
+    assert any(v.check == "range_guard" for v in gate.evaluate(far, ctx_b)), "5 cents from mid is outside 3 cents"

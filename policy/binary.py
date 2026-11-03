@@ -6,8 +6,15 @@ minimum edge, not a fixed probability.
     min_edge(price) = (1 + margin) * (taker fee per contract at that price + half the spread)
 
 The expected edge is reported in bps of notional so the risk gate's fees check compares the same
-dollars: edge_bps / 1e4 * qty * price = qty * (p - price). Exits use the bot's cost-ratio threshold
-on the exit judgments, plus a reversal rule: close when the model no longer beats the market's price.
+dollars: edge_bps / 1e4 * qty * price = qty * (p - price).
+
+Exits use the same price-derived rule from the other side. Holding a long YES to settlement is worth
+p_yes per contract; selling now is worth the YES bid less its fee. So the threshold on P(the position
+loses) is 1 - (bid - min_edge(bid)), the cost of being wrong in each direction weighed at the market's
+price, and the desk sells early only when that probability clears it. A fixed threshold on P(loss)
+would sell nearly every position right after buying it: one entered at p_yes 0.70 already carries a
+0.30 chance of losing. The exit_now and pickoff answers are still asked, logged and scored for
+calibration; they are reported beside the decision but do not move it.
 """
 
 from __future__ import annotations
@@ -74,16 +81,15 @@ def final_pick_binary(bot: str, phase: str, answers: Mapping[str, Mapping], snap
         if not blocked and best.prob >= best.threshold:
             return Pick(best.action, best.prob, best.threshold, best.expected_edge_bps, candidates)
         return Pick(HOLD, best.prob, best.threshold, best.expected_edge_bps, candidates)
-    exit_score = score_actions(bot, "manage", answers, snapshot)[0]
+    judged = score_actions(bot, "manage", answers, snapshot)[0]  # Jev's exit_now/pickoff blend: logged, not deciding
+    if position_sign == 0:
+        return Pick(HOLD, 0.0, 1.0, 0.0, (judged,))
     if position_sign > 0:
-        reversed_edge = p_yes < float(yes_bid) - min_edge(float(yes_bid), spread, costs)
-    elif position_sign < 0:
-        no_bid = 1.0 - float(yes_ask)
-        reversed_edge = (1.0 - p_yes) < no_bid - min_edge(no_bid, spread, costs)
+        p_lose, sell_price = 1.0 - p_yes, float(yes_bid)
     else:
-        reversed_edge = False
-    scores = (exit_score, ActionScore("edge_reversed", 1.0 if reversed_edge else 0.0, 1.0, 0.0))
-    threshold = THRESHOLDS[bot]["exit"].threshold
-    if exit_score.prob >= threshold or reversed_edge:
-        return Pick("exit", max(exit_score.prob, 1.0 if reversed_edge else 0.0), threshold, 0.0, scores)
-    return Pick(HOLD, exit_score.prob, threshold, 0.0, scores)
+        p_lose, sell_price = p_yes, 1.0 - float(yes_ask)
+    threshold = min(1.0, max(0.0, 1.0 - (sell_price - min_edge(sell_price, spread, costs))))
+    scores = (ActionScore("exit", p_lose, threshold, 0.0), judged)
+    if p_lose > threshold:
+        return Pick("exit", p_lose, threshold, 0.0, scores)
+    return Pick(HOLD, p_lose, threshold, 0.0, scores)
