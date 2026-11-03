@@ -17,7 +17,7 @@ import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 JEV_KEY_ENV = "TYPESAFE_API_KEY"
 STUB_MODEL = "stub-jev-0.0"
@@ -36,6 +36,20 @@ def ensure_pinned(model: str | None) -> str:
     if name in _ALIASES or "latest" in name or not _PINNED.match(name):
         raise ModelNotPinnedError(f"{name!r} is not a pinned Jev version; aliases move, pin an exact name from GET /v1/models (for example jev-1.13.0)")
     return name
+
+
+PROBE_STATE = "probe"
+PROBE_QUESTIONS: Mapping[str, Mapping] = {"probe": {"type": "noul", "instructions": "Is this a probe?"}}
+
+
+def answering_model(client: Any, model: str, *, timeout_s: float = 20.0) -> str:
+    """Ask `model` the smallest possible battery and return the exact name that answered (response.model).
+
+    This is how an alias such as jev-latest is resolved to a pinned version, and how a pinned version is
+    verified when GET /v1/models lists only aliases. One call, no retries beyond the client's own policy.
+    """
+    response = client.system_one(state=PROBE_STATE, questions=PROBE_QUESTIONS, model=model, timeout=timeout_s)
+    return str(response.model)
 
 
 class JudgeFault(Exception):
@@ -153,6 +167,7 @@ class TypeSafeBackend:
             timeout=retry_budget_s,
         )
         self._client = TypeSafeClient(api_key=api_key, model=self.model, retry=policy, timeout=timeout_s)
+        self._timeout_s = timeout_s
         sdk_logger = logging.getLogger("typesafe_sdk")
         if sdk_logger.level < logging.WARNING:
             sdk_logger.setLevel(logging.WARNING)  # the SDK logs request and response bodies at DEBUG; never here
@@ -161,9 +176,17 @@ class TypeSafeBackend:
         return [m.name for m in self._client.models.list().models]
 
     def verify_model(self) -> None:
+        """The pin must be served as itself: GET /v1/models may list only aliases, so when the pinned name is not
+        in the list, one minimal probe asks for it and the answering model (response.model) must be that name."""
         names = self.list_models()
-        if self.model not in names:
-            raise ModelNotPinnedError(f"pinned model {self.model!r} is not offered to this account; available: {names}")
+        if self.model in names:
+            return
+        try:
+            answering = answering_model(self._client, self.model, timeout_s=self._timeout_s)
+        except Exception as exc:  # noqa: BLE001 - any failure of the probe means the pin is not verified
+            raise ModelNotPinnedError(f"pinned model {self.model!r} is not listed and a probe with it failed ({type(exc).__name__}); available: {names}") from None
+        if answering != self.model:
+            raise ModelNotPinnedError(f"pinned model {self.model!r} is not offered to this account (a probe answered as {answering!r}); available: {names}")
 
     def ask(self, state: Mapping, questions: Mapping[str, Mapping], *, timeout_s: float) -> RawAnswers:
         t0 = time.monotonic()
