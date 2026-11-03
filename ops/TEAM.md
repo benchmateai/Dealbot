@@ -19,6 +19,7 @@ raises an ALERT if a decision is ever logged twice).
 | Coordinator | Opus 5.5, session `session_01C4NeDS3CKGZfUNrC7ArPuL` | on escalation; supervisor check every 6 h; morning report 06:31 Arizona (13:31Z) | the only writer of code (`claude/desk-skeleton`) and the only voice to the owner; fixes what teammates find; replaces a teammate that stops | live trading; keys without the owner |
 | Runner | Sonnet 5.5, session `session_01JrtRuFoJFvVT79cmMzPuAC` | 110-minute chunks back to back | `ops/paper_chunk.sh` (`ops/runner_prompt.md`): the chunk script pushes logs to `paper-run` every 30 min; the runner republishes the pipeline dashboard after each chunk | edits, commits or pushes by hand |
 | Watchdog | Haiku 5.5, session `session_01JrtRuCP3RKtfhHmsiC3UYw` | hourly at :17 | `ops/watchdog.sh` (`ops/watchdog_prompt.md`): health line, then refreshes the money dashboard | edits code, deletes anything |
+| Lab runner | Haiku 5.5, session `session_01JrtRuC2MxTqb4BE8GVXSXP` | 110-minute chunks back to back | `ops/lab_chunk.sh` (`ops/lab_runner_prompt.md`): records Kalshi market data for the shadow lab (public REST always; the live feed when its session has the market-data key) and pushes each finished hour to `shadow-run` | orders of any kind; edits, commits or pushes by hand |
 | Analyst | Sonnet 5.5, session `session_01JrtRuFFYYmFkU2WSWi25VR` | daily 12:41Z | `ops/analyst_prompt.md`: reconciles settlements, studies P&L, Jev's calibration and the filter funnel; one note a day on `paper-notes` | edits the desk's code or the run |
 | Fresh eyes | a review subagent the coordinator starts | before any change to `risk/`, `policy/`, `broker/` or fills | reads the diff cold, without the coordinator's reasoning | |
 
@@ -41,8 +42,11 @@ Each teammate does one job on a schedule and hands everything else up. The deter
 
 - `claude/desk-skeleton`: the code (PR #1). A push that touches the desk's code restarts the running
   desk within about 3 minutes, after the pre-flight passes again; a push that touches only docs,
-  `ops/`, `tests/`, `reports/` or `dashboard/` does not (the run picks it up at its next restart).
+  `ops/`, `tests/`, `reports/`, `dashboard/`, `lab/` or `research_notes/` does not (the run picks it up
+  at its next restart).
 - `paper-run`: the run's logs, state, trials, reports and summaries; only the chunk script commits here.
+- `shadow-run`: the shadow lab's recorded market data, `lab/data/<date>/<HH>.jsonl.gz` from the REST
+  recorder and `<HH>.ws.jsonl.gz` from the live feed; only the lab chunk script commits here.
 - `paper-notes`: the analyst's daily notes, `notes/<date>.md`.
 - Money dashboard (the owner's phone): https://claude.ai/artifact/PAbprFb46SYGp9T2RZa66o, page
   `dashboard/money_page/index.html`, dataset `paper` = the rows from `python -m dashboard.money`.
@@ -60,6 +64,8 @@ those pushed a needless notification to the owner's phone), so the old poke-only
 `trig_011Fb7LfMudmP3ipB3cb1Uq5` is disabled.
 
 - Runner: after two failed cycles in a row (pre-flight exit 4 twice, or any other failure twice).
+- Lab runner: after two failed cycles in a row (exit 5: the REST recorder crashed; exit 6: the live
+  feed kept failing).
 - Watchdog: when the health line is ALERT (stale pushes, a desk fault, no Jev calls for two hours,
   Jev failing, a stuck position, the daily loss limit), once per problem, again only after 3 hours.
 - Analyst: a position settled the wrong way (reconcile exit 3), a BUG finding, or an ALERT.
@@ -84,6 +90,30 @@ it. `reports/shadow.py` replays the desk's own log under two rules registered at
 `capped` (skip entries more than 10 points from the market's mid) and `capped_exit` (capped, and sell
 3 minutes before the close). Their results before 15:15Z were known when they were chosen; only trades
 opened after it test them. The rules are not retuned during the week.
+
+## Shadow lab
+
+The owner then asked for six next-round strategies to run beside the live test, read-only and on paper
+(`lab/`; the research behind them is `reports/Viable Kalshi trading strategies.md`). Each counts only
+data recorded after its registration time, and none is retuned during the week.
+
+| | Strategy | Registered (Nov 3) | Data |
+|---|---|---|---|
+| A | repaired model control (taker): settlement-aware model, pooled with the market | 21:00Z | the desk's price tape, REST |
+| B | late-window harvest (taker): buy the side the settlement average has all but decided | 22:00Z | live feed |
+| C | ETH 15-minute market making (maker) | 22:00Z | live feed |
+| D | consistency scanner, with the 15-minute against hourly-ladder pair | 21:00Z | REST |
+| E | liquidity-incentive capture (maker) | 22:00Z | live feed |
+| F | maker long-shot fade (maker) | 22:00Z | live feed |
+
+`python3 -m lab.report --tape <paper-run logs/data> --lab <shadow-run lab/data>` prints one line each.
+Maker results (C, E, F) are upper bounds: fills are pessimistic, but paper cannot know queue position.
+B, C, E and F say they are waiting until the live feed has run. The live feed needs the market-data
+key the owner adds to the cloud environment (`KALSHI_PROD_API_KEY_ID`, `KALSHI_PROD_PRIVATE_KEY`; it
+signs WebSocket subscriptions and nothing else). A session sees only the environment variables set
+before it was created, so the coordinator replaces the lab runner once the key is in, after telling
+the old one to stop at the end of its chunk (two lab runners would push over each other). The paper
+desk and the REST recorder run with the key removed from their environment.
 
 ## During the paper week
 

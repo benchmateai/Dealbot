@@ -11,8 +11,10 @@ without it. One connection carries:
 Watched markets, refreshed while it runs over public REST at the lab's request budget (in a worker thread,
 so the socket is always being read):
   15m  the open KXBTC15M and KXETH15M contracts                  book every 2 s in the last 3 minutes, else 10 s
-  E    the markets with the largest active liquidity-incentive pools         full-depth book every 15 s
-  F    markets closing in 1-30 days with a 1-10 cent YES ask, by 24-hour volume        book every 60 s
+  E    the markets with the largest active liquidity-incentive pools
+                                     full-depth book when it changes, at most every 15 s, at least every 60 s
+  F    markets closing in 1-30 days with a 1-10 cent YES ask, by 24-hour volume
+                                                  book when it changes, at most every 60 s, at least every 5 min
 
 It writes the normalized records lab/strategies/maker_common.py describes (book, trade, index, settled,
 incentives, lab_status) to its own hour files (<HH>.ws.jsonl), never one the REST recorder writes, and it
@@ -49,7 +51,8 @@ INDEXES = ("BRTI", "ETHUSD_RTI")
 MARKET_CHANNELS = ("orderbook_delta", "trade")
 DATA_KINDS = ("orderbook_snapshot", "orderbook_delta", "trade")
 LEVELS = 30  # levels written per side; E books are written in full, since their reward depends on the depth
-CADENCE_S = {"15m": 10.0, "15m_late": 2.0, "E": 15.0, "F": 60.0}
+CADENCE_S = {"15m": 10.0, "15m_late": 2.0, "E": 15.0, "F": 60.0}       # a changed book at most this often
+HEARTBEAT_S = {"15m": 10.0, "15m_late": 2.0, "E": 60.0, "F": 300.0}     # any book at least this often
 REFRESH_S = {"crypto": 60, "incentives": 1800, "fade": 6 * 3600}  # seconds; the desk shares the REST limit
 E_MAX, F_MAX = 12, 30
 F_MIN_DAYS, F_MAX_DAYS, F_YES_ASK = 1, 30, (0.01, 0.10)  # close within the month so some settle during the test
@@ -67,13 +70,15 @@ class Book:
         self.yes: dict[float, float] = {}
         self.no: dict[float, float] = {}
         self.ready = False
+        self.changed = False  # since it was last written
 
     def snapshot(self, msg: dict) -> None:
         self.yes = {round(float(p), 4): float(s) for p, s in msg.get("yes_dollars_fp") or [] if float(s) > 0}
         self.no = {round(float(p), 4): float(s) for p, s in msg.get("no_dollars_fp") or [] if float(s) > 0}
-        self.ready = True
+        self.ready = self.changed = True
 
     def delta(self, msg: dict) -> None:
+        self.changed = True
         side = self.yes if msg.get("side") == "yes" else self.no
         p = round(float(msg["price_dollars"]), 4)
         side[p] = side.get(p, 0.0) + float(msg["delta_fp"])
@@ -367,10 +372,13 @@ class Feed:
             if book is None or not book.ready:
                 continue
             s = meta["set"]
-            cadence = (CADENCE_S["15m_late"] if meta.get("close_ms") and meta["close_ms"] - now_ms <= 180_000 else CADENCE_S["15m"]) if s == "15m" else CADENCE_S[s]
-            if now_ms - self.last_written.get(t, 0) >= cadence * 1000:
-                self.store.write("book", {"ticker": t, **meta, **book.normalized(None if s == "E" else LEVELS)}, ts_ms=now_ms)
+            if s == "15m" and meta.get("close_ms") and meta["close_ms"] - now_ms <= 180_000:
+                s = "15m_late"
+            since = now_ms - self.last_written.get(t, 0)
+            if since >= CADENCE_S[s] * 1000 and (book.changed or since >= HEARTBEAT_S[s] * 1000):
+                self.store.write("book", {"ticker": t, **meta, **book.normalized(None if meta["set"] == "E" else LEVELS)}, ts_ms=now_ms)
                 self.last_written[t] = now_ms
+                book.changed = False
 
     def write_status(self, now_ms: int, note: str | None = None) -> None:
         rec = {"source": "ws", "ws": dict(self.counters), "rest": self.rest.counters(), "errors": list(self.errors),

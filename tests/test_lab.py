@@ -244,7 +244,8 @@ def test_e_charges_fills_their_markout_and_stops_adding_past_its_cap(tmp_path):
     for k in range(4):
         items.append(_book(T0 + 1000 + k * 2000, "M", None, None, yes=yes, no=no, set="E"))
         items.append(("trade", {"ticker": "M", "yes_price": 0.49, "count": 50.0, "taker_side": "no"}, T0 + 2000 + k * 2000))  # through our YES bid
-    items.append(_book(T0 + 400_000, "M", None, None, yes=[[0.40, 100.0]], no=[[0.55, 100.0]], set="E"))  # YES mid 0.425 five minutes on
+    items.append(_book(T0 + 301_000, "M", None, None, yes=[[0.40, 100.0]], no=[[0.55, 100.0]], set="E"))  # YES mid 0.425 five minutes on
+    items.append(_book(T0 + 400_000, "M", None, None, yes=[[0.40, 100.0]], no=[[0.55, 100.0]], set="E"))  # unchanged, rewritten
     _write(tmp_path, items)
     s = e_incentive.evaluate(tmp_path, registered_ms=0)["summary"]
     # 10 contracts a quote (a tenth of the target), refilled after each fill until the net position reaches 30
@@ -427,3 +428,33 @@ def test_ws_run_records_resubscribes_after_a_drop_and_stops_on_time(tmp_path):
     assert feed.counters["connects"] == 2 and feed.counters["disconnects"] == 1
     kinds = sorted({r["kind"] for r in read_lab(tmp_path)})
     assert kinds == ["book", "index", "lab_status", "trade"]
+
+
+def test_markouts_read_the_book_as_it_stood_then():
+    from lab.fills import Resting, markouts
+
+    o = Resting("M", "yes", 0.50, 10, 0, 0.0, filled=10, fills=[{"ts": 1_000, "qty": 10, "price": 0.50}])
+    b = lambda bid: {"yes": [[bid, 1.0]], "no": [[1 - bid - 0.02, 1.0]]}  # YES mid = bid + 0.01
+    m = markouts(o, [(1_000, b(0.50)), (50_000, b(0.60)), (200_000, b(0.70)), (400_000, b(0.70))], None)[0]
+    assert (m["m60"], m["m300"]) == (0.11, 0.21)  # 61 s: the 50 s book; 301 s: the 200 s book, unchanged since
+    late = Resting("M", "yes", 0.50, 10, 0, 0.0, filled=10, fills=[{"ts": 100_000, "qty": 10, "price": 0.50}])
+    stale = markouts(late, [(0, b(0.50)), (2_000_000, b(0.60))], None)[0]
+    assert stale["m60"] == 0.01 and stale["m300"] is None  # 400 s after the last book: no markout rather than a guess
+
+
+def test_ws_feed_rewrites_an_unchanged_book_only_on_its_heartbeat(tmp_path):
+    from lab.ws_recorder import Feed
+
+    clock = {"ms": T0}
+    store = LabStore(tmp_path, stream="ws")
+    feed = Feed(store, LabRest(FakeKalshi({"ms": T0}), Budget(1e9, 1e9)), now_ms=lambda: clock["ms"])
+    feed.watch("INC", {"series": None, "event": None, "close_ms": None, "strike": None, "strike_type": None, "set": "E"})
+    feed.handle({"type": "orderbook_snapshot", "sid": 2, "seq": 1, "msg": {"market_ticker": "INC", "yes_dollars_fp": [["0.3000", "500.00"]], "no_dollars_fp": [["0.6000", "500.00"]]}})
+    for second in range(0, 125, 5):
+        clock["ms"] = T0 + second * 1000
+        if second == 30:
+            feed.handle({"type": "orderbook_delta", "sid": 2, "seq": 2, "msg": {"market_ticker": "INC", "price_dollars": "0.3000", "delta_fp": "1.00", "side": "yes"}})
+        feed.write_books(clock["ms"])
+    store.close()
+    written = [(r["ts"] - T0) // 1000 for r in read_lab(tmp_path) if r["kind"] == "book"]
+    assert written == [0, 30, 90]  # first sight, the change (15 s cadence passed), then the 60 s heartbeat

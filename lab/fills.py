@@ -8,8 +8,9 @@ an upper bound, and this module makes that bound as tight as the data allows:
 - it fills only from trades: at its own price once the queue ahead has traded, or any trade that prints
   through its price (which must have taken it first)
 - a quote touching it never fills it
-- each fill records its markout: the contract's mid 60 and 300 seconds later, and the settlement, against
-  the fill price, which measures what informed takers took from it
+- each fill records its markout: the contract's mid 60 and 300 seconds later (the book as it stood then:
+  the last one recorded at or before that moment, no older than MAX_BOOK_AGE_MS, with the recording still
+  running after it), and the settlement, against the fill price, which measures what informed takers took
 
 Kalshi's conventions: a trade has a YES price and a taker side. A YES taker buys YES from a resting NO bid
 at 1 - yes_price; a NO taker buys NO from a resting YES bid at yes_price. Books list YES bids and NO bids
@@ -18,9 +19,11 @@ at 1 - yes_price; a NO taker buys NO from a resting YES bid at yes_price. Books 
 
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass, field
 
 MARKOUT_S = (60, 300)
+MAX_BOOK_AGE_MS = 330_000  # the live feed rewrites an unchanged book at least every 5 minutes
 TICK = 0.01
 EPS = 0.00005  # prices are 4-decimal dollar strings, and some books tick in tenths of a cent: compare tightly
 
@@ -88,14 +91,24 @@ def side_mid(book: dict, side: str) -> float | None:
     return yes_mid if side == "yes" else 1.0 - yes_mid
 
 
+def book_at(books: list[tuple[int, dict]], times: list[int], ts: int) -> dict | None:
+    """The book as it stood at `ts`: the last one recorded at or before it, if it is recent enough and the
+    recording ran on past `ts`. `times` are the books' times."""
+    if not times or times[-1] < ts:
+        return None
+    i = bisect.bisect_right(times, ts) - 1
+    return books[i][1] if i >= 0 and ts - times[i] <= MAX_BOOK_AGE_MS else None
+
+
 def markouts(order: Resting, books: list[tuple[int, dict]], payout_yes: float | None) -> list[dict]:
     """For each fill: the side's mid MARKOUT_S seconds later and the settlement value, minus the fill price
     (positive is good for the maker). `books` is (ts, book) in time order for this ticker."""
     out = []
+    times = [t for t, _ in books]
     for f in order.fills:
         row = {"ts": f["ts"], "qty": f["qty"], "price": f["price"]}
         for s in MARKOUT_S:
-            later = next((b for t, b in books if t >= f["ts"] + s * 1000), None)
+            later = book_at(books, times, f["ts"] + s * 1000)
             mid = side_mid(later, order.side) if later else None
             row[f"m{s}"] = None if mid is None else round(mid - f["price"], 4)
         if payout_yes is not None:
