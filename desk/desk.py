@@ -98,7 +98,7 @@ class Desk:
         self._binary = cfg.fee_model == "kalshi"
         pick_kind = "binary" if self._binary else "spot"
         binary_costs = BinaryCosts(taker_rate=cfg.kalshi_taker_rate, maker_rate=cfg.kalshi_maker_rate, margin=cfg.limits.min_edge_margin, model_weight=cfg.binary_model_weight)
-        free_cut = dict(max_spread_bps=cfg.max_spread_bps, rv_min_bps=cfg.rv_min_bps, rv_max_bps=cfg.rv_max_bps, min_ticks=cfg.min_ticks, max_stale_ms=cfg.max_stale_ms)
+        free_cut = dict(max_spread_bps=cfg.max_spread_bps, rv_min_bps=cfg.rv_min_bps, rv_max_bps=cfg.rv_max_bps, min_ticks=cfg.min_ticks, max_stale_ms=cfg.max_stale_ms, spread_basis="payout" if cfg.fee_model == "kalshi" else "price")
         self._scan_funnel = Funnel([
             FreeCut(**free_cut),
             OneCall(broker, feed, min_equity_usd=cfg.min_equity_usd, max_feed_lag_ms=cfg.max_feed_lag_ms),

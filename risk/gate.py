@@ -92,11 +92,12 @@ def check_range_guard(order: Order, ctx: RiskContext, lim: RiskLimits) -> Veto |
     if not (math.isfinite(ctx.mid) and ctx.mid > 0):
         return Veto("range_guard", f"mid {ctx.mid!r} is not a positive finite number", str(ctx.mid), None)
     price = ctx.mid if order.price is None else order.price
-    dev = abs(price - ctx.mid) / ctx.mid * 1e4
+    scale = 1.0 if lim.fee_model == "kalshi" else ctx.mid  # a binary's distance is measured in points of its $1 payout
+    dev = abs(price - ctx.mid) / scale * 1e4
     if dev > lim.range_guard_bps:
         return Veto("range_guard", f"order price {price} is {dev:.1f} bps from mid {ctx.mid}; limit {lim.range_guard_bps}", round(dev, 1), lim.range_guard_bps)
     if ctx.reference_mid is not None and ctx.reference_mid > 0:
-        ref_dev = abs(ctx.mid - ctx.reference_mid) / ctx.reference_mid * 1e4
+        ref_dev = abs(ctx.mid - ctx.reference_mid) / (1.0 if lim.fee_model == "kalshi" else ctx.reference_mid) * 1e4
         if ref_dev > lim.range_guard_ref_bps:
             return Veto(
                 "range_guard",

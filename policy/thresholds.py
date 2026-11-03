@@ -55,7 +55,7 @@ THRESHOLDS: dict[str, dict[str, ActionCost]] = {
     "kalshi": {
         "enter_long": ActionCost(wrong_bps=50, missed_bps=50),    # 0.50, superseded by policy/binary.py
         "enter_short": ActionCost(wrong_bps=50, missed_bps=50),   # 0.50, superseded by policy/binary.py
-        "exit": ActionCost(wrong_bps=2, missed_bps=6),            # 0.25: closing early costs a cent or two, holding a loser costs the contract
+        "exit": ActionCost(wrong_bps=2, missed_bps=6),            # 0.25, superseded by policy/binary.py: the exit line is 1 - (bid - min edge)
     },
 }
 

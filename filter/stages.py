@@ -27,8 +27,11 @@ from risk.gate import RiskContext, RiskGate
 class FreeCut:
     name = "free_cut"
 
-    def __init__(self, *, max_spread_bps: float, rv_min_bps: float, rv_max_bps: float, min_ticks: int, max_stale_ms: int, manage: bool = False) -> None:
+    def __init__(self, *, max_spread_bps: float, rv_min_bps: float, rv_max_bps: float, min_ticks: int, max_stale_ms: int, manage: bool = False, spread_basis: str = "price") -> None:
+        if spread_basis not in ("price", "payout"):
+            raise ValueError(f"spread_basis must be 'price' or 'payout', not {spread_basis!r}")
         self._max_spread = max_spread_bps
+        self._spread_basis = spread_basis  # payout: a binary's spread in bps of its $1 payout, the same at 5 cents as at 95
         self._rv_min = rv_min_bps
         self._rv_max = rv_max_bps
         self._min_ticks = min_ticks
@@ -52,8 +55,10 @@ class FreeCut:
             return None
         if s.rv_bps is None:
             return Rejection(c.sym, self.name, "rv_unavailable", "not enough history for realized vol")
-        if s.spr_bps > self._max_spread:
-            return Rejection(c.sym, self.name, "spread_too_wide", f"spread {s.spr_bps} bps, limit {self._max_spread}")
+        spread = s.spr_bps * s.mid if self._spread_basis == "payout" else s.spr_bps
+        if spread > self._max_spread:
+            basis = "of the $1 payout" if self._spread_basis == "payout" else "of price"
+            return Rejection(c.sym, self.name, "spread_too_wide", f"spread {spread:.1f} bps {basis}, limit {self._max_spread}")
         if not (self._rv_min <= s.rv_bps <= self._rv_max):
             return Rejection(c.sym, self.name, "rv_out_of_band", f"rv {s.rv_bps} bps outside [{self._rv_min}, {self._rv_max}]")
         return None
