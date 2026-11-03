@@ -166,7 +166,10 @@ class DeskConfig:
                 daily_loss_limit_usd=_float(env, "DAILY_LOSS_LIMIT_USD", "100"),
                 max_leverage=_float(env, "MAX_LEVERAGE", "1.0"),
                 range_guard_bps=_float(env, "RANGE_GUARD_BPS", "50"),
-                range_guard_ref_bps=_float(env, "RANGE_GUARD_REF_BPS", "300"),
+                # A binary's mid legitimately moves tens of percent in the minutes before expiry, so the
+                # "suspect data" check against the trailing median is effectively off for Kalshi; tick sanity
+                # and the spread cap still reject broken quotes.
+                range_guard_ref_bps=_float(env, "RANGE_GUARD_REF_BPS", "100000" if binary else "300"),
                 fee_bps=fee_bps,
                 maker_fee_bps=maker_fee_bps,
                 gas_usd=gas_usd,

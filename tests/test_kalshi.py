@@ -217,8 +217,9 @@ def test_kalshi_defaults_are_contract_sized(tmp_path):
     env = {"DESK_MODE": "paper", "DESK_BOT": "kalshi", "FEED": "kalshi", "JUDGE_URL": "stub://local", "LOG_DIR": str(tmp_path)}
     cfg = DeskConfig.from_env(env)
     assert cfg.order_qty == 10 and cfg.limits.max_position_units >= cfg.order_qty, "a default Kalshi order must pass the position limit"
+    assert cfg.limits.range_guard_ref_bps >= 10_000, "a binary that runs from 0.10 to 0.90 before expiry is not suspect data"
     spot = DeskConfig.from_env({**env, "DESK_BOT": "gambler", "FEED": "synthetic"})
-    assert spot.order_qty == 0.2 and spot.limits.max_position_units == 1.0
+    assert spot.order_qty == 0.2 and spot.limits.max_position_units == 1.0 and spot.limits.range_guard_ref_bps == 300
 
 
 def test_kalshi_config_pairs_bot_and_feed(tmp_path):
