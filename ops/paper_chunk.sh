@@ -23,6 +23,8 @@ export LOG_DIR=logs/data
 
 if git fetch -q origin "$RUN_BRANCH" 2>/dev/null; then
   git checkout -q "$RUN_BRANCH" && git pull -q --ff-only origin "$RUN_BRANCH"
+  # Carry code fixes made on the base branch into the run; the run branch only adds logs, so this merges cleanly.
+  git fetch -q origin "$BASE_BRANCH" && git merge -q --no-edit "origin/$BASE_BRANCH"
 else
   git fetch -q origin "$BASE_BRANCH" && git checkout -q -B "$RUN_BRANCH" "origin/$BASE_BRANCH"
 fi
