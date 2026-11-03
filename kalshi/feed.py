@@ -90,6 +90,9 @@ class KalshiFeed:
         self._settlements: list[Settlement] = []
         self.errors = 0
         self.polls = 0
+        self.rate_limits = 0
+        self._backoff_s = 0.0
+        self._backoff_until_ms = 0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -99,6 +102,25 @@ class KalshiFeed:
         live = [m for m in markets if m.close_ts is not None and m.close_ts > now_ms and m.status not in ("settled", "finalized", "closed")]
         return min(live, key=lambda m: m.close_ts) if live else None
 
+    # ---- rate limiting ---------------------------------------------------------------------
+    # Kalshi answers 429 when the public endpoints are polled too hard (the egress address may be
+    # shared). Every 429 pauses all polling: 2 s, then doubling to 30 s, or longer when Retry-After says
+    # so; the first clean answer resets it. A paused feed simply yields no ticks, and the desk's
+    # stale-data veto keeps it from trading on old quotes.
+
+    def _paused(self, now_ms: int) -> bool:
+        return now_ms < self._backoff_until_ms
+
+    def _back_off(self, now_ms: int, exc: KalshiApiError, what: str) -> None:
+        self.rate_limits += 1
+        self._backoff_s = min(30.0, max(2.0, self._backoff_s * 2))
+        pause = max(self._backoff_s, exc.retry_after_s or 0.0)
+        self._backoff_until_ms = now_ms + int(pause * 1000)
+        log.warning("%s: rate limited by Kalshi; pausing polls for %.0f s", what, pause)
+
+    def _after_success(self) -> None:
+        self._backoff_s = 0.0
+
     def _refresh(self, sym: str, st: _SeriesState, now_ms: int) -> None:
         expired = st.contract is not None and st.contract.close_ts is not None and now_ms >= st.contract.close_ts
         if not expired and now_ms - st.refreshed_ms < self._refresh_ms and st.contract is not None:
@@ -107,8 +129,12 @@ class KalshiFeed:
             markets = self._client.markets(sym)
         except KalshiApiError as exc:
             self.errors += 1
-            log.warning("%s: markets: %s", sym, exc)
+            if exc.rate_limited:
+                self._back_off(now_ms, exc, f"{sym}: markets")
+            else:
+                log.warning("%s: markets: %s", sym, exc)
             return
+        self._after_success()
         st.refreshed_ms = now_ms
         current = self._pick_current(markets, now_ms)
         if st.contract is not None and (current is None or current.ticker != st.contract.ticker):
@@ -156,18 +182,25 @@ class KalshiFeed:
         now = self._now()
         out: dict[str, Tick | None] = {}
         for sym, st in self._state.items():
+            if self._paused(now):
+                out[sym] = None
+                continue
             self._refresh(sym, st, now)
             contract = st.contract
-            if contract is None:
+            if contract is None or self._paused(now):
                 out[sym] = None
                 continue
             try:
                 yes_bid, yes_ask, bid_qty, ask_qty = self._client.orderbook(contract.ticker)
             except KalshiApiError as exc:
                 self.errors += 1
-                log.warning("%s: orderbook: %s", sym, exc)
+                if exc.rate_limited:
+                    self._back_off(now, exc, f"{sym}: orderbook")
+                else:
+                    log.warning("%s: orderbook: %s", sym, exc)
                 out[sym] = None
                 continue
+            self._after_success()
             if yes_bid is None or yes_ask is None:
                 out[sym] = None
                 continue

@@ -28,9 +28,14 @@ Fetch = Callable[[str, Mapping[str, str]], dict]
 
 
 class KalshiApiError(RuntimeError):
-    def __init__(self, message: str, *, status: int | None = None) -> None:
+    def __init__(self, message: str, *, status: int | None = None, retry_after_s: float | None = None) -> None:
         super().__init__(message)
         self.status = status
+        self.retry_after_s = retry_after_s  # from a 429's Retry-After header, when Kalshi sends one
+
+    @property
+    def rate_limited(self) -> bool:
+        return self.status == 429
 
 
 def taker_fee_usd(contracts: float, price: float, rate: float = TAKER_RATE) -> float:
@@ -173,7 +178,13 @@ def http_fetch(url: str, headers: Mapping[str, str], *, timeout_s: float = 5.0) 
             body = exc.read().decode()[:200]
         except Exception:  # noqa: BLE001
             pass
-        raise KalshiApiError(f"HTTP {exc.code} from Kalshi: {body}", status=exc.code) from None
+        retry_after = None
+        if exc.code == 429:
+            try:
+                retry_after = float(exc.headers.get("Retry-After") or 0) or None
+            except (TypeError, ValueError):
+                retry_after = None
+        raise KalshiApiError(f"HTTP {exc.code} from Kalshi: {body}", status=exc.code, retry_after_s=retry_after) from None
     except urllib.error.URLError as exc:
         raise KalshiApiError(f"Kalshi unreachable: {exc.reason}") from None
 
