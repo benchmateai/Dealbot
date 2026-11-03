@@ -1,67 +1,69 @@
 {
  "decisions": {
-  "enter_long": 2,
-  "enter_short": 1,
-  "hold": 26
+  "enter_long": 4,
+  "enter_short": 3,
+  "exit": 2,
+  "hold": 119
  },
- "equity_end": 9949.8929,
+ "equity_end": 9956.4201,
  "equity_start": 9952.2231,
- "executed": 2,
+ "executed": 8,
  "feed": {
-  "errors": 15,
-  "polls": 144,
-  "rate_limits": 15
+  "errors": 38,
+  "polls": 503,
+  "rate_limits": 37
  },
  "fills": {
-  "buy": 1,
-  "sell": 1,
-  "settle": 1
+  "buy": 5,
+  "sell": 3,
+  "settle": 3
  },
  "first_ts": 1793734752000,
- "judge_calls": 29,
+ "judge_calls": 128,
  "judge_failures": {
-  "jev_budget": 2
+  "jev_budget": 6
  },
- "last_ts": 1793735652000,
+ "last_ts": 1793737452000,
  "models": {
-  "jev-1.14.0": 29
+  "jev-1.14.0": 128
  },
- "positions_closed": 1,
- "positions_opened": 2,
- "realized_pnl_usd": -2.5102,
+ "positions_closed": 5,
+ "positions_opened": 6,
+ "realized_pnl_usd": 4.2478,
  "records": {
-  "answer": 29,
-  "decision": 29,
-  "fill": 3,
-  "heartbeat": 7,
-  "order": 2,
-  "outcome": 85,
-  "position_closed": 1,
-  "position_opened": 2,
-  "question": 29,
-  "rejection": 133,
-  "settlement": 2,
-  "snapshot": 29,
-  "tape": 73,
+  "answer": 128,
+  "decision": 128,
+  "fill": 11,
+  "heartbeat": 22,
+  "order": 8,
+  "outcome": 556,
+  "position_closed": 5,
+  "position_opened": 6,
+  "question": 128,
+  "rejection": 332,
+  "settlement": 6,
+  "snapshot": 128,
+  "tape": 220,
   "trial": 1,
   "veto": 1
  },
  "rejections": {
-  "below_threshold": 26,
-  "benched": 47,
+  "below_threshold": 119,
+  "benched": 55,
+  "insufficient_data": 2,
   "insufficient_ticks": 10,
-  "jev_budget": 2,
-  "no_contract": 6,
-  "outside_trade_window": 42
+  "jev_budget": 6,
+  "no_contract": 13,
+  "outside_trade_window": 127
  },
  "settlements": {
-  "official": 2,
+  "official": 6,
   "provisional": 0
  },
  "since_ms": 1793734751000,
- "span_minutes": 15.0,
+ "span_minutes": 45.0,
  "stalled": false,
- "until_ms": 1793735655666,
+ "until_ms": 1793737457423,
  "vetoes": {
   "fees_plus_gas": 1
  }
