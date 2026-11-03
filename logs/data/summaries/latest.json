@@ -1,67 +1,69 @@
 {
  "decisions": {
-  "enter_long": 2,
-  "enter_short": 2,
-  "hold": 141
+  "enter_long": 3,
+  "enter_short": 4,
+  "exit": 1,
+  "hold": 234
  },
- "equity_end": 9943.5108,
+ "equity_end": 9941.9392,
  "equity_start": 9948.636,
- "executed": 2,
+ "executed": 6,
  "feed": {
-  "errors": 22,
-  "polls": 503,
-  "rate_limits": 21
+  "errors": 40,
+  "polls": 863,
+  "rate_limits": 39
  },
  "fills": {
-  "buy": 2,
-  "settle": 3
+  "buy": 4,
+  "sell": 2,
+  "settle": 5
  },
  "first_ts": 1793741448000,
- "judge_calls": 145,
+ "judge_calls": 242,
  "judge_failures": {
-  "jev_budget": 3
+  "jev_budget": 6
  },
- "last_ts": 1793744148000,
+ "last_ts": 1793745948000,
  "models": {
-  "jev-1.14.0": 145
+  "jev-1.14.0": 242
  },
- "positions_closed": 3,
- "positions_opened": 2,
- "realized_pnl_usd": -4.291,
+ "positions_closed": 6,
+ "positions_opened": 5,
+ "realized_pnl_usd": -5.8926,
  "records": {
-  "answer": 145,
-  "decision": 145,
-  "fill": 5,
-  "heartbeat": 22,
-  "order": 2,
-  "outcome": 883,
-  "position_closed": 3,
-  "position_opened": 2,
-  "question": 145,
-  "rejection": 304,
-  "settlement": 6,
-  "snapshot": 145,
-  "tape": 220,
+  "answer": 242,
+  "decision": 242,
+  "fill": 11,
+  "heartbeat": 37,
+  "order": 6,
+  "outcome": 1370,
+  "position_closed": 6,
+  "position_opened": 5,
+  "question": 242,
+  "rejection": 510,
+  "settlement": 10,
+  "snapshot": 242,
+  "tape": 367,
   "trial": 1,
   "veto": 2
  },
  "rejections": {
-  "below_threshold": 141,
-  "benched": 44,
-  "insufficient_data": 2,
+  "below_threshold": 234,
+  "benched": 58,
+  "insufficient_data": 4,
   "insufficient_ticks": 11,
-  "jev_budget": 3,
-  "no_contract": 15,
-  "outside_trade_window": 88
+  "jev_budget": 6,
+  "no_contract": 24,
+  "outside_trade_window": 173
  },
  "settlements": {
-  "official": 6,
+  "official": 10,
   "provisional": 0
  },
  "since_ms": 1793741446000,
- "span_minutes": 45.0,
+ "span_minutes": 75.0,
  "stalled": false,
- "until_ms": 1793744150281,
+ "until_ms": 1793745953095,
  "vetoes": {
   "fees_plus_gas": 2
  }
