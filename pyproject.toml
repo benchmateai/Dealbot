@@ -12,10 +12,11 @@ dependencies = []
 [project.optional-dependencies]
 # Only the judge process needs the TypeSafe SDK. Bots never import it.
 judge = ["typesafe-sdk>=0.7.5,<0.8"]
+kalshi = ["cryptography>=42"]
 dev = ["pytest>=8"]
 
 [tool.setuptools]
-packages = ["desk", "state", "feed", "questions", "policy", "risk", "broker", "filter", "book", "logs", "judge", "outcomes", "reports", "trials", "dashboard"]
+packages = ["desk", "state", "feed", "questions", "policy", "risk", "broker", "filter", "book", "logs", "judge", "outcomes", "reports", "trials", "dashboard", "kalshi"]
 
 [tool.setuptools.package-data]
 dashboard = ["static/*.html"]

@@ -68,6 +68,14 @@ WEIGHTS: dict[str, dict[str, tuple[Term, ...]]] = {
             Term("informed_flow", "noul", 0.2),
         ),
     },
+    "kalshi": {
+        "enter_long": (Term("settles_yes", "noul", 1.0),),
+        "enter_short": (Term("settles_yes", "not_noul", 1.0),),
+        "exit": (
+            Term("exit_now", "noul", 0.7),
+            Term("pickoff", "noul", 0.3),
+        ),
+    },
     "spy": {
         "enter_long": (
             Term("dir_if_any", "choice:up", 0.5),

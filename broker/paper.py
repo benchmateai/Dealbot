@@ -94,10 +94,13 @@ class PaperBroker:
         self._resting = {o["id"]: Order(**o) for o in data.get("resting", [])}
         self._last = {s: Tick(**t) for s, t in data.get("last", {}).items()}
 
+    def _fee_usd(self, qty: float, px: float, maker: bool) -> float:
+        return qty * px * (self._maker_fee_bps if maker else self._fee_bps) / 1e4
+
     def _apply_fill(self, order: Order, px: float, ts: int, *, maker: bool = False) -> Fill:
         qty, signed = order.qty, order.signed_qty
         notional = qty * px
-        fee = notional * (self._maker_fee_bps if maker else self._fee_bps) / 1e4
+        fee = self._fee_usd(qty, px, maker)
         gas = self._gas_usd
         pos = self._positions.setdefault(order.sym, Position(order.sym))
         realized = 0.0

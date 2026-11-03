@@ -19,6 +19,9 @@ class RiskLimits:
     min_edge_margin: float
     pinned_model: str
     max_stale_ms: int
+    fee_model: str = "bps"
+    kalshi_taker_rate: float = 0.07
+    kalshi_maker_rate: float = 0.0
 
     def validate(self) -> RiskLimits:
         positive = {
@@ -38,7 +41,19 @@ class RiskLimits:
                 raise ValueError(f"risk limit {name} must not be negative, got {value}")
         if not self.pinned_model:
             raise ValueError("risk limits need the pinned model version")
+        if self.fee_model not in ("bps", "kalshi"):
+            raise ValueError("fee_model must be bps or kalshi")
         return self
+
+    def round_trip_cost_usd(self, qty: float, price: float, order_type: str) -> float:
+        """Entry plus exit cost in dollars. bps: fees on notional plus gas each way. kalshi: the exchange's
+        per-contract formula each way (settlement itself is free, so this is the conservative case)."""
+        if self.fee_model == "kalshi":
+            from kalshi.api import maker_fee_usd, taker_fee_usd
+
+            one_way = maker_fee_usd(qty, price, self.kalshi_maker_rate) if order_type == "limit" else taker_fee_usd(qty, price, self.kalshi_taker_rate)
+            return 2.0 * one_way
+        return 2.0 * self.fee_bps_for(order_type) / 1e4 * qty * price + 2.0 * self.gas_usd
 
     def fee_bps_for(self, order_type: str) -> float:
         """Maker fee for orders that rest (limit), taker fee for everything else."""

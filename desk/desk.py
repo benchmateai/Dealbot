@@ -20,6 +20,7 @@ from desk.modes import Executor
 from feed.base import MarketFeed, Tick
 from filter.funnel import Candidate, Funnel, FunnelContext, Rejection
 from filter.stages import FinalPick, FreeCut, HardFacts, JevStage, OneCall
+from policy.binary import BinaryCosts
 from judge.client import Backoff, Judge
 from logs.writer import LogWriter
 from outcomes.resolver import OutcomeResolver
@@ -35,7 +36,7 @@ def round_trip_cost_bps(fee_bps: float, gas_usd: float, notional_usd: float) -> 
     return 2 * fee_bps + 2 * gas_usd / notional_usd * 1e4
 
 
-def make_state(snapshot: Snapshot, position: OpenPosition | None, *, bot: str, phase: str, cost_bps: float, fee_bps: float, gas_usd: float, block: int) -> dict:
+def make_state(snapshot: Snapshot, position: OpenPosition | None, *, bot: str, phase: str, cost_bps: float, fee_bps: float, gas_usd: float, block: int, contract: dict | None = None, fee_model: str = "bps") -> dict:
     pos = None
     if position is not None:
         pos = {
@@ -45,11 +46,14 @@ def make_state(snapshot: Snapshot, position: OpenPosition | None, *, bot: str, p
             "upnl_bps": round(position.upnl_bps(snapshot.mid), 1),
             "age_blocks": block - position.entry_block,
         }
-    return {
+    state = {
         "mkt": snapshot.to_dict(),
         "pos": pos,
-        "desk": {"bot": bot, "phase": phase, "cost_bps": round(cost_bps, 2), "fee_bps": fee_bps, "gas_usd": gas_usd},
+        "desk": {"bot": bot, "phase": phase, "cost_bps": round(cost_bps, 2), "fee_bps": fee_bps, "gas_usd": gas_usd, "fee_model": fee_model},
     }
+    if contract is not None:
+        state["contract"] = contract
+    return state
 
 
 class Desk:
@@ -91,18 +95,21 @@ class Desk:
         self._last_block: int | None = None
         self._order_type = "limit" if cfg.bot == "house" else "market"
         self._bot_fee_bps = cfg.limits.fee_bps_for(self._order_type)
+        self._binary = cfg.fee_model == "kalshi"
+        pick_kind = "binary" if self._binary else "spot"
+        binary_costs = BinaryCosts(taker_rate=cfg.kalshi_taker_rate, maker_rate=cfg.kalshi_maker_rate, margin=cfg.limits.min_edge_margin, model_weight=cfg.binary_model_weight)
         free_cut = dict(max_spread_bps=cfg.max_spread_bps, rv_min_bps=cfg.rv_min_bps, rv_max_bps=cfg.rv_max_bps, min_ticks=cfg.min_ticks, max_stale_ms=cfg.max_stale_ms)
         self._scan_funnel = Funnel([
             FreeCut(**free_cut),
             OneCall(broker, feed, min_equity_usd=cfg.min_equity_usd, max_feed_lag_ms=cfg.max_feed_lag_ms),
             HardFacts(gate, EDGE[cfg.bot], cfg.order_qty, order_type=self._order_type),
             JevStage(judge, battery, backoff, max_candidates=cfg.max_jev_candidates),
-            FinalPick(),
+            FinalPick(kind=pick_kind, binary_costs=binary_costs),
         ])
         self._manage_funnel = Funnel([
             FreeCut(**free_cut, manage=True),
             JevStage(judge, battery, backoff, max_candidates=1),
-            FinalPick(),
+            FinalPick(kind=pick_kind, binary_costs=binary_costs),
         ])
 
     @property
@@ -178,6 +185,10 @@ class Desk:
 
     def step(self, block: Block) -> None:
         self._ingest(self._feed.advance(block.ts_ms), block)
+        pop = getattr(self._feed, "pop_settlements", None)
+        if pop is not None:
+            for settlement in pop():
+                self._apply_settlement(settlement, block)
         marks = self._marks()
         equity = self._broker.equity(marks)
         self._book.mark(equity, block.ts_ms)
@@ -228,14 +239,25 @@ class Desk:
     # ---- candidates and context -----------------------------------------------------------
 
     def _candidate(self, sym: str, block: Block, phase: str, position: OpenPosition | None) -> Candidate | Rejection:
-        hist = self._feed.history(sym)
+        snapshot_history = getattr(self._feed, "snapshot_history", None)
+        hist = snapshot_history(sym) if snapshot_history is not None else self._feed.history(sym)
         account = self._book.account_state(inventory=self._broker.position(sym).qty)
         try:
             snap = build_snapshot(sym, hist, block.ts_ms, block.number, account, block_ms=self._cfg.block_ms, ret_windows_blocks=self._cfg.ret_windows_blocks, rv_window_blocks=self._cfg.rv_window_blocks)
         except InsufficientData as exc:
             return Rejection(sym, "free_cut", "insufficient_data", str(exc))
-        cost = round_trip_cost_bps(self._bot_fee_bps, self._cfg.gas_usd, self._cfg.order_qty * snap.mid)
-        state = make_state(snap, position, bot=self._cfg.bot, phase=phase, cost_bps=cost, fee_bps=self._bot_fee_bps, gas_usd=self._cfg.gas_usd, block=block.number)
+        contract = None
+        extra_state = getattr(self._feed, "extra_state", None)
+        if extra_state is not None:
+            contract = extra_state(sym, block.ts_ms, block=block.number)
+            if contract is None:
+                return Rejection(sym, "free_cut", "no_contract", "no open contract for this series")
+            if phase == "entry" and not contract.get("tradable"):
+                return Rejection(sym, "free_cut", "outside_trade_window", f"contract {contract.get('ticker')} expires in {contract.get('expires_in_s')} s")
+        notional = self._cfg.order_qty * snap.mid
+        cost_usd = self._cfg.limits.round_trip_cost_usd(self._cfg.order_qty, snap.mid, self._order_type)
+        cost = cost_usd / notional * 1e4 if notional > 0 else math.inf
+        state = make_state(snap, position, bot=self._cfg.bot, phase=phase, cost_bps=cost, fee_bps=self._bot_fee_bps, gas_usd=self._cfg.gas_usd, block=block.number, contract=contract, fee_model=self._cfg.fee_model)
         return Candidate(sym=sym, snapshot=snap, state=state, reference_mid=self._reference_mid(hist, block.ts_ms), cost_bps=cost)
 
     def _reference_mid(self, hist: Sequence[Tick], as_of_ms: int) -> float | None:
@@ -262,7 +284,18 @@ class Desk:
         )
 
     def _register_outcomes(self, c: Candidate) -> None:
-        self._resolver.register(decision_id=c.decision_id, bot=self._cfg.bot, sym=c.sym, block=c.snapshot.blk, snapshot=c.snapshot.to_dict(), state=c.state, battery=self._battery, answers=c.answers or {}, ts_ms=c.snapshot.as_of)
+        contract = c.state.get("contract") if isinstance(c.state, dict) else None
+        expiry_blocks = None
+        underlying_sym = None
+        underlying_snapshot = None
+        if contract:
+            left = contract.get("expires_in_s")
+            if left is not None:
+                expiry_blocks = max(1, math.ceil(float(left) * 1000 / self._cfg.block_ms))
+            underlying_sym = contract.get("underlying")
+            if contract.get("underlying_snapshot"):
+                underlying_snapshot = {**contract["underlying_snapshot"], "strike": contract.get("strike")}
+        self._resolver.register(decision_id=c.decision_id, bot=self._cfg.bot, sym=c.sym, block=c.snapshot.blk, snapshot=c.snapshot.to_dict(), state=c.state, battery=self._battery, answers=c.answers or {}, ts_ms=c.snapshot.as_of, expiry_blocks=expiry_blocks, underlying_sym=underlying_sym, underlying_snapshot=underlying_snapshot)
 
     # ---- scan (no position) ------------------------------------------------------------------
 
@@ -383,6 +416,24 @@ class Desk:
         elif bpos.qty == 0 and self._book.position is not None:
             closed = self._book.close()
             self._log.write("position_closed", {"decision_id": closed.decision_id, "sym": closed.sym, "blk": block.number, "position": closed.to_dict(), "realized_pnl_usd": bpos.realized_pnl_usd, "fees_usd": bpos.fees_usd, "exit_decision_id": order.decision_id}, ts_ms=block.ts_ms)
+
+    def _apply_settlement(self, settlement, block: Block) -> None:
+        settle = getattr(self._broker, "settle", None)
+        fill = settle(settlement.sym, settlement.payout, settlement.ts) if settle is not None else None
+        position = self._book.position
+        decision_id = position.decision_id if position is not None and position.sym == settlement.sym else None
+        self._log.write("settlement", {**settlement.to_dict(), "decision_id": decision_id, "blk": block.number, "realized_pnl_usd": None if fill is None else fill.realized_pnl_usd, "contracts": None if fill is None else fill.qty}, ts_ms=block.ts_ms)
+        if fill is not None:
+            self._log.write("fill", {**fill.to_dict(), "decision_id": decision_id or "", "blk": block.number}, ts_ms=fill.ts)
+        if position is not None and position.sym == settlement.sym and self._broker.position(settlement.sym).qty == 0:
+            closed = self._book.close()
+            bpos = self._broker.position(closed.sym)
+            self._log.write("position_closed", {"decision_id": closed.decision_id, "sym": closed.sym, "blk": block.number, "position": closed.to_dict(), "realized_pnl_usd": bpos.realized_pnl_usd, "fees_usd": bpos.fees_usd, "settled": True, "payout": settlement.payout}, ts_ms=block.ts_ms)
+        pending = self._book.pending
+        if pending is not None and pending.order.sym == settlement.sym:
+            self._broker.cancel(pending.order.id)
+            self._book.clear_pending()
+            self._log.write("order_expired", {"order_id": pending.order.id, "decision_id": pending.order.decision_id, "sym": pending.order.sym, "blk": block.number, "reason": "contract settled"}, ts_ms=block.ts_ms)
 
     def _open_position(self, order: Order, block: Block) -> None:
         bpos = self._broker.position(order.sym)

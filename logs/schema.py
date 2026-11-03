@@ -20,6 +20,7 @@ KINDS: dict[str, tuple[str, ...]] = {
     "position_opened": ("decision_id", "sym"),
     "position_closed": ("decision_id", "sym"),
     "order_expired": ("order_id",),
+    "settlement": ("sym", "ticker", "payout"),
     "error": ("where",),
 }
 

@@ -37,7 +37,8 @@ def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None) -> tuple[Desk, Log
     """Wire every component. `judge` can be injected (tests); by default it comes from JUDGE_URL."""
     assert_desk_cannot_see_jev_key(os.environ)
     log = LogWriter(cfg.log_dir, Redactor([cfg.desk_secret]))
-    feed = make_feed(cfg.feed, cfg.symbols, start_ms=start_ms - cfg.warmup_blocks * cfg.block_ms, replay_path=cfg.replay_path, seed=cfg.synthetic_seed, tick_ms=cfg.synthetic_tick_ms, base_url=cfg.feed_base_url, poll_ms=cfg.feed_poll_ms)
+    kalshi_opts = {"underlying": cfg.kalshi_underlying, "base_url": cfg.kalshi_base_url, "block_ms": cfg.block_ms, "trade_window_s": cfg.kalshi_trade_window_s, "min_time_left_s": cfg.kalshi_min_time_left_s, "rv_window_blocks": cfg.rv_window_blocks}
+    feed = make_feed(cfg.feed, cfg.symbols, start_ms=start_ms - cfg.warmup_blocks * cfg.block_ms, replay_path=cfg.replay_path, seed=cfg.synthetic_seed, tick_ms=cfg.synthetic_tick_ms, base_url=cfg.feed_base_url, poll_ms=cfg.feed_poll_ms, kalshi=kalshi_opts)
     if hasattr(feed, "start"):
         feed.start()
     battery = load_battery(cfg.bot)
@@ -46,7 +47,10 @@ def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None) -> tuple[Desk, Log
     trial = registry.register_run(spec, mode=cfg.mode, ts_ms=start_ms)
     log.write("trial", {"trial_id": trial.trial_id, "spec": spec, "run": trial.runs, "mode": cfg.mode, "registered_trials": registry.count()}, ts_ms=start_ms)
     gate = RiskGate(cfg.limits)
-    broker = make_broker("paper", gate, cash_usd=cfg.paper_cash_usd, fee_bps=cfg.fee_bps, maker_fee_bps=cfg.maker_fee_bps, gas_usd=cfg.gas_usd, slippage_bps=cfg.paper_slippage_bps)
+    if cfg.fee_model == "kalshi":
+        broker = make_broker("paper", gate, binary=True, taker_rate=cfg.kalshi_taker_rate, maker_rate=cfg.kalshi_maker_rate, cash_usd=cfg.paper_cash_usd, slippage_bps=cfg.paper_slippage_bps)
+    else:
+        broker = make_broker("paper", gate, cash_usd=cfg.paper_cash_usd, fee_bps=cfg.fee_bps, maker_fee_bps=cfg.maker_fee_bps, gas_usd=cfg.gas_usd, slippage_bps=cfg.paper_slippage_bps)
     desk = Desk(
         cfg,
         feed=feed,
@@ -70,8 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Dealbot desk (paper trading only)")
     parser.add_argument("--env-file", help="KEY=VALUE file; real environment variables take precedence")
     parser.add_argument("--mode", choices=("shadow", "paper"))
-    parser.add_argument("--bot", choices=("gambler", "house", "spy"))
-    parser.add_argument("--feed", choices=("synthetic", "replay", "coinbase"))
+    parser.add_argument("--bot", choices=("gambler", "house", "spy", "kalshi"))
+    parser.add_argument("--feed", choices=("synthetic", "replay", "coinbase", "kalshi"))
     parser.add_argument("--symbols", help="comma separated")
     parser.add_argument("--judge-url")
     parser.add_argument("--blocks", type=int, default=None, help="stop after N blocks (default: run forever)")
@@ -88,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     overrides = {"DESK_MODE": args.mode, "DESK_BOT": args.bot, "FEED": args.feed, "DESK_SYMBOLS": args.symbols, "JUDGE_URL": args.judge_url}
     try:
         cfg = DeskConfig.from_env(env, overrides)
-        if cfg.feed == "coinbase" and args.fast:
+        if cfg.feed in ("coinbase", "kalshi") and args.fast:
             raise ConfigError("--fast makes no sense with a live feed; the block clock must run in real time")
         if args.start_ms is not None:
             start_ms = args.start_ms

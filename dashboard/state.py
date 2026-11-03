@@ -10,7 +10,7 @@ from collections.abc import Mapping
 
 from reports.calibration import brier, buckets, forecasts_from_outcomes
 
-TRADE_KINDS = frozenset({"fill", "order", "would_execute", "position_opened", "position_closed", "order_expired"})
+TRADE_KINDS = frozenset({"fill", "order", "would_execute", "position_opened", "position_closed", "order_expired", "settlement"})
 MOVE_KINDS = frozenset({"decision", "veto", "trial", "error"}) | TRADE_KINDS
 
 
@@ -207,6 +207,13 @@ class DeskState:
     def _on_position_closed(self, rec: Mapping) -> None:
         pos = rec.get("position") or {}
         self._move(rec, title=f"position closed: {pos.get('side')} {rec.get('sym')}", detail=f"symbol realized to date {float(rec.get('realized_pnl_usd') or 0):+.2f} USD, fees {float(rec.get('fees_usd') or 0):.2f} USD", status="neutral", data={"position": pos})
+
+    def _on_settlement(self, rec: Mapping) -> None:
+        self.counts["settlements"] += 1
+        realized = rec.get("realized_pnl_usd")
+        payout = float(rec.get("payout") or 0)
+        status = "neutral" if realized is None else ("good" if realized >= 0 else "critical")
+        self._move(rec, title=f"settled {rec.get('ticker')}: {'YES' if payout >= 1 else 'NO'} ({'official' if rec.get('official') else 'provisional'})", detail=("no position" if realized is None else f"realized {float(realized):+.2f} USD") + (f", strike {rec.get('strike')}, underlying {rec.get('underlying_price')}" if rec.get("strike") is not None else ""), status=status, data={"payout": payout, "official": rec.get("official")})
 
     def _on_order_expired(self, rec: Mapping) -> None:
         self._move(rec, title=f"order expired: {rec.get('order_id')}", detail="resting entry cancelled after its time to live", status="warning", data={})

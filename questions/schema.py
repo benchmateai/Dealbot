@@ -34,8 +34,11 @@ class BatteryError(ValueError):
 @dataclass(frozen=True)
 class Resolution:
     rule: str
-    horizon_blocks: int
+    horizon_blocks: int | str
     param: float | str = "cost"
+    on: str = "symbol"
+    """horizon_blocks: a block count, or "expiry" for a contract (the desk supplies the count at decision time).
+    on: "symbol" grades the candidate's own price path; "underlying" grades the contract's underlying."""
 
 
 @dataclass(frozen=True)
@@ -121,8 +124,10 @@ def _validate_question(q: Question) -> None:
             raise BatteryError(f"{q.id}: unknown outcome rule {res.rule!r}")
         if spec.kind != q.kind:
             raise BatteryError(f"{q.id}: rule {res.rule!r} grades a {spec.kind} question, not a {q.kind}")
-        if not isinstance(res.horizon_blocks, int) or res.horizon_blocks < 1:
-            raise BatteryError(f"{q.id}: horizon_blocks must be a positive integer")
+        if res.horizon_blocks != "expiry" and (not isinstance(res.horizon_blocks, int) or isinstance(res.horizon_blocks, bool) or res.horizon_blocks < 1):
+            raise BatteryError(f"{q.id}: horizon_blocks must be a positive integer or 'expiry'")
+        if res.on not in ("symbol", "underlying"):
+            raise BatteryError(f"{q.id}: resolution.on must be 'symbol' or 'underlying'")
         try:
             parse_param(res.param, cost_bps=1.0, rv_bps=1.0)
         except ValueError as exc:

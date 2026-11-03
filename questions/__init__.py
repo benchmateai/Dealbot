@@ -6,7 +6,7 @@ import importlib
 
 from questions.schema import OTHER, OTHER_TEXT, Battery, BatteryError, ChoiceQ, NoulQ, Resolution, ScoreQ
 
-BOTS = ("gambler", "house", "spy")
+BOTS = ("gambler", "house", "spy", "kalshi")
 
 __all__ = ["BOTS", "OTHER", "OTHER_TEXT", "Battery", "BatteryError", "ChoiceQ", "NoulQ", "Resolution", "ScoreQ", "load_battery"]
 

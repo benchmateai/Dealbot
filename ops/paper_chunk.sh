@@ -31,14 +31,19 @@ export DESK_SECRET
 DESK_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 
 PY=python3
+NEED=""
+[ "$JUDGE_BACKEND" = "typesafe" ] && ! python3 -c "import typesafe_sdk" 2>/dev/null && NEED="$NEED typesafe-sdk>=0.7.5,<0.8"
+[ "$FEED" = "kalshi" ] && ! python3 -c "import cryptography" 2>/dev/null && NEED="$NEED cryptography>=42"
+if [ -n "$NEED" ]; then
+  if [ ! -x .venv/bin/python ]; then
+    if command -v uv >/dev/null 2>&1; then uv venv -q .venv; else python3 -m venv .venv; fi
+  fi
+  # shellcheck disable=SC2086
+  if command -v uv >/dev/null 2>&1; then uv pip install -q --python .venv/bin/python $NEED; else .venv/bin/pip install -q $NEED; fi
+  PY=.venv/bin/python
+fi
 if [ "$JUDGE_BACKEND" = "typesafe" ]; then
   if [ "$JUDGE_AUTH" = "env" ] && [ -z "${TYPESAFE_API_KEY:-}" ]; then echo "paper_chunk: TYPESAFE_API_KEY is not set (or set JUDGE_AUTH=proxy)" >&2; exit 2; fi
-  if ! python3 -c "import typesafe_sdk" 2>/dev/null; then
-    if [ ! -x .venv/bin/python ]; then
-      if command -v uv >/dev/null 2>&1; then uv venv -q .venv && uv pip install -q --python .venv/bin/python "typesafe-sdk>=0.7.5,<0.8"; else python3 -m venv .venv && .venv/bin/pip install -q "typesafe-sdk>=0.7.5,<0.8"; fi
-    fi
-    PY=.venv/bin/python
-  fi
   export JUDGE_AUTH
   if [ ! -s "$LOG_DIR/pinned_model.txt" ]; then "$PY" -m judge.pin_model > "$LOG_DIR/pinned_model.txt"; fi
   export JEV_MODEL; JEV_MODEL=$(cat "$LOG_DIR/pinned_model.txt")
@@ -54,7 +59,7 @@ else
 fi
 
 echo "paper_chunk: branch=$RUN_BRANCH mode=$DESK_MODE bot=$DESK_BOT feed=$FEED judge=$JUDGE_URL model=${JEV_MODEL:-stub} blocks=$CHUNK_BLOCKS"
-env -u TYPESAFE_API_KEY python3 -m desk.run --blocks "$CHUNK_BLOCKS" --state-file "$LOG_DIR/state.json" ${DESK_FAST:+--fast} ${DESK_START_MS:+--start-ms "$DESK_START_MS"}
+env -u TYPESAFE_API_KEY "$PY" -m desk.run --blocks "$CHUNK_BLOCKS" --state-file "$LOG_DIR/state.json" ${DESK_FAST:+--fast} ${DESK_START_MS:+--start-ms "$DESK_START_MS"}
 
 python3 -m reports.daily --log-dir "$LOG_DIR" --date "$(date -u +%F)" --out "$LOG_DIR/reports" >/dev/null 2>&1 || true
 git add -f "$LOG_DIR"/events-*.jsonl "$LOG_DIR/state.json" "$LOG_DIR/trials.json" 2>/dev/null || true

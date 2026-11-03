@@ -54,15 +54,29 @@ class OutcomeResolver:
     def restore_state(self, data: list[dict]) -> None:
         self._pending = [Pending(**p) for p in data]
 
-    def register(self, *, decision_id: str, bot: str, sym: str, block: int, snapshot: dict, state: dict, battery: Battery, answers: dict, ts_ms: int | None = None) -> int:
+    def register(self, *, decision_id: str, bot: str, sym: str, block: int, snapshot: dict, state: dict, battery: Battery, answers: dict, ts_ms: int | None = None, expiry_blocks: int | None = None, underlying_sym: str | None = None, underlying_snapshot: dict | None = None) -> int:
+        """Queue every graded answer. Contract questions pass `expiry_blocks`; questions graded on the
+        underlying pass its symbol and snapshot (with `strike` included for strike-relative rules)."""
         cost_bps = float((state.get("desk") or {}).get("cost_bps") or 0.0)
-        rv_bps = snapshot.get("rv_bps")
         registered = 0
         for q in battery.questions:
             res = q.resolution
             answer = answers.get(q.id)
             if res is None or answer is None:
                 continue
+            horizon = res.horizon_blocks
+            if horizon == "expiry":
+                if not expiry_blocks or expiry_blocks < 1:
+                    self._log.write("outcome", {"decision_id": decision_id, "qid": q.id, "qkind": q.kind, "bot": bot, "sym": sym, "blk": block, "status": "unresolvable:horizon", "rule": res.rule}, ts_ms=ts_ms)
+                    continue
+                horizon = int(expiry_blocks)
+            target_sym, target_snap = sym, snapshot
+            if res.on == "underlying":
+                if not underlying_sym or not underlying_snapshot:
+                    self._log.write("outcome", {"decision_id": decision_id, "qid": q.id, "qkind": q.kind, "bot": bot, "sym": sym, "blk": block, "status": "unresolvable:underlying", "rule": res.rule}, ts_ms=ts_ms)
+                    continue
+                target_sym, target_snap = underlying_sym, underlying_snapshot
+            rv_bps = target_snap.get("rv_bps")
             threshold = parse_param(res.param, cost_bps=cost_bps, rv_bps=rv_bps)
             if threshold is None:
                 self._log.write("outcome", {"decision_id": decision_id, "qid": q.id, "qkind": q.kind, "bot": bot, "sym": sym, "blk": block, "status": "unresolvable:threshold", "rule": res.rule}, ts_ms=ts_ms)
@@ -73,7 +87,7 @@ class OutcomeResolver:
                 predicted, chosen = answer.get("probabilities"), answer.get("choice")
             else:
                 predicted, chosen = answer.get("probabilities"), answer.get("score")
-            self._pending.append(Pending(decision_id, q.id, q.kind, bot, sym, block, int(snapshot["as_of"]), res.horizon_blocks, res.rule, threshold, predicted, chosen, snapshot, _pos_sign(state), rv_bps, cost_bps))
+            self._pending.append(Pending(decision_id, q.id, q.kind, bot, target_sym, block, int(target_snap["as_of"]), horizon, res.rule, threshold, predicted, chosen, target_snap, _pos_sign(state), rv_bps, cost_bps))
             registered += 1
         return registered
 

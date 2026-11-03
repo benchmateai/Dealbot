@@ -179,7 +179,7 @@ td.r, th.r { text-align: right; }
   'use strict';
   const S = { data: null, details: {}, mode: 'live', range: 'all', show: { decision: true, trade: true, veto: true, rejection: false, system: true }, sym: '', expanded: null, lastFetch: 0, failed: false, limit: 120 };
   const PAGE = 120;
-  const TRADE = new Set(['fill', 'order', 'would_execute', 'position_opened', 'position_closed', 'order_expired']);
+  const TRADE = new Set(['fill', 'order', 'would_execute', 'position_opened', 'position_closed', 'order_expired', 'settlement']);
   const SYSTEM = new Set(['trial', 'error']);
   const STAGES = ['free_cut', 'one_call', 'hard_facts', 'jev', 'final_pick'];
   const $ = (sel) => document.querySelector(sel);
@@ -364,6 +364,7 @@ td.r, th.r { text-align: right; }
       case 'position_opened': return 'opened';
       case 'position_closed': return 'closed';
       case 'order_expired': return 'expired';
+      case 'settlement': return 'settled';
       case 'rejection': return 'rejected';
       case 'error': return 'fault';
       case 'trial': return 'started';

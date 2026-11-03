@@ -19,9 +19,25 @@ def make_feed(
     start_prices: dict[str, float] | None = None,
     base_url: str | None = None,
     poll_ms: int = 2000,
+    kalshi: dict | None = None,
 ) -> MarketFeed:
     if kind == "synthetic":
         return SyntheticFeed(symbols, start_ms=start_ms, seed=seed, tick_ms=tick_ms, start_prices=start_prices)
+    if kind == "kalshi":
+        from kalshi.api import KalshiClient
+        from kalshi.auth import KalshiAuth
+        from kalshi.feed import KalshiFeed
+
+        opts = dict(kalshi or {})
+        underlying = opts.get("underlying") or {}
+        products = tuple(sorted(set(underlying.get(s) for s in symbols if underlying.get(s))))
+        if len(products) != len([s for s in symbols]):
+            pass  # several series may share an underlying product; that is fine
+        if not products:
+            raise FeedError("kalshi feed needs KALSHI_UNDERLYING entries for every series")
+        under = CoinbaseFeed(products, poll_ms=poll_ms)
+        client = KalshiClient(opts.get("base_url") or "https://api.elections.kalshi.com", auth=KalshiAuth.from_env())
+        return KalshiFeed(symbols, underlying=underlying, client=client, underlying_feed=under, poll_ms=poll_ms, block_ms=int(opts.get("block_ms") or 12_000), trade_window_s=float(opts.get("trade_window_s") or 600.0), min_time_left_s=float(opts.get("min_time_left_s") or 30.0), rv_window_blocks=int(opts.get("rv_window_blocks") or 20))
     if kind == "coinbase":
         return CoinbaseFeed(symbols, poll_ms=poll_ms, **({"base_url": base_url} if base_url else {}))
     if kind == "replay":

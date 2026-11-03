@@ -175,7 +175,25 @@ def vol_regime_differs(s: PathStats, thr: float, ctx: RuleContext) -> bool | Non
     return after > 1.5 * ctx.rv_bps or after < 0.5 * ctx.rv_bps
 
 
+def end_price_above_half(s: PathStats, thr: float, ctx: RuleContext) -> bool | None:
+    """For a binary contract's own price path: the last price before expiry is above 0.50, so it settled YES."""
+    return None if not s.mids else s.mids[-1] > 0.5
+
+
 # ---- choice rules ---------------------------------------------------------------------------
+
+def moves_toward_strike(s: PathStats, thr: float, ctx: RuleContext) -> str:
+    strike = ctx.snapshot.get("strike")
+    if strike is None or not s.mid0:
+        return "other"
+    to_strike = _sign(float(strike) - s.mid0)
+    end = s.end_ret_bps
+    if abs(end) <= thr:
+        return "stay"
+    if to_strike == 0:
+        return "other"
+    return "toward" if _sign(end) == to_strike else "away"
+
 
 def direction_first_touch(s: PathStats, thr: float, ctx: RuleContext) -> str:
     return {1: "up", -1: "down", 0: "flat"}[s.first_touch(thr)]
@@ -237,6 +255,8 @@ RULES: dict[str, RuleSpec] = {
     "pos_loses_more_than": RuleSpec("noul", pos_loses_more_than, "open position loses more than thr by the horizon"),
     "pos_gains": RuleSpec("noul", pos_gains, "open position gains more than thr by the horizon"),
     "vol_regime_differs": RuleSpec("noul", vol_regime_differs, "realized vol after is >1.5x or <0.5x rv_bps"),
+    "end_price_above_half": RuleSpec("noul", end_price_above_half, "binary: last price before expiry above 0.50"),
+    "moves_toward_strike": RuleSpec("choice", moves_toward_strike, "toward / away / stay relative to snapshot.strike"),
     "direction_first_touch": RuleSpec("choice", direction_first_touch, "up / down / flat by first touch of thr"),
     "revert_or_continue": RuleSpec("choice", revert_or_continue, "revert / continue / stay relative to ret_bps.w20"),
     "regime_realized": RuleSpec("choice", regime_realized, "trending / ranging / volatile_chop / other"),

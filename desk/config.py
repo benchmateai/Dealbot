@@ -13,8 +13,8 @@ from judge.jev import JEV_KEY_ENV, STUB_MODEL, ModelNotPinnedError, ensure_pinne
 from risk.limits import RiskLimits
 
 MODES = ("shadow", "paper")
-BOTS = ("gambler", "house", "spy")
-FEEDS = ("synthetic", "replay", "coinbase")
+BOTS = ("gambler", "house", "spy", "kalshi")
+FEEDS = ("synthetic", "replay", "coinbase", "kalshi")
 MIN_DESK_SECRET_CHARS = 32
 
 
@@ -97,6 +97,14 @@ class DeskConfig:
     synthetic_tick_ms: int
     trials_file: str
     heartbeat_every_blocks: int
+    fee_model: str = "bps"
+    kalshi_base_url: str = "https://api.elections.kalshi.com"
+    kalshi_underlying: dict = field(default_factory=dict)
+    kalshi_trade_window_s: float = 600.0
+    kalshi_min_time_left_s: float = 30.0
+    kalshi_taker_rate: float = 0.07
+    kalshi_maker_rate: float = 0.0
+    binary_model_weight: float = 0.5
 
     @property
     def block_ms(self) -> int:
@@ -118,7 +126,19 @@ class DeskConfig:
             raise ConfigError(f"DESK_BOT must be one of {BOTS}")
         if feed not in FEEDS:
             raise ConfigError(f"FEED must be one of {FEEDS}")
-        symbols = tuple(s.strip() for s in _get(env, "DESK_SYMBOLS", "ETH-USD").split(",") if s.strip())
+        binary = bot == "kalshi"
+        if binary != (feed == "kalshi"):
+            raise ConfigError("DESK_BOT=kalshi and FEED=kalshi go together; the kalshi bot trades binaries from the kalshi feed")
+        symbols = tuple(s.strip() for s in _get(env, "DESK_SYMBOLS", "KXETH15M" if binary else "ETH-USD").split(",") if s.strip())
+        kalshi_underlying: dict[str, str] = {}
+        if binary:
+            for pair in _get(env, "KALSHI_UNDERLYING", "KXETH15M:ETH-USD,KXBTC15M:BTC-USD").split(","):
+                if ":" in pair:
+                    series, product = pair.split(":", 1)
+                    kalshi_underlying[series.strip()] = product.strip()
+            missing = [s for s in symbols if s not in kalshi_underlying]
+            if missing:
+                raise ConfigError(f"KALSHI_UNDERLYING has no product for {missing}")
         if not symbols:
             raise ConfigError("DESK_SYMBOLS must list at least one symbol")
         block_seconds = _float(env, "BLOCK_SECONDS", "12")
@@ -152,13 +172,16 @@ class DeskConfig:
                 min_edge_margin=_float(env, "MIN_EDGE_MARGIN", "0.5"),
                 pinned_model=jev_model,
                 max_stale_ms=_int(env, "MAX_STALE_MS", str(2 * block_ms)),
+                fee_model="kalshi" if binary else "bps",
+                kalshi_taker_rate=_float(env, "KALSHI_TAKER_RATE", "0.07"),
+                kalshi_maker_rate=_float(env, "KALSHI_MAKER_RATE", "0"),
             ).validate()
         except ValueError as exc:
             raise ConfigError(str(exc)) from exc
         windows = tuple(int(w) for w in _get(env, "RET_WINDOWS_BLOCKS", "1,5,20").split(","))
         if len(windows) != 3 or any(w <= 0 for w in windows):
             raise ConfigError("RET_WINDOWS_BLOCKS must be three positive integers")
-        order_qty = _float(env, "ORDER_QTY", "0.2")
+        order_qty = _float(env, "ORDER_QTY", "10" if binary else "0.2")
         if order_qty <= 0:
             raise ConfigError("ORDER_QTY must be positive")
         replay_path = _get(env, "FEED_REPLAY_PATH", "") or None
@@ -191,9 +214,9 @@ class DeskConfig:
             max_jev_candidates=_int(env, "MAX_JEV_CANDIDATES", "1"),
             ret_windows_blocks=windows,  # type: ignore[arg-type]
             rv_window_blocks=_int(env, "RV_WINDOW_BLOCKS", "20"),
-            max_spread_bps=_float(env, "MAX_SPREAD_BPS", "20"),
-            rv_min_bps=_float(env, "RV_MIN_BPS", "1"),
-            rv_max_bps=_float(env, "RV_MAX_BPS", "500"),
+            max_spread_bps=_float(env, "MAX_SPREAD_BPS", "1500" if binary else "20"),
+            rv_min_bps=_float(env, "RV_MIN_BPS", "0" if binary else "1"),
+            rv_max_bps=_float(env, "RV_MAX_BPS", "20000" if binary else "500"),
             min_ticks=_int(env, "MIN_TICKS", "30"),
             max_stale_ms=limits.max_stale_ms,
             max_feed_lag_ms=_int(env, "MAX_FEED_LAG_MS", str(block_ms)),
@@ -205,6 +228,14 @@ class DeskConfig:
             synthetic_tick_ms=_int(env, "SYNTHETIC_TICK_MS", "1000"),
             trials_file=_get(env, "TRIALS_FILE", f"{log_dir}/trials.json"),
             heartbeat_every_blocks=heartbeat_every,
+            fee_model="kalshi" if binary else "bps",
+            kalshi_base_url=_get(env, "KALSHI_BASE_URL", "https://api.elections.kalshi.com"),
+            kalshi_underlying=kalshi_underlying,
+            kalshi_trade_window_s=_float(env, "KALSHI_TRADE_WINDOW_S", "600"),
+            kalshi_min_time_left_s=_float(env, "KALSHI_MIN_TIME_LEFT_S", "30"),
+            kalshi_taker_rate=_float(env, "KALSHI_TAKER_RATE", "0.07"),
+            kalshi_maker_rate=_float(env, "KALSHI_MAKER_RATE", "0"),
+            binary_model_weight=_float(env, "BINARY_MODEL_WEIGHT", "0.5"),
         )
 
     def public_dict(self) -> dict:

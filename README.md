@@ -18,6 +18,7 @@ logs/       JSONL: every snapshot, question, answer (with probabilities), decisi
 outcomes/   grades every judgment after its horizon from the realized path -> calibration data
 reports/    calibration (buckets, Brier, reliability chart), daily summary, trial report
 trials/     registry of every configuration ever run, deflated Sharpe haircut
+kalshi/     15-minute binaries: market data, signing, baseline probability, binary paper broker
 dashboard/  the visual desk: tails the event log and shows every move live    -> read-only
 desk/       config, block clock, modes (shadow | paper), the loop, the CLI
 ```
@@ -129,6 +130,27 @@ exchange's time. The first twenty blocks hold while history accumulates. Set `FE
 your actual fee tier and `GAS_USD=0` for a centralized venue. The weekly report prints the money line last on
 purpose: a week is far below the minimum backtest length for any Sharpe worth having, so the calibration table
 and the trial verdict are the evidence, the PnL is noise until they say otherwise.
+
+## Kalshi 15-minute binaries
+
+`DESK_BOT=kalshi FEED=kalshi DESK_SYMBOLS=KXETH15M` trades the series' current 15-minute contract on paper.
+A binary is a different instrument, so the pieces differ from spot:
+
+- `kalshi/feed.py` tracks the series' current contract, polls its level-1 book into ticks whose bid and ask
+  are the YES prices, keeps the Coinbase underlying alongside, and records a settlement at expiry (Kalshi's
+  official result when published, otherwise provisional from the underlying against the strike).
+- `kalshi/model.py` owns the baseline: P(above strike) from distance, time left and the underlying's realized
+  vol. Jev is asked only what the formula misses (`questions/kalshi.py`): a stale quote, where the underlying
+  heads in the minutes left, how violent the path will be, and whether to close early.
+- `policy/binary.py` makes the threshold the market's own price plus a cost-derived minimum edge: buy YES
+  when the combined probability beats the ask by more than (1 + margin) x (taker fee + half the spread).
+- `kalshi/broker.py` fills in the paper broker with Kalshi's fee formula and settles positions to $1 or $0.
+- Trading is confined to each contract's last `KALSHI_TRADE_WINDOW_S` seconds and never inside the last
+  `KALSHI_MIN_TIME_LEFT_S`. `ORDER_QTY` is a contract count.
+
+Market data needs no key. Signed requests (`kalshi/auth.py`, RSA-PSS) need `KALSHI_API_KEY_ID` and
+`KALSHI_PRIVATE_KEY` (PEM text or its base64) as environment variables and `pip install 'dealbot-desk[kalshi]'`.
+No order endpoint is wired to the trading loop: paper only.
 
 ## Unattended runs
 

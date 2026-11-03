@@ -50,6 +50,13 @@ THRESHOLDS: dict[str, dict[str, ActionCost]] = {
         "enter_short": ActionCost(wrong_bps=60, missed_bps=20),   # 0.75
         "exit": ActionCost(wrong_bps=15, missed_bps=45),          # 0.25
     },
+    # Kalshi binaries: entries use the market-price rule in policy/binary.py (threshold = contract price plus
+    # the cost-derived minimum edge), so the entry rows here are placeholders that are never the deciding line.
+    "kalshi": {
+        "enter_long": ActionCost(wrong_bps=50, missed_bps=50),    # 0.50, superseded by policy/binary.py
+        "enter_short": ActionCost(wrong_bps=50, missed_bps=50),   # 0.50, superseded by policy/binary.py
+        "exit": ActionCost(wrong_bps=2, missed_bps=6),            # 0.25: closing early costs a cent or two, holding a loser costs the contract
+    },
 }
 
 
@@ -68,6 +75,7 @@ EDGE: dict[str, EdgeModel] = {
     "gambler": EdgeModel(target_bps=80, stop_bps=40),
     "house": EdgeModel(target_bps=15, stop_bps=25),
     "spy": EdgeModel(target_bps=50, stop_bps=30),
+    "kalshi": EdgeModel(target_bps=0, stop_bps=0),  # binaries carry their edge as (probability - price); see policy/binary.py
 }
 
 

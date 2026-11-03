@@ -16,6 +16,7 @@ from dataclasses import replace
 from broker.base import Order
 from filter.funnel import Candidate, FunnelContext, Rejection
 from judge.client import Backoff, Judge, JudgeError, JudgeMalformed, JudgeRateLimited, JudgeTimeout
+from policy.binary import BinaryCosts, final_pick_binary
 from policy.decide import final_pick
 from policy.thresholds import EdgeModel
 from policy.weights import PolicyError
@@ -104,9 +105,9 @@ class HardFacts:
         for c in candidates:
             s = c.snapshot
             notional = self._qty * s.mid
-            cost = 2 * lim.fee_bps_for(self._order_type) / 1e4 * notional + 2 * lim.gas_usd
+            cost = lim.round_trip_cost_usd(self._qty, s.mid, self._order_type)
             best_edge = self._edge.target_bps / 1e4 * notional
-            if best_edge < cost * (1 + lim.min_edge_margin):
+            if lim.fee_model == "bps" and best_edge < cost * (1 + lim.min_edge_margin):
                 rejected.append(Rejection(c.sym, self.name, "fees_exceed_best_case_edge", f"best case edge {best_edge:.4f} USD vs required {cost * (1 + lim.min_edge_margin):.4f} USD"))
                 continue
             rctx = RiskContext(
@@ -196,11 +197,22 @@ class JevStage:
 class FinalPick:
     name = "final_pick"
 
+    def __init__(self, *, kind: str = "spot", binary_costs: BinaryCosts | None = None) -> None:
+        if kind not in ("spot", "binary"):
+            raise ValueError("kind must be spot or binary")
+        self._kind = kind
+        self._costs = binary_costs or BinaryCosts()
+
     def run(self, candidates: list[Candidate], ctx: FunnelContext) -> tuple[list[Candidate], list[Rejection]]:
         picked, rejected = [], []
+        position_sign = 0 if ctx.position is None else getattr(ctx.position, "sign", 0)
         for c in candidates:
             try:
-                pick = final_pick(ctx.bot, ctx.phase, c.answers or {}, c.snapshot.to_dict())
+                contract = c.state.get("contract") if isinstance(c.state, dict) else None
+                if self._kind == "binary" and contract:
+                    pick = final_pick_binary(ctx.bot, ctx.phase, c.answers or {}, c.snapshot.to_dict(), contract, self._costs, position_sign=position_sign)
+                else:
+                    pick = final_pick(ctx.bot, ctx.phase, c.answers or {}, c.snapshot.to_dict())
             except PolicyError as exc:
                 rejected.append(Rejection(c.sym, self.name, "policy_error", str(exc)))
                 continue

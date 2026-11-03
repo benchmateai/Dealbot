@@ -112,7 +112,7 @@ def check_fees_plus_gas(order: Order, ctx: RiskContext, lim: RiskLimits) -> Veto
         return None
     price = ctx.mid if order.price is None else order.price
     notional = order.qty * price
-    cost = 2.0 * lim.fee_bps_for(order.type) / 1e4 * notional + 2.0 * lim.gas_usd
+    cost = lim.round_trip_cost_usd(order.qty, price, order.type)
     required = cost * (1.0 + lim.min_edge_margin)
     edge = ctx.expected_edge_bps / 1e4 * notional
     if edge < required:

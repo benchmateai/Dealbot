@@ -44,6 +44,8 @@ def strategy_spec(cfg, battery: Battery) -> dict:
         "pending_order_ttl_blocks": cfg.pending_order_ttl_blocks,
         "warmup_blocks": cfg.warmup_blocks,
         "heartbeat_every_blocks": cfg.heartbeat_every_blocks,
+        "fee_model": cfg.fee_model,
+        "kalshi": None if cfg.fee_model != "kalshi" else {"base_url": cfg.kalshi_base_url, "underlying": dict(cfg.kalshi_underlying), "trade_window_s": cfg.kalshi_trade_window_s, "min_time_left_s": cfg.kalshi_min_time_left_s, "taker_rate": cfg.kalshi_taker_rate, "maker_rate": cfg.kalshi_maker_rate, "model_weight": cfg.binary_model_weight},
         "jev_model": cfg.jev_model,
         "feed": {"kind": cfg.feed, "replay_path": cfg.replay_path, "synthetic_seed": cfg.synthetic_seed, "synthetic_tick_ms": cfg.synthetic_tick_ms},
     }
