@@ -1,80 +1,182 @@
 #!/usr/bin/env bash
-# One unattended chunk of the paper desk: pull the run branch, resume from its checkpoint, run the
-# judge and the desk for CHUNK_BLOCKS blocks, then commit the logs and the checkpoint and push.
-# Paper only. The TypeSafe key is read from the environment by the judge (JUDGE_AUTH=env) or injected
-# by the environment's proxy (JUDGE_AUTH=proxy); the desk itself runs without it and without any
-# Kalshi credentials (paper needs only public market data). Nothing secret is written to the branch.
-# The judge gets its own .venv with the SDK when needed.
+# One unattended chunk of the paper desk. Paper only: there is no live broker in this repository.
 #
-#   RUN_BRANCH=paper-run FEED=coinbase DESK_SYMBOLS=ETH-USD CHUNK_BLOCKS=570 bash ops/paper_chunk.sh
+#   FEED=kalshi DESK_BOT=kalshi DESK_SYMBOLS=KXETH15M,KXBTC15M bash ops/paper_chunk.sh
+#
+# The run branch lives in its own git worktree outside this checkout (RUN_DIR), so the session's
+# checkout stays clean on the base branch and no stop hook asks anyone to commit run logs. A chunk:
+#   1. syncs the run worktree: the run branch from origin, then the base branch merged in
+#   2. pins the Jev model once per run and starts the judge, which alone holds the TypeSafe key
+#   3. runs the pre-flight (python -m desk.preflight); a failure stops the chunk with exit 4
+#   4. runs the desk until the chunk deadline, checking the base branch every WATCH_SECONDS: when a
+#      fix lands, the desk stops after its current block, the run merges the fix, passes the
+#      pre-flight again and carries on (so a pushed fix reaches the run within minutes)
+#   5. after every desk segment: a chunk summary (reports.chunk_summary) and a commit of logs,
+#      checkpoint, trials, reports and summaries to the run branch, pushed
+#   6. at the end: the daily report and the dashboard snapshot in DASHBOARD_OUT
+# The desk process never sees TYPESAFE_API_KEY or any Kalshi credential.
+#
+# Exit codes: 0 done, 2 setup (key missing, judge down, pin failed), 4 pre-flight failed, 5 desk crashed.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+REPO=$(cd "$(dirname "$0")/.." && pwd)
 
 RUN_BRANCH=${RUN_BRANCH:-paper-run}
-BASE_BRANCH=${BASE_BRANCH:-claude/desk-skeleton}   # the first chunk branches the run off this
-JUDGE_AUTH=${JUDGE_AUTH:-env}                    # env: TYPESAFE_API_KEY | proxy: the environment proxy injects the key
-CHUNK_BLOCKS=${CHUNK_BLOCKS:-570}            # 570 blocks of 12 s = 114 minutes
+BASE_BRANCH=${BASE_BRANCH:-claude/desk-skeleton}
+RUN_DIR=${RUN_DIR:-$HOME/dealbot-run}
+VENV=${VENV:-$HOME/dealbot-venv}
+JUDGE_AUTH=${JUDGE_AUTH:-env}                 # env: TYPESAFE_API_KEY | proxy: the environment proxy injects the key
 JUDGE_PORT=${JUDGE_PORT:-8787}
 JUDGE_BACKEND=${JUDGE_BACKEND:-typesafe}      # typesafe | stub | demo (demo and stub need no key)
+BLOCK_SECONDS=${BLOCK_SECONDS:-12}
+if [ -n "${CHUNK_BLOCKS:-}" ]; then CHUNK_SECONDS=$(( CHUNK_BLOCKS * BLOCK_SECONDS )); else CHUNK_SECONDS=$(( ${CHUNK_MINUTES:-110} * 60 )); fi
+WATCH_SECONDS=${WATCH_SECONDS:-180}
+DASHBOARD_OUT=${DASHBOARD_OUT:-/tmp/dealbot-dashboard/data.json}
 export DESK_MODE=${DESK_MODE:-paper}
 export DESK_BOT=${DESK_BOT:-gambler}
 export FEED=${FEED:-coinbase}
+export BLOCK_SECONDS
 export LOG_DIR=logs/data
 
-if git fetch -q origin "$RUN_BRANCH" 2>/dev/null; then
-  git checkout -q "$RUN_BRANCH" && git pull -q --ff-only origin "$RUN_BRANCH"
-  # Carry code fixes made on the base branch into the run; the run branch only adds logs, so this merges cleanly.
-  git fetch -q origin "$BASE_BRANCH" && git merge -q --no-edit "origin/$BASE_BRANCH"
-else
-  git fetch -q origin "$BASE_BRANCH" && git checkout -q -B "$RUN_BRANCH" "origin/$BASE_BRANCH"
+say() { echo "paper_chunk: $*"; }
+desk_env() { env -u TYPESAFE_API_KEY -u KALSHI_API_KEY_ID -u KALSHI_PRIVATE_KEY "$@"; }
+retry_push() { for delay in 0 2 4 8 16; do [ "$delay" -gt 0 ] && sleep "$delay"; git push -q -u origin "$RUN_BRANCH" && return 0; done; return 1; }
+
+# ---- 1. the run worktree ---------------------------------------------------------------------
+git -C "$REPO" worktree prune
+git -C "$REPO" fetch -q origin "$BASE_BRANCH"
+if [ "$(git -C "$REPO" branch --show-current)" = "$RUN_BRANCH" ]; then
+  git -C "$REPO" checkout -q "$BASE_BRANCH"   # an older session left the checkout on the run branch
 fi
-mkdir -p "$LOG_DIR"
+if [ ! -e "$RUN_DIR/.git" ]; then
+  if git -C "$REPO" fetch -q origin "$RUN_BRANCH" 2>/dev/null; then
+    git -C "$REPO" worktree add -q -B "$RUN_BRANCH" "$RUN_DIR" "origin/$RUN_BRANCH"
+  else
+    git -C "$REPO" worktree add -q -B "$RUN_BRANCH" "$RUN_DIR" "origin/$BASE_BRANCH"
+  fi
+fi
+cd "$RUN_DIR"
+
+sync_run() {
+  git fetch -q origin "$BASE_BRANCH"
+  if git fetch -q origin "$RUN_BRANCH" 2>/dev/null; then
+    git merge -q --no-edit "origin/$RUN_BRANCH"
+  fi
+  git merge -q --no-edit "origin/$BASE_BRANCH"
+  BASE_SHA=$(git rev-parse "origin/$BASE_BRANCH")
+  mkdir -p "$LOG_DIR"
+}
+sync_run
+
+# ---- 2. python and the judge -----------------------------------------------------------------
+NEED="cryptography>=42"
+IMPORTS="cryptography"
+if [ "$JUDGE_BACKEND" = "typesafe" ]; then NEED="$NEED typesafe-sdk>=0.7.5,<0.8"; IMPORTS="$IMPORTS, typesafe_sdk"; fi
+# shellcheck disable=SC2086
+if ! "$VENV/bin/python" -c "import $IMPORTS" 2>/dev/null; then
+  if command -v uv >/dev/null 2>&1; then
+    [ -x "$VENV/bin/python" ] || uv venv -q "$VENV"
+    uv pip install -q --python "$VENV/bin/python" $NEED
+  else
+    [ -x "$VENV/bin/python" ] || python3 -m venv "$VENV"
+    "$VENV/bin/pip" install -q $NEED
+  fi
+fi
+PY="$VENV/bin/python"
 
 export DESK_SECRET
-DESK_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+DESK_SECRET=$("$PY" -c 'import secrets; print(secrets.token_hex(32))')
+JUDGE_PID=""
+stop_judge() { if [ -n "$JUDGE_PID" ]; then kill "$JUDGE_PID" 2>/dev/null || true; wait "$JUDGE_PID" 2>/dev/null || true; JUDGE_PID=""; fi; }
+trap stop_judge EXIT
 
-PY=python3
-NEED=""
-[ "$JUDGE_BACKEND" = "typesafe" ] && ! python3 -c "import typesafe_sdk" 2>/dev/null && NEED="$NEED typesafe-sdk>=0.7.5,<0.8"
-[ "$FEED" = "kalshi" ] && ! python3 -c "import cryptography" 2>/dev/null && NEED="$NEED cryptography>=42"
-if [ -n "$NEED" ]; then
-  if [ ! -x .venv/bin/python ]; then
-    if command -v uv >/dev/null 2>&1; then uv venv -q .venv; else python3 -m venv .venv; fi
-  fi
-  # shellcheck disable=SC2086
-  if command -v uv >/dev/null 2>&1; then uv pip install -q --python .venv/bin/python $NEED; else .venv/bin/pip install -q $NEED; fi
-  PY=.venv/bin/python
-fi
-if [ "$JUDGE_BACKEND" = "typesafe" ]; then
-  if [ "$JUDGE_AUTH" = "env" ] && [ -z "${TYPESAFE_API_KEY:-}" ]; then echo "paper_chunk: TYPESAFE_API_KEY is not set (or set JUDGE_AUTH=proxy)" >&2; exit 2; fi
+start_judge() {
+  if [ "$JUDGE_BACKEND" = "demo" ]; then export JUDGE_URL="stub://demo"; return; fi
+  if [ "$JUDGE_BACKEND" != "typesafe" ]; then export JUDGE_URL="stub://local"; return; fi
+  if [ "$JUDGE_AUTH" = "env" ] && [ -z "${TYPESAFE_API_KEY:-}" ]; then say "TYPESAFE_API_KEY is not set (or set JUDGE_AUTH=proxy)" >&2; exit 2; fi
   export JUDGE_AUTH
-  if [ ! -s "$LOG_DIR/pinned_model.txt" ]; then "$PY" -m judge.pin_model > "$LOG_DIR/pinned_model.txt"; fi
+  if [ ! -s "$LOG_DIR/pinned_model.txt" ]; then
+    if ! "$PY" -m judge.pin_model > "$LOG_DIR/pinned_model.txt.new"; then rm -f "$LOG_DIR/pinned_model.txt.new"; say "could not pin a model" >&2; exit 2; fi
+    mv "$LOG_DIR/pinned_model.txt.new" "$LOG_DIR/pinned_model.txt"
+  fi
   export JEV_MODEL; JEV_MODEL=$(cat "$LOG_DIR/pinned_model.txt")
   export JUDGE_URL="http://127.0.0.1:$JUDGE_PORT"
-  JUDGE_BACKEND=typesafe JUDGE_PORT=$JUDGE_PORT "$PY" -m judge.service > "$LOG_DIR/judge.log" 2>&1 &
+  JUDGE_BACKEND=typesafe JUDGE_PORT=$JUDGE_PORT "$PY" -m judge.service >> "$LOG_DIR/judge.log" 2>&1 &
   JUDGE_PID=$!
-  trap 'kill $JUDGE_PID 2>/dev/null || true' EXIT
-  for _ in $(seq 1 30); do curl -sf --noproxy '*' "http://127.0.0.1:$JUDGE_PORT/healthz" >/dev/null 2>&1 && break; sleep 1; done
-  if ! curl -sf --noproxy '*' "http://127.0.0.1:$JUDGE_PORT/healthz" >/dev/null 2>&1; then
-    echo "paper_chunk: the judge did not come up; last lines of $LOG_DIR/judge.log:" >&2
-    tail -n 20 "$LOG_DIR/judge.log" >&2
-    exit 3
+  for _ in $(seq 1 30); do curl -sf --noproxy '*' "$JUDGE_URL/healthz" >/dev/null 2>&1 && return 0; sleep 1; done
+  say "the judge did not come up; last lines of $LOG_DIR/judge.log:" >&2
+  tail -n 20 "$LOG_DIR/judge.log" >&2
+  exit 2
+}
+
+preflight() {
+  if desk_env "$PY" -m desk.preflight > "$LOG_DIR/preflight.log" 2>&1; then
+    say "preflight passed: $(grep -m1 '^scenario' "$LOG_DIR/preflight.log")"
+  else
+    say "PREFLIGHT FAILED; the desk was not started. Report:" >&2
+    cat "$LOG_DIR/preflight.log" >&2
+    exit 4
   fi
-elif [ "$JUDGE_BACKEND" = "demo" ]; then
-  export JUDGE_URL="stub://demo"
-else
-  export JUDGE_URL="stub://local"
-fi
+}
 
-echo "paper_chunk: branch=$RUN_BRANCH mode=$DESK_MODE bot=$DESK_BOT feed=$FEED judge=$JUDGE_URL model=${JEV_MODEL:-stub} blocks=$CHUNK_BLOCKS"
-env -u TYPESAFE_API_KEY -u KALSHI_API_KEY_ID -u KALSHI_PRIVATE_KEY "$PY" -m desk.run --blocks "$CHUNK_BLOCKS" --state-file "$LOG_DIR/state.json" ${DESK_FAST:+--fast} ${DESK_START_MS:+--start-ms "$DESK_START_MS"}
+# ---- 5. publish a segment --------------------------------------------------------------------
+publish() {
+  local since_ms=$1
+  "$PY" -m reports.chunk_summary --log-dir "$LOG_DIR" --since-ms "$since_ms" | sed 's/^/paper_chunk: /' || true
+  "$PY" -m reports.daily --log-dir "$LOG_DIR" --date "$(date -u +%F)" --out "$LOG_DIR/reports" >/dev/null 2>&1 || true
+  git add -f "$LOG_DIR"/events-*.jsonl "$LOG_DIR/state.json" "$LOG_DIR/trials.json" 2>/dev/null || true
+  [ -s "$LOG_DIR/pinned_model.txt" ] && git add -f "$LOG_DIR/pinned_model.txt"
+  git add -f "$LOG_DIR/reports" "$LOG_DIR/summaries" 2>/dev/null || true
+  if ! git diff --cached --quiet; then
+    git commit -q -m "paper run: ${DESK_BOT}/${FEED}/${DESK_MODE} through $(date -u +%FT%TZ) on base ${BASE_SHA:0:7}"
+    retry_push || say "push failed; the commit stays local until the next segment" >&2
+  fi
+}
 
-python3 -m reports.daily --log-dir "$LOG_DIR" --date "$(date -u +%F)" --out "$LOG_DIR/reports" >/dev/null 2>&1 || true
-git add -f "$LOG_DIR"/events-*.jsonl "$LOG_DIR/state.json" "$LOG_DIR/trials.json" 2>/dev/null || true
-[ -s "$LOG_DIR/pinned_model.txt" ] && git add -f "$LOG_DIR/pinned_model.txt"
-git add -f "$LOG_DIR/reports" 2>/dev/null || true
-if ! git diff --cached --quiet; then
-  git commit -q -m "paper run: chunk ending $(date -u +%FT%TZ) (${DESK_BOT}, ${FEED}, ${DESK_MODE})"
-  for delay in 0 2 4 8 16; do [ "$delay" -gt 0 ] && sleep "$delay"; git push -q -u origin "$RUN_BRANCH" && break; done
-fi
-echo "paper_chunk: done"
+# ---- 3, 4. run until the deadline, restarting on base changes --------------------------------
+START_MS=$(( $(date +%s) * 1000 ))
+DEADLINE=$(( $(date +%s) + CHUNK_SECONDS ))
+start_judge
+preflight
+say "branch=$RUN_BRANCH base=${BASE_SHA:0:7} mode=$DESK_MODE bot=$DESK_BOT feed=$FEED judge=$JUDGE_URL model=${JEV_MODEL:-stub} until=$(date -u -d "@$DEADLINE" +%H:%M:%SZ)"
+while :; do
+  LEFT=$(( DEADLINE - $(date +%s) ))
+  [ "$LEFT" -ge 60 ] || break
+  SEGMENT_MS=$(( $(date +%s) * 1000 ))
+  desk_env "$PY" -m desk.run --blocks $(( LEFT / BLOCK_SECONDS )) --state-file "$LOG_DIR/state.json" &
+  DESK_PID=$!
+  RESTART=""
+  LAST_WATCH=$(date +%s)
+  while kill -0 "$DESK_PID" 2>/dev/null; do
+    sleep 5
+    if [ $(( $(date +%s) - LAST_WATCH )) -ge "$WATCH_SECONDS" ]; then
+      LAST_WATCH=$(date +%s)
+      REMOTE=$(git ls-remote origin "refs/heads/$BASE_BRANCH" 2>/dev/null | cut -f1)
+      if [ -n "$REMOTE" ] && [ "$REMOTE" != "$BASE_SHA" ] && [ -z "$RESTART" ]; then
+        say "base moved to ${REMOTE:0:7}; stopping the desk after its current block to pick it up"
+        RESTART=1
+        kill -TERM "$DESK_PID" 2>/dev/null || true
+      fi
+    fi
+  done
+  DESK_RC=0
+  wait "$DESK_PID" || DESK_RC=$?
+  publish "$SEGMENT_MS"
+  if [ -n "$RESTART" ]; then
+    stop_judge
+    sync_run
+    start_judge
+    preflight
+    say "restarted on base ${BASE_SHA:0:7}"
+    continue
+  fi
+  if [ "$DESK_RC" -ne 0 ]; then say "the desk exited with code $DESK_RC" >&2; exit 5; fi
+  break
+done
+
+# ---- 6. the chunk's summary and the dashboard snapshot -----------------------------------------
+"$PY" -m reports.chunk_summary --log-dir "$LOG_DIR" --since-ms "$START_MS" --out-dir "$LOG_DIR/summaries/chunks" | sed 's/^/paper_chunk: chunk /' || true
+git add -f "$LOG_DIR/summaries" 2>/dev/null || true
+if ! git diff --cached --quiet; then git commit -q -m "paper run: chunk summary $(date -u +%FT%TZ)"; retry_push || true; fi
+mkdir -p "$(dirname "$DASHBOARD_OUT")"
+"$PY" -m dashboard.export --log-dir "$LOG_DIR" --out "$DASHBOARD_OUT" | sed 's/^/paper_chunk: /' || say "dashboard export failed" >&2
+say "done $(git log -1 --format='%h %s')"

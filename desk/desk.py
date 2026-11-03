@@ -465,6 +465,7 @@ class Desk:
                 "benched": [e.to_dict() for e in self._bench.entries()],
                 "pending_outcomes": self._resolver.pending_count,
                 "fault": self._fault,
+                "feed": {k: getattr(self._feed, k) for k in ("polls", "errors", "rate_limits") if isinstance(getattr(self._feed, k, None), int)},
             },
             ts_ms=block.ts_ms,
         )
