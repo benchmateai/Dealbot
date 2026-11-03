@@ -48,6 +48,7 @@ class _SeriesState:
         self.hist: list[Tick] = []
         self.contract_start = 0
         self.last_ts = -1
+        self.settle_checked_ms = 0
 
 
 def pick_current(markets: list[ContractInfo], now_ms: int) -> ContractInfo | None:
@@ -72,6 +73,9 @@ class KalshiFeed:
         rv_window_blocks: int = 20,
         now_ms: Callable[[], int] | None = None,
         max_history: int = 50_000,
+        settle_wait_s: float = 120.0,
+        settle_check_s: float = 5.0,
+        settle_give_up_s: float = 900.0,
     ) -> None:
         if not series:
             raise FeedError("kalshi feed needs at least one series ticker such as KXETH15M")
@@ -91,6 +95,9 @@ class KalshiFeed:
         self._rv_window = rv_window_blocks
         self._now = now_ms or (lambda: int(time.time() * 1000))
         self._max_history = max_history
+        self._settle_wait_ms = int(settle_wait_s * 1000)
+        self._settle_check_ms = int(settle_check_s * 1000)
+        self._settle_give_up_ms = int(settle_give_up_s * 1000)
         self._lock = threading.Lock()
         self._state = {s: _SeriesState() for s in self.series}
         self._settlements: list[Settlement] = []
@@ -128,7 +135,13 @@ class KalshiFeed:
 
     def _refresh(self, sym: str, st: _SeriesState, now_ms: int) -> None:
         expired = st.contract is not None and st.contract.close_ts is not None and now_ms >= st.contract.close_ts
-        if not expired and now_ms - st.refreshed_ms < self._refresh_ms and st.contract is not None:
+        if expired:
+            # Hold the rollover until the expired contract settles, so a position on it is never marked,
+            # managed or exited against the next contract's prices. No quotes are polled meanwhile.
+            if not self._settle_when_known(sym, st, now_ms):
+                return
+            st.contract = None
+        elif now_ms - st.refreshed_ms < self._refresh_ms and st.contract is not None:
             return
         try:
             markets = self._client.markets(sym)
@@ -142,9 +155,6 @@ class KalshiFeed:
         self._after_success()
         st.refreshed_ms = now_ms
         current = self._pick_current(markets, now_ms)
-        if st.contract is not None and (current is None or current.ticker != st.contract.ticker):
-            if st.contract.close_ts is not None and now_ms >= st.contract.close_ts:
-                self._settle(sym, st.contract, now_ms)
         if current is not None and (st.contract is None or current.ticker != st.contract.ticker):
             with self._lock:
                 st.contract_start = len(st.hist) + len(st.buffer)
@@ -152,29 +162,57 @@ class KalshiFeed:
         if current is not None or expired:
             st.contract = current
 
-    def _settle(self, sym: str, contract: ContractInfo, now_ms: int) -> None:
+    def _settlement_average(self, sym: str, contract: ContractInfo) -> float | None:
+        """Kalshi settles on the average of the last sixty seconds of the CF Benchmarks index before the
+        close; the nearest thing the desk sees is the underlying's mid averaged over the same minute."""
+        if contract.close_ts is None:
+            return None
+        hist = self._under.history(self._underlying[sym])
+        minute = [t.mid for t in hist if contract.close_ts - 60_000 <= t.ts < contract.close_ts]
+        if minute:
+            return sum(minute) / len(minute)
+        before = [t for t in hist if t.ts < contract.close_ts]
+        return before[-1].mid if before else None
+
+    def _settle_when_known(self, sym: str, st: _SeriesState, now_ms: int) -> bool:
+        """Settle an expired contract from Kalshi's official result; after `settle_wait_s` without one,
+        from the underlying's last-minute average (marked provisional). True once settled or given up."""
+        contract = st.contract
+        assert contract is not None and contract.close_ts is not None
+        if now_ms - st.settle_checked_ms < self._settle_check_ms:
+            return False
+        st.settle_checked_ms = now_ms
         official = contract.result
-        if official is None:
+        if official not in ("yes", "no"):
             try:
                 official = self._client.market(contract.ticker).result
-            except KalshiApiError:
+                self._after_success()
+            except KalshiApiError as exc:
+                self.errors += 1
+                if exc.rate_limited:
+                    self._back_off(now_ms, exc, f"{sym}: settlement of {contract.ticker}")
                 official = None
-        underlying_price = None
-        payout: float | None = None
+        average = self._settlement_average(sym, contract)
         if official in ("yes", "no"):
-            payout = 1.0 if official == "yes" else 0.0
-        else:
-            hist = self._under.history(self._underlying[sym])
-            before = [t for t in hist if contract.close_ts is None or t.ts < contract.close_ts]
-            if before:
-                underlying_price = before[-1].mid
-                settled = contract.settles_yes(underlying_price)
-                payout = None if settled is None else (1.0 if settled else 0.0)
-        if payout is None:
-            log.warning("%s: contract %s expired without a determinable result", sym, contract.ticker)
-            return
+            self._record_settlement(sym, contract, 1.0 if official == "yes" else 0.0, True, average)
+            return True
+        waited = now_ms - contract.close_ts
+        if waited < self._settle_wait_ms:
+            return False
+        if average is not None:
+            settled = contract.settles_yes(average)
+            if settled is not None:
+                log.warning("%s: no official result for %s after %d s; settling provisionally from the underlying's last-minute average", sym, contract.ticker, waited // 1000)
+                self._record_settlement(sym, contract, 1.0 if settled else 0.0, False, average)
+                return True
+        if waited < self._settle_give_up_ms:
+            return False
+        log.error("%s: contract %s expired %d s ago without a determinable result; moving on", sym, contract.ticker, waited // 1000)
+        return True
+
+    def _record_settlement(self, sym: str, contract: ContractInfo, payout: float, official: bool, average: float | None) -> None:
         with self._lock:
-            self._settlements.append(Settlement(sym, contract.ticker, payout, contract.close_ts or now_ms, official in ("yes", "no"), contract.strike, underlying_price))
+            self._settlements.append(Settlement(sym, contract.ticker, payout, contract.close_ts or 0, official, contract.strike, average))
 
     def pop_settlements(self) -> list[Settlement]:
         with self._lock:
@@ -192,7 +230,7 @@ class KalshiFeed:
                 continue
             self._refresh(sym, st, now)
             contract = st.contract
-            if contract is None or self._paused(now):
+            if contract is None or self._paused(now) or (contract.close_ts is not None and now >= contract.close_ts):
                 out[sym] = None
                 continue
             try:

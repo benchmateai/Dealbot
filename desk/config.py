@@ -102,6 +102,7 @@ class DeskConfig:
     kalshi_underlying: dict = field(default_factory=dict)
     kalshi_trade_window_s: float = 600.0
     kalshi_min_time_left_s: float = 30.0
+    kalshi_settle_wait_s: float = 120.0
     kalshi_taker_rate: float = 0.07
     kalshi_maker_rate: float = 0.0
     binary_model_weight: float = 0.5
@@ -237,6 +238,7 @@ class DeskConfig:
             kalshi_underlying=kalshi_underlying,
             kalshi_trade_window_s=_float(env, "KALSHI_TRADE_WINDOW_S", "600"),
             kalshi_min_time_left_s=_float(env, "KALSHI_MIN_TIME_LEFT_S", "30"),
+            kalshi_settle_wait_s=_float(env, "KALSHI_SETTLE_WAIT_S", "120"),
             kalshi_taker_rate=_float(env, "KALSHI_TAKER_RATE", "0.07"),
             kalshi_maker_rate=_float(env, "KALSHI_MAKER_RATE", "0"),
             binary_model_weight=_float(env, "BINARY_MODEL_WEIGHT", "0.5"),

@@ -38,7 +38,7 @@ def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None, feed=None, trial_i
     come from JUDGE_URL and FEED. With `trial_id` given, nothing is written to the trial registry."""
     assert_desk_cannot_see_jev_key(os.environ)
     log = LogWriter(cfg.log_dir, Redactor([cfg.desk_secret]))
-    kalshi_opts = {"underlying": cfg.kalshi_underlying, "base_url": cfg.kalshi_base_url, "block_ms": cfg.block_ms, "trade_window_s": cfg.kalshi_trade_window_s, "min_time_left_s": cfg.kalshi_min_time_left_s, "rv_window_blocks": cfg.rv_window_blocks}
+    kalshi_opts = {"underlying": cfg.kalshi_underlying, "base_url": cfg.kalshi_base_url, "block_ms": cfg.block_ms, "trade_window_s": cfg.kalshi_trade_window_s, "min_time_left_s": cfg.kalshi_min_time_left_s, "rv_window_blocks": cfg.rv_window_blocks, "settle_wait_s": cfg.kalshi_settle_wait_s}
     if feed is None:
         feed = make_feed(cfg.feed, cfg.symbols, start_ms=start_ms - cfg.warmup_blocks * cfg.block_ms, replay_path=cfg.replay_path, seed=cfg.synthetic_seed, tick_ms=cfg.synthetic_tick_ms, base_url=cfg.feed_base_url, poll_ms=cfg.feed_poll_ms, kalshi=kalshi_opts)
         if hasattr(feed, "start"):

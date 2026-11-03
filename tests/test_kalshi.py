@@ -140,12 +140,18 @@ def test_feed_tracks_the_current_contract_and_settles_on_rollover():
     assert extra["ticker"] == "KXETH15M-0" and extra["strike"] == 2400.0 and extra["yes_ask"] == 0.62 and extra["tradable"] is False
     assert extra["model_p_yes"] is None or 0.0 <= extra["model_p_yes"] <= 1.0
     assert feed.extra_state("KXETH15M", T0 + CYCLE_MS - 300_000, block=50)["tradable"] is True
-    # roll over: the next poll after expiry settles the old contract from the underlying (spot ~2500 > strike 2400)
+    # expiry without an official result: the old contract stays current, unquoted, while the desk waits for Kalshi
     clock["now"] = T0 + CYCLE_MS + 1000
+    under.advance(clock["now"])
+    assert feed.poll_once() == {"KXETH15M": None} and feed.pop_settlements() == []
+    assert feed.contract("KXETH15M").ticker == "KXETH15M-0", "a position on the expired contract must not be priced off the next one"
+    # after the wait it settles from the underlying's last-minute average (spot ~2500 > strike 2400) and rolls over
+    clock["now"] = T0 + CYCLE_MS + 121_000
     under.advance(clock["now"])
     feed.poll_once()
     settlements = feed.pop_settlements()
     assert len(settlements) == 1 and settlements[0].ticker == "KXETH15M-0" and settlements[0].payout == 1.0 and settlements[0].official is False
+    assert settlements[0].underlying_price == pytest.approx(2500, rel=0.05) and settlements[0].ts == T0 + CYCLE_MS
     assert feed.contract("KXETH15M").ticker == "KXETH15M-1" and feed.pop_settlements() == []
     feed.advance(clock["now"] + 1)
     assert len(feed.snapshot_history("KXETH15M")) == 1 and len(feed.history("KXETH15M")) == 4
@@ -158,7 +164,29 @@ def test_official_result_wins_over_the_provisional_one():
     clock["now"] = T0 + CYCLE_MS + 1000
     feed.poll_once()
     s = feed.pop_settlements()[0]
-    assert s.payout == 0.0 and s.official is True
+    assert s.payout == 0.0 and s.official is True, "spot is above the strike, but Kalshi's result decides"
+
+
+def test_settlement_waits_for_kalshi_and_uses_the_last_minute_average():
+    """Live on 2026-11-03 the provisional rule (last Coinbase mid) called KXETH15M-26NOV022215-15 NO at 2249.82
+    against a 2249.99 strike; Kalshi's sixty-second average was 2250.08 and the official result YES."""
+    clock = {"now": T0 + 1000}
+    feed, fake, under = _kalshi_feed(clock)
+    feed.poll_once()
+    results = iter([None, None, "yes"])
+    real_market = fake.market
+
+    def market(ticker):
+        c = real_market(ticker)
+        return type(c)(**{**c.__dict__, "result": next(results)})
+
+    fake.market = market
+    for k, dt in enumerate((1_000, 3_000, 7_000, 13_000)):
+        clock["now"] = T0 + CYCLE_MS + dt
+        feed.poll_once()
+    settled = feed.pop_settlements()
+    assert len(settled) == 1 and settled[0].official is True and settled[0].payout == 1.0
+    assert sum(1 for kind, _ in fake.calls if kind == "markets") >= 2
 
 
 def test_binary_broker_settles_long_and_short_positions():
@@ -248,6 +276,7 @@ def test_desk_buys_a_contract_in_the_window_and_settles_it(tmp_path):
     gate = RiskGate(cfg.limits)
     broker = BinaryPaperBroker(gate, cash_usd=cfg.paper_cash_usd)
     judge = FakeJudge(cfg.jev_model, nouls={"settles_yes": 0.95})
+    fake.official_result = "yes"  # Kalshi publishes the result within seconds of the close
     desk = Desk(cfg, feed=feed, gate=gate, broker=broker, book=Book(), bench=Bench(), battery=load_battery("kalshi"), judge=judge, backoff=Backoff(), resolver=OutcomeResolver(log, block_ms=cfg.block_ms), executor=make_executor("paper", broker, log), log=log, trial_id="t-kalshi")
     for block in BlockClock(cfg.block_ms, T0 + BLOCK_MS, realtime=False).blocks(82):
         for k in range(6):
