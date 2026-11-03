@@ -1,64 +1,62 @@
 {
  "decisions": {
-  "enter_long": 5,
-  "hold": 96
+  "enter_short": 1,
+  "hold": 36
  },
- "equity_end": 9993.8347,
- "equity_start": 9997.039303000001,
- "executed": 5,
+ "equity_end": 9993.6442,
+ "equity_start": 9992.8495,
+ "executed": 1,
  "feed": {
-  "errors": 68,
-  "polls": 1223,
-  "rate_limits": 68
+  "errors": 4,
+  "polls": 168,
+  "rate_limits": 4
  },
  "fills": {
-  "buy": 5,
-  "settle": 5
+  "sell": 1,
+  "settle": 1
  },
- "first_ts": 1793693616000,
- "judge_calls": 101,
+ "first_ts": 1793694228000,
+ "judge_calls": 37,
  "judge_failures": {
-  "jev_budget": 6
+  "jev_budget": 1
  },
- "last_ts": 1793694192000,
+ "last_ts": 1793695116000,
  "models": {
-  "jev-1.14.0": 101
+  "jev-1.14.0": 37
  },
- "positions_closed": 5,
- "positions_opened": 5,
- "realized_pnl_usd": -5.2205,
+ "positions_closed": 1,
+ "positions_opened": 1,
+ "realized_pnl_usd": -1.4601,
  "records": {
-  "answer": 101,
-  "decision": 101,
-  "fill": 10,
-  "heartbeat": 26,
-  "order": 5,
-  "outcome": 1009,
-  "position_closed": 5,
-  "position_opened": 5,
-  "question": 101,
-  "rejection": 392,
-  "settlement": 10,
-  "snapshot": 101,
+  "answer": 37,
+  "decision": 37,
+  "fill": 2,
+  "heartbeat": 8,
+  "order": 1,
+  "outcome": 165,
+  "position_closed": 1,
+  "position_opened": 1,
+  "question": 37,
+  "rejection": 102,
+  "settlement": 2,
+  "snapshot": 37,
   "trial": 1
  },
  "rejections": {
-  "below_threshold": 96,
-  "benched": 45,
-  "feed_lagging": 1,
-  "insufficient_data": 1,
-  "insufficient_ticks": 8,
-  "jev_budget": 6,
-  "no_contract": 10,
-  "outside_trade_window": 225
+  "below_threshold": 36,
+  "benched": 5,
+  "insufficient_ticks": 12,
+  "jev_budget": 1,
+  "no_contract": 1,
+  "outside_trade_window": 47
  },
  "settlements": {
-  "official": 10,
+  "official": 2,
   "provisional": 0
  },
- "since_ms": 1793693616000,
- "span_minutes": 9.6,
+ "since_ms": 1793694219000,
+ "span_minutes": 14.8,
  "stalled": false,
- "until_ms": 1793694193265,
+ "until_ms": 1793695123266,
  "vetoes": {}
 }
