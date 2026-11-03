@@ -113,11 +113,21 @@ def _min_size(a, b):
 
 
 def scan(data_dir: str | Path, *, since_ms: int = 0, until_ms: int | None = None) -> dict:
-    snaps = [r for r in read_lab(data_dir, since_ms=since_ms, until_ms=until_ms, kinds=("book_top",))]
-    snaps.sort(key=lambda r: r["ts"])
+    # book_top comes from the REST recorder alone, whose records are already in time order: stream them
+    snaps = read_lab(data_dir, since_ms=since_ms, until_ms=until_ms, kinds=("book_top",))
     latest_15m: dict[str, tuple[int, list, int]] = {}  # series -> (ts, row, close_ms)
-    findings: list[dict] = []
+    runs: dict[tuple, dict] = {}  # persistence: the same legs in consecutive snapshots of that event
     counts = defaultdict(int)
+
+    def found(f: dict) -> None:
+        counts["findings"] += 1
+        key = (f["kind"], tuple(f["legs"]))
+        run = runs.get(key)
+        if run and f["ts"] - run["last_ts"] <= 90_000:
+            run.update(last_ts=f["ts"], seen=run["seen"] + 1, best_net_100=max(run["best_net_100"], f["net_100"]))
+        else:
+            runs[key] = {"kind": f["kind"], "legs": list(key[1]), "first_ts": f["ts"], "last_ts": f["ts"], "seen": 1, "best_net_100": f["net_100"], "size": f.get("size")}
+
     for s in snaps:
         counts[s["type"]] += 1
         ts, rows = s["ts"], s["rows"]
@@ -125,28 +135,20 @@ def scan(data_dir: str | Path, *, since_ms: int = 0, until_ms: int | None = None
             latest_15m[s["series"]] = (ts, rows[0], s["close_ms"])
         elif s["type"] == "ladder":
             for f in ladder_findings(rows):
-                findings.append({**f, "ts": ts, "event": s["event"]})
+                found({**f, "ts": ts, "event": s["event"]})
             m15_series = s["series"].replace("D", "15M", 1) if s["series"].endswith("D") else None  # KXBTCD -> KXBTC15M
             m15 = latest_15m.get(m15_series) if m15_series else None
             if m15 and m15[2] == s["close_ms"] and abs(ts - m15[0]) <= PAIR_MAX_SKEW_MS:
                 counts["pair_checks"] += 1
                 for f in pair_findings(m15[1], rows):
-                    findings.append({**f, "ts": ts, "event": s["event"], "skew_ms": ts - m15[0]})
+                    found({**f, "ts": ts, "event": s["event"], "skew_ms": ts - m15[0]})
         elif s["type"] == "range":
             for f in range_findings(rows):
-                findings.append({**f, "ts": ts, "event": s["event"]})
-    # persistence: the same legs in consecutive snapshots of that event
-    runs: dict[tuple, dict] = {}
-    for f in findings:
-        key = (f["kind"], tuple(f["legs"]))
-        run = runs.get(key)
-        if run and f["ts"] - run["last_ts"] <= 90_000:
-            run.update(last_ts=f["ts"], seen=run["seen"] + 1, best_net_100=max(run["best_net_100"], f["net_100"]))
-        else:
-            runs[key] = {"kind": f["kind"], "legs": list(key[1]), "first_ts": f["ts"], "last_ts": f["ts"], "seen": 1, "best_net_100": f["net_100"], "size": f.get("size")}
+                found({**f, "ts": ts, "event": s["event"]})
+    findings = counts.pop("findings", 0)
     run_list = sorted(runs.values(), key=lambda r: -r["best_net_100"])
     summary = {
-        "snapshots": dict(counts), "findings": len(findings),
+        "snapshots": dict(counts), "findings": findings,
         "profitable_after_fees_100": sum(1 for r in run_list if r["best_net_100"] > 0),
         "profitable_and_persistent": sum(1 for r in run_list if r["best_net_100"] > 0 and r["seen"] >= 2),
         "by_kind": {k: sum(1 for r in run_list if r["kind"] == k and r["best_net_100"] > 0) for k in ("ladder", "range_no", "range_yes", "pair_below", "pair_above")},

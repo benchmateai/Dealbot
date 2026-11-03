@@ -62,6 +62,7 @@ class Recorder:
         self.pending: dict[str, tuple[int, str]] = {}  # event -> (close, series) awaiting settlement
         self._last_discover = 0
         self.stop = False
+        self.poll_errors = 0
 
     def discover(self, now_ms: int) -> None:
         for series, _ in SERIES:
@@ -124,12 +125,17 @@ class Recorder:
         last_status = 0
         while not self.stop and self.now_ms() < until_ms:
             started = self.now_ms()
-            if started - self._last_discover >= DISCOVER_S * 1000 or any(c <= started for _, c in self.events.values()) or not self.events:
-                self.discover(started)
-            self.snapshot(started)
-            self.settle(started)
+            try:
+                if started - self._last_discover >= DISCOVER_S * 1000 or any(c <= started for _, c in self.events.values()) or not self.events:
+                    self.discover(started)
+                self.snapshot(started)
+                self.settle(started)
+            except Exception as exc:  # noqa: BLE001 - one bad poll must not end a week of recording
+                self.poll_errors += 1
+                log.warning("poll failed (%s: %s); carrying on", type(exc).__name__, exc)
             if started - last_status >= STATUS_S * 1000:
-                self.store.write("lab_status", {"rest": self.rest.counters(), "events": {s: e for s, (e, _) in self.events.items()}}, ts_ms=self.now_ms())
+                self.store.write("lab_status", {"rest": self.rest.counters(), "poll_errors": self.poll_errors,
+                                                "events": {s: e for s, (e, _) in self.events.items()}}, ts_ms=self.now_ms())
                 last_status = started
             elapsed = (self.now_ms() - started) / 1000
             sleep(max(0.0, self.next_wait_s(started) - elapsed))
@@ -138,6 +144,7 @@ class Recorder:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Record Kalshi market data for the shadow lab (public REST, read-only)")
     parser.add_argument("--minutes", type=float, default=110.0)
+    parser.add_argument("--until", type=float, default=None, help="stop at this Unix time (seconds) instead of after --minutes")
     parser.add_argument("--data", default="lab/data")
     parser.add_argument("--rate", type=float, default=0.25, help="average Kalshi requests a second")
     args = parser.parse_args(argv)
@@ -147,9 +154,11 @@ def main(argv: list[str] | None = None) -> int:
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: setattr(rec, "stop", True))
     try:
-        rec.run(int(time.time() * 1000 + args.minutes * 60_000))
+        rec.run(int(args.until * 1000) if args.until else int(time.time() * 1000 + args.minutes * 60_000))
     finally:
-        store.write("lab_status", {"rest": rec.rest.counters(), "note": "recorder stopped"}, ts_ms=int(time.time() * 1000))
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, signal.SIG_IGN)  # the last seal finishes before the process goes
+        store.write("lab_status", {"rest": rec.rest.counters(), "poll_errors": rec.poll_errors, "note": "recorder stopped"}, ts_ms=int(time.time() * 1000))
         store.close()
         sealed = store.seal_closed_hours()
         print(f"lab recorder: {rec.rest.counters()}; sealed {len(sealed)} hour files")
