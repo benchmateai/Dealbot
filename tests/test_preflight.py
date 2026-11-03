@@ -31,3 +31,15 @@ def test_a_bad_setting_is_named_by_the_scenario(override, check, blocks_everythi
 def test_the_default_spot_desk_opens_a_position_on_sane_data():
     result = run_scenario({"DESK_MODE": "paper", "DESK_BOT": "gambler", "FEED": "coinbase", "DESK_SYMBOLS": "ETH-USD", "JEV_MODEL": "jev-1.14.0"})
     assert result.ok, result.summary()
+
+
+def test_each_block_tapes_both_series_without_changing_what_the_desk_does():
+    result = run_scenario(KALSHI)
+    tapes = [e for e in result.events if e["kind"] == "tape"]
+    blocks = {e["blk"] for e in result.events if e["kind"] == "heartbeat"} | {e["blk"] for e in tapes}
+    assert len(tapes) == len({e["blk"] for e in tapes}) >= result.blocks - 5  # one record a block once the feed has contracts
+    last = tapes[-1]["contracts"]
+    assert set(last) == {"KXETH15M", "KXBTC15M"}
+    for c in last.values():
+        assert c["ticker"] and c["yes_bid"] is not None and c["yes_ask"] is not None and c["spot"] and c["strike"] and c["expires_in_s"] is not None
+    assert result.ok and result.opened == 1 and blocks  # the scenario still opens its one position

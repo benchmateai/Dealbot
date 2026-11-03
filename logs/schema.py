@@ -22,6 +22,7 @@ KINDS: dict[str, tuple[str, ...]] = {
     "order_expired": ("order_id",),
     "settlement": ("sym", "ticker", "payout"),
     "error": ("where",),
+    "tape": ("blk", "contracts"),
 }
 
 

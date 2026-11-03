@@ -1,6 +1,8 @@
 """The desk loop. Each block: advance the feed, mark equity, resolve due outcomes, then either scan
 for a new position (no position open, nothing resting) or manage the one open position. Exactly one
-Jev call per candidate per block and at most one order per block.
+Jev call per candidate per block and at most one order per block. On a binary-contract feed each
+block also logs a `tape` record of every series' contract and quotes, for shadow strategies to
+replay; it is logging only and can never change or stop a decision.
 """
 
 from __future__ import annotations
@@ -28,6 +30,9 @@ from policy.thresholds import EDGE
 from questions.schema import Battery
 from risk.gate import RiskContext, RiskGate
 from state.snapshot import InsufficientData, Snapshot, build_snapshot
+
+
+TAPE_FIELDS = ("ticker", "strike", "strike_type", "expires_in_s", "yes_bid", "yes_ask", "spot", "underlying_rv_bps", "model_p_yes", "tradable")
 
 
 def round_trip_cost_bps(fee_bps: float, gas_usd: float, notional_usd: float) -> float:
@@ -192,6 +197,7 @@ class Desk:
         marks = self._marks()
         equity = self._broker.equity(marks)
         self._book.mark(equity, block.ts_ms)
+        self._tape(block)
         self._resolver.resolve_due(block.number, self._feed, ts_ms=block.ts_ms)
         self._sync_book(block)
         if self._fault is None:
@@ -204,6 +210,24 @@ class Desk:
         self._last_block = block.number
         if self._state_file:
             save_checkpoint(self._state_file, self.checkpoint())
+
+    def _tape(self, block: Block) -> None:
+        """Every series' contract and quotes this block, so a shadow strategy can be replayed on every block
+        and not only where this desk asked Jev. Logging only: it reads the feed, changes nothing, and a
+        failure here is swallowed rather than allowed near a decision."""
+        extra_state = getattr(self._feed, "extra_state", None)
+        if extra_state is None:
+            return
+        try:
+            contracts = {}
+            for sym in self._cfg.symbols:
+                c = extra_state(sym, block.ts_ms, block=block.number)
+                if c:
+                    contracts[sym] = {k: c.get(k) for k in TAPE_FIELDS}
+            if contracts:
+                self._log.write("tape", {"blk": block.number, "contracts": contracts}, ts_ms=block.ts_ms)
+        except Exception:  # noqa: BLE001 - the tape must never stop the desk
+            pass
 
     def _ingest(self, new_ticks: dict[str, list[Tick]], block: Block | None) -> None:
         for sym, ticks in new_ticks.items():
