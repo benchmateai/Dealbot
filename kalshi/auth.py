@@ -24,20 +24,25 @@ class KalshiAuthError(RuntimeError):
     pass
 
 
-def load_private_key_pem(value: str) -> bytes:
-    """Accept the PEM text itself or its base64 on one line; return the PEM bytes."""
+def load_private_key_bytes(value: str) -> bytes:
+    """Accept the PEM text itself, the base64 of the PEM file, or the base64 of the raw DER key (which is
+    what the body of a PEM file is); return bytes that `KalshiAuth` can load."""
     text = (value or "").strip()
     if not text:
         raise KalshiAuthError("private key is empty")
     if text.startswith("-----BEGIN"):
         return text.encode() + b"\n"
+    compact = "".join(text.split())
     try:
-        decoded = base64.b64decode(text, validate=True)
+        decoded = base64.b64decode(compact + "=" * (-len(compact) % 4), validate=False)
     except (binascii.Error, ValueError) as exc:
         raise KalshiAuthError("private key is neither PEM text nor valid base64") from exc
-    if not decoded.lstrip().startswith(b"-----BEGIN"):
-        raise KalshiAuthError("decoded private key is not PEM")
-    return decoded
+    if decoded.lstrip().startswith(b"-----BEGIN") or decoded[:1] == b"\x30":
+        return decoded
+    raise KalshiAuthError("decoded private key is neither PEM nor DER")
+
+
+load_private_key_pem = load_private_key_bytes
 
 
 class KalshiAuth:
@@ -50,7 +55,10 @@ class KalshiAuth:
             raise KalshiAuthError("key id is empty")
         self.key_id = key_id
         try:
-            self._key = serialization.load_pem_private_key(private_key_pem, password=None)
+            if private_key_pem.lstrip().startswith(b"-----BEGIN"):
+                self._key = serialization.load_pem_private_key(private_key_pem, password=None)
+            else:
+                self._key = serialization.load_der_private_key(private_key_pem, password=None)
         except (ValueError, TypeError) as exc:
             raise KalshiAuthError(f"private key could not be loaded: {type(exc).__name__}") from exc
 
@@ -63,7 +71,7 @@ class KalshiAuth:
             return None
         if not key_id or not pem:
             raise KalshiAuthError(f"both {KEY_ID_ENV} and {PRIVATE_KEY_ENV} are needed")
-        return cls(key_id, load_private_key_pem(pem))
+        return cls(key_id, load_private_key_bytes(pem))
 
     def sign(self, message: str) -> str:
         from cryptography.hazmat.primitives import hashes

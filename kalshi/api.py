@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from kalshi.auth import KalshiAuth
 
 DEFAULT_PROD_URL = "https://api.elections.kalshi.com"
-DEFAULT_DEMO_URL = "https://external-api.demo.kalshi.co"
+DEFAULT_DEMO_URL = "https://demo-api.kalshi.co"
 API_PREFIX = "/trade-api/v2"
 USER_AGENT = "dealbot-desk/0.1 (paper trading research)"
 TAKER_RATE = 0.07

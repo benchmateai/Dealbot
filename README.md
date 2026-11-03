@@ -149,7 +149,7 @@ A binary is a different instrument, so the pieces differ from spot:
   `KALSHI_MIN_TIME_LEFT_S`. `ORDER_QTY` is a contract count.
 
 Market data needs no key. Signed requests (`kalshi/auth.py`, RSA-PSS) need `KALSHI_API_KEY_ID` and
-`KALSHI_PRIVATE_KEY` (PEM text or its base64) as environment variables and `pip install 'dealbot-desk[kalshi]'`.
+`KALSHI_PRIVATE_KEY` (the PEM text, or the base64 of the PEM file or of the raw key) as environment variables and `pip install 'dealbot-desk[kalshi]'`.
 No order endpoint is wired to the trading loop: paper only.
 
 ## Unattended runs

@@ -67,6 +67,9 @@ def test_private_key_loading_and_signing():
     pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption())
     assert load_private_key_pem(pem.decode()) == pem.decode().strip().encode() + b"\n"
     assert load_private_key_pem(base64.b64encode(pem).decode()) == pem
+    der = key.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
+    assert load_private_key_pem(base64.b64encode(der).decode()) == der and KalshiAuth("k", der).key_id == "k"
+    assert KalshiAuth("k", load_private_key_pem(base64.b64encode(der).decode().rstrip("="))).sign("x")
     auth = KalshiAuth("key-123", pem)
     headers = auth.headers("GET", "/trade-api/v2/portfolio/balance?x=1", timestamp_ms=1_700_000_000_000)
     assert headers[KEY_HEADER] == "key-123" and headers[TIMESTAMP_HEADER] == "1700000000000"
