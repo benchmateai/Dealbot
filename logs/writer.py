@@ -79,10 +79,16 @@ def read_events(directory: str | Path, *, date: str | None = None, kinds: Iterab
         if date is not None and path.name != f"events-{date}.jsonl":
             continue
         with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
+            lines = fh.read().split("\n")
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            try:
                 rec = json.loads(line)
-                if wanted is None or rec.get("kind") in wanted:
-                    yield rec
+            except json.JSONDecodeError:
+                if i == len(lines) - 1:
+                    break  # the desk was mid-write when this copy was taken; the line completes later
+                raise
+            if wanted is None or rec.get("kind") in wanted:
+                yield rec
