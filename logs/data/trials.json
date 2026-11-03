@@ -281,11 +281,11 @@
   {
    "evaluation": null,
    "first_seen_ms": 1793686680000,
-   "last_seen_ms": 1793733936000,
+   "last_seen_ms": 1793734752000,
    "modes": [
     "paper"
    ],
-   "runs": 13,
+   "runs": 14,
    "spec": {
     "battery_version": "7af437155918",
     "block_seconds": 12.0,
