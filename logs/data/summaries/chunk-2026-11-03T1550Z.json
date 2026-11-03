@@ -1,0 +1,67 @@
+{
+ "decisions": {
+  "enter_long": 1,
+  "enter_short": 1,
+  "hold": 36
+ },
+ "equity_end": 9953.5547,
+ "equity_start": 9958.5352,
+ "executed": 1,
+ "feed": {
+  "errors": 9,
+  "polls": 168,
+  "rate_limits": 9
+ },
+ "fills": {
+  "sell": 1,
+  "settle": 1
+ },
+ "first_ts": 1793721024000,
+ "judge_calls": 38,
+ "judge_failures": {
+  "jev_budget": 1
+ },
+ "last_ts": 1793721912000,
+ "models": {
+  "jev-1.14.0": 38
+ },
+ "positions_closed": 1,
+ "positions_opened": 1,
+ "realized_pnl_usd": -4.9805,
+ "records": {
+  "answer": 38,
+  "decision": 38,
+  "fill": 2,
+  "heartbeat": 8,
+  "order": 1,
+  "outcome": 190,
+  "position_closed": 1,
+  "position_opened": 1,
+  "question": 38,
+  "rejection": 112,
+  "settlement": 2,
+  "snapshot": 38,
+  "trial": 1,
+  "veto": 1
+ },
+ "rejections": {
+  "below_threshold": 36,
+  "benched": 17,
+  "insufficient_data": 2,
+  "insufficient_ticks": 10,
+  "jev_budget": 1,
+  "no_contract": 3,
+  "outside_trade_window": 43
+ },
+ "settlements": {
+  "official": 2,
+  "provisional": 0
+ },
+ "since_ms": 1793721016000,
+ "span_minutes": 14.8,
+ "stalled": false,
+ "until_ms": 1793721916559,
+ "vetoes": {
+  "fees_plus_gas": 1
+ }
+}
