@@ -60,9 +60,13 @@ MARKET_CHANNELS = ("orderbook_delta", "trade")
 SEQUENCED = ("orderbook_snapshot", "orderbook_delta", "trade", "cfbenchmarks_value")
 SETS = ("15m", "E", "F")
 META_FIELDS = ("series", "event", "close_ms", "strike", "strike_type")
-LEVELS = 30  # levels written per side; a book in set E is written in full, since its reward depends on the depth
-CADENCE_S = {"15m": 10.0, "15m_late": 2.0, "E": 15.0, "F": 60.0}       # a changed book at most this often
-HEARTBEAT_S = {"15m": 10.0, "15m_late": 2.0, "E": 60.0, "F": 300.0}     # any book at least this often
+LEVELS = 10  # levels written per side (B, C and F use the top); a book in set E is written in full: its reward depends on the depth
+# C trades the ETH 15-minute book, so that book is written every 10 s and its trades kept; the BTC one is
+# needed only in its last three minutes (B), and no strategy fills from BTC 15-minute trades
+C_SERIES = ("KXETH15M",)
+CADENCE_S = {"15m": 10.0, "15m_other": 60.0, "15m_late": 2.0, "E": 15.0, "F": 60.0}     # a changed book at most this often
+HEARTBEAT_S = {"15m": 10.0, "15m_other": 60.0, "15m_late": 2.0, "E": 60.0, "F": 300.0}  # any book at least this often
+TRADE_FLUSH_MS = 200  # prints at one price, side and millisecond within this are written as one record (count summed)
 PING_S, PONG_TIMEOUT_S = 5.0, 5.0
 STALE_MS = 12_000
 SNAPSHOT_RETRY_S = (10, 20, 40, 80, 160, 320)  # waits before asking again for a missing snapshot; then the market is dropped
@@ -168,6 +172,8 @@ class Feed:
         self.retry_subscribe_at = 0
         self._last_check = 0
         self._next_id = 0
+        self._trades: dict[tuple, dict] = {}  # (ticker, price, taker side, trade time) -> merged print, until flushed
+        self._trades_since = 0
         self._load_state()
 
     # ---- state that outlives a restart ---------------------------------------------------------------
@@ -219,11 +225,22 @@ class Feed:
     def _sid(self, channel: str) -> int | None:
         return next((s for s, c in self.sid_channel.items() if c == channel), None)
 
+    def _wants(self, channel: str, ticker: str) -> bool:
+        """Every watched market's book; trades only where a strategy fills from them (E, F and C's series)."""
+        if channel != "trade":
+            return ticker in self.meta
+        m = self.meta.get(ticker)
+        return m is not None and (bool({"E", "F"} & set(m["sets"])) or m.get("series") in C_SERIES)
+
+    def _carried(self, channel: str) -> list[str]:
+        return sorted(t for t in self.meta if self._wants(channel, t))
+
     def _subscribe_markets(self, channel: str) -> None:
+        tickers = self._carried(channel)
         if channel in self.split_mode:  # one market first, one Kalshi has not refused if there is one; the rest after
-            tickers = sorted(self.meta, key=lambda t: (self.refusals[t], t))[:1]
-        else:
-            tickers = sorted(self.meta)
+            tickers = sorted(tickers, key=lambda t: (self.refusals[t], t))[:1]
+        if not tickers:
+            return
         params: dict = {"channels": [channel], "market_tickers": tickers}
         if channel == "orderbook_delta":
             params["use_yes_price"] = False  # NO bids in NO prices, as Book and lab/fills.py expect
@@ -257,7 +274,8 @@ class Feed:
         for cid in [c for c, ch in self.subscribing.items() if ch == channel]:
             del self.subscribing[cid]
         carried = self.sent.pop(channel, set())
-        missing, gone = sorted(set(self.meta) - carried), sorted(carried - set(self.meta))  # watched or dropped while it was on its way
+        wanted = set(self._carried(channel))
+        missing, gone = sorted(wanted - carried), sorted(carried - wanted)  # watched or dropped while it was on its way
         for batch in ([[t] for t in missing] if channel in self.split_mode else [missing] if missing else []):
             self._command("update_subscription", {"sids": [sid], "market_tickers": batch, "action": "add_markets"})
         if gone:
@@ -270,35 +288,44 @@ class Feed:
         fields = {k: info.get(k) for k in META_FIELDS}
         m = self.meta.get(ticker)
         if m is not None:
+            trades_before = self._wants("trade", ticker)
             for k, v in fields.items():
                 if v is not None:
                     m[k] = v
             if set_name not in m["sets"]:
                 m["sets"] = sorted(m["sets"] + [set_name], key=SETS.index)
+            if not trades_before and self._wants("trade", ticker):  # it joined a set that fills from trades
+                self._add("trade", ticker)
             return
         self.meta[ticker] = {**fields, "sets": [set_name]}
         self.books.pop(ticker, None)  # a book kept from an earlier watch is stale
         self.counters["watched"] += 1
         for channel in MARKET_CHANNELS:
-            sid = self._sid(channel)
-            if sid is not None:
-                self._command("update_subscription", {"sids": [sid], "market_tickers": [ticker], "action": "add_markets"})
-            elif channel not in self.subscribing.values() and self.now_ms() >= self.retry_subscribe_at:
-                self._subscribe_markets(channel)
-            # else the subscribe on its way is topped up when Kalshi confirms it, or the retry carries it
+            if self._wants(channel, ticker):
+                self._add(channel, ticker)
+
+    def _add(self, channel: str, ticker: str) -> None:
+        sid = self._sid(channel)
+        if sid is not None:
+            self._command("update_subscription", {"sids": [sid], "market_tickers": [ticker], "action": "add_markets"})
+        elif channel not in self.subscribing.values() and self.now_ms() >= self.retry_subscribe_at:
+            self._subscribe_markets(channel)
+        # else the subscribe on its way is topped up when Kalshi confirms it, or the retry carries it
 
     def unwatch(self, ticker: str, set_name: str | None = None) -> None:
         """Take `ticker` out of `set_name` (or out of every set); it stops being recorded when it is in none."""
         m = self.meta.get(ticker)
         if m is None or (set_name is not None and set_name not in m["sets"]):
             return
+        carried = [c for c in MARKET_CHANNELS if self._wants(c, ticker)]
         if set_name is not None and len(m["sets"]) > 1:
             m["sets"] = [s for s in m["sets"] if s != set_name]
-            return
-        del self.meta[ticker]
-        for d in (self.books, self.last_written, self.snap_asked):
-            d.pop(ticker, None)
-        for channel in MARKET_CHANNELS:
+            carried = [c for c in carried if not self._wants(c, ticker)]  # the trades it no longer needs
+        else:
+            del self.meta[ticker]
+            for d in (self.books, self.last_written, self.snap_asked):
+                d.pop(ticker, None)
+        for channel in carried:
             sid = self._sid(channel)
             if sid is not None:
                 self._command("update_subscription", {"sids": [sid], "market_tickers": [ticker], "action": "delete_markets"})
@@ -614,9 +641,19 @@ class Feed:
                 self.counters["books_lost"] += 1
         elif kind == "trade":
             self.last_data_ms = self.last_market_ms = now
-            self.store.write("trade", {"ticker": body.get("market_ticker"), "yes_price": _num(body.get("yes_price_dollars")), "count": _num(body.get("count_fp")),
-                                       "taker_side": body.get("taker_outcome_side") or body.get("taker_side"), "trade_ts": body.get("ts_ms"),
-                                       "sent_ts": m.get("sending_ts_ms"), "block": body.get("is_block_trade")}, ts_ms=now)
+            t = body.get("market_ticker")
+            if not self._wants("trade", t):
+                return
+            price, side, at, count = _num(body.get("yes_price_dollars")), body.get("taker_outcome_side") or body.get("taker_side"), body.get("ts_ms"), _num(body.get("count_fp")) or 0.0
+            merged = self._trades.get((t, price, side, at, bool(body.get("is_block_trade"))))
+            if merged is not None:  # another fill of the same sweep: one record
+                merged["count"] = round(merged["count"] + count, 2)
+                merged["n"] += 1
+            else:
+                self._trades[(t, price, side, at, bool(body.get("is_block_trade")))] = {
+                    "ticker": t, "yes_price": price, "count": count, "taker_side": side, "trade_ts": at, "sent_ts": m.get("sending_ts_ms"),
+                    "block": body.get("is_block_trade"), "n": 1}
+                self._trades_since = self._trades_since or now
         elif kind == "cfbenchmarks_value":
             self.last_data_ms = now
             try:
@@ -630,7 +667,15 @@ class Feed:
                                        "qavg": _num(q.get("value")), "qn": q.get("window_size"), "src_ts": data.get("time"),
                                        "sent_ts": m.get("sending_ts_ms")}, ts_ms=now)
 
+    def flush_trades(self, now_ms: int) -> None:
+        for rec in self._trades.values():
+            self.store.write("trade", rec, ts_ms=now_ms)
+        self._trades.clear()
+        self._trades_since = 0
+
     def write_books(self, now_ms: int) -> None:
+        if self._trades and now_ms - self._trades_since >= TRADE_FLUSH_MS:
+            self.flush_trades(now_ms)
         if now_ms - self.alive_ms > STALE_MS:
             if self.stale_since is None:
                 self.stale_since = now_ms
@@ -645,7 +690,8 @@ class Feed:
                 book.ready = False  # a book that cannot exist on the exchange: ask for a fresh one
                 self.counters["crossed_books"] += 1
                 continue
-            keys = ["15m_late" if s == "15m" and m.get("close_ms") and m["close_ms"] - now_ms <= 180_000 else s for s in m["sets"]]
+            keys = [s if s != "15m" else "15m_late" if m.get("close_ms") and m["close_ms"] - now_ms <= 180_000 else "15m" if m.get("series") in C_SERIES else "15m_other"
+                    for s in m["sets"]]
             since = now_ms - self.last_written.get(t, 0)
             if since >= min(CADENCE_S[k] for k in keys) * 1000 and (book.changed or since >= min(HEARTBEAT_S[k] for k in keys) * 1000):
                 self.store.write("book", {"ticker": t, **{k: m.get(k) for k in META_FIELDS}, "set": m["sets"][0], "sets": m["sets"],
@@ -850,6 +896,7 @@ def main(argv: list[str] | None = None) -> int:
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, signal.SIG_IGN)  # the last seal finishes before the process goes
         end = feed.now_ms()
+        feed.flush_trades(end)
         feed.write_status(end, note="ws recorder stopped")
         store.close()
         store.seal_closed_hours()
