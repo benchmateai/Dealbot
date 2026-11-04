@@ -1,66 +1,69 @@
 {
  "decisions": {
-  "enter_long": 1,
-  "enter_short": 1,
-  "hold": 31
+  "enter_long": 3,
+  "enter_short": 2,
+  "exit": 1,
+  "hold": 125
  },
- "equity_end": 9917.9181,
+ "equity_end": 9921.4668,
  "equity_start": 9925.3338,
- "executed": 1,
+ "executed": 5,
  "feed": {
-  "errors": 10,
-  "polls": 168,
-  "rate_limits": 10
+  "errors": 37,
+  "polls": 528,
+  "rate_limits": 37
  },
  "fills": {
-  "sell": 1,
-  "settle": 1
+  "buy": 3,
+  "sell": 2,
+  "settle": 3
  },
  "first_ts": 1793756508000,
- "judge_calls": 33,
+ "judge_calls": 131,
  "judge_failures": {
-  "jev_budget": 1
+  "jev_budget": 4
  },
- "last_ts": 1793757396000,
+ "last_ts": 1793759196000,
  "models": {
-  "jev-1.14.0": 33
+  "jev-1.14.0": 131
  },
- "positions_closed": 1,
- "positions_opened": 1,
- "realized_pnl_usd": -2.4402,
+ "positions_closed": 4,
+ "positions_opened": 4,
+ "realized_pnl_usd": 0.6179,
  "records": {
-  "answer": 33,
-  "decision": 33,
-  "fill": 2,
-  "heartbeat": 8,
-  "order": 1,
-  "outcome": 141,
-  "position_closed": 1,
-  "position_opened": 1,
-  "question": 33,
-  "rejection": 106,
-  "settlement": 2,
-  "snapshot": 33,
-  "tape": 75,
+  "answer": 131,
+  "decision": 131,
+  "fill": 8,
+  "heartbeat": 23,
+  "order": 5,
+  "outcome": 619,
+  "position_closed": 4,
+  "position_opened": 4,
+  "question": 131,
+  "rejection": 308,
+  "settlement": 6,
+  "snapshot": 131,
+  "tape": 224,
   "trial": 1,
   "veto": 1
  },
  "rejections": {
-  "below_threshold": 31,
-  "benched": 13,
-  "insufficient_data": 3,
+  "below_threshold": 125,
+  "benched": 22,
+  "insufficient_data": 5,
   "insufficient_ticks": 12,
-  "jev_budget": 1,
-  "outside_trade_window": 46
+  "jev_budget": 4,
+  "no_contract": 6,
+  "outside_trade_window": 134
  },
  "settlements": {
-  "official": 2,
+  "official": 6,
   "provisional": 0
  },
  "since_ms": 1793756504000,
- "span_minutes": 14.8,
+ "span_minutes": 44.8,
  "stalled": false,
- "until_ms": 1793757407329,
+ "until_ms": 1793759207291,
  "vetoes": {
   "fees_plus_gas": 1
  }
