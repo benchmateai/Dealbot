@@ -52,7 +52,7 @@ from lab.ws_auth import load_signer, ws_headers
 
 log = logging.getLogger("lab.ws")
 
-URL = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
+URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"  # Kalshi's other documented host; the cloud proxy allows this one
 STREAM = "ws"
 CRYPTO = ("KXBTC15M", "KXETH15M")
 INDEXES = ("BRTI", "ETHUSD_RTI")
@@ -81,6 +81,7 @@ SETTLE_PER_PASS = 3
 SETTLE_GIVE_UP_MS = 3 * 86_400_000
 RESET_CODES = (7, 10, 25)  # unknown subscription id; channel error and buffer overflow (Kalshi ends the subscription)
 NO_DATA_EXIT_MS = 1_800_000  # no book or trade message for this long, with markets watched: exit 4
+NEVER_CONNECTED_EXIT_MS = 600_000  # no connection at all for this long: exit 3 (the chunk restarts it, then escalates)
 MAX_DROPS = 5  # markets dropped for being refused twice; past this many a refusal is only noted (it may be our request)
 MAX_TRACKED_COMMANDS = 2000
 
@@ -322,8 +323,8 @@ class Feed:
     def fetch_incentives(self) -> list[dict] | None:
         """Every active liquidity program, or None if any page failed: a partial list is never used."""
         programs, cursor = [], None
-        for _ in range(INCENTIVE_PAGES):
-            payload = self.rest.get("/incentive_programs", {"status": "active", "type": "liquidity", "limit": 1000, "cursor": cursor})
+        for _ in range(INCENTIVE_PAGES):  # about 5,000 active programs on 2026-11-04: one page of 10,000
+            payload = self.rest.get("/incentive_programs", {"status": "active", "type": "liquidity", "limit": 10_000, "cursor": cursor})
             if payload is None:
                 return None
             programs += payload.get("incentive_programs") or []
@@ -337,7 +338,6 @@ class Feed:
             self.counters["incentive_fetch_failed"] += 1
             return
         programs = [p for p in programs if p.get("incentive_type") == "liquidity" and p.get("market_ticker")]
-        self.store.write("incentives", {"programs": programs}, ts_ms=now_ms)
 
         def per_day(p):
             start, end = _ts(p.get("start_date")), _ts(p.get("end_date"))
@@ -345,6 +345,8 @@ class Feed:
             return (p.get("period_reward") or 0) / 10_000 / max(1.0, (end - start) / 86_400_000) if live else 0.0
         chosen = [p for p in sorted(programs, key=per_day, reverse=True) if per_day(p) > 0][:E_MAX]
         keep = {p["market_ticker"] for p in chosen}
+        # the full list runs to megabytes; E needs only the programs of the markets it watches
+        self.store.write("incentives", {"programs": [p for p in programs if p["market_ticker"] in keep], "active_programs": len(programs)}, ts_ms=now_ms)
         for t, m in list(self.meta.items()):
             if "E" in m["sets"] and t not in keep:
                 self.unwatch(t, "E")
@@ -665,6 +667,13 @@ class Feed:
         silent_since = max(self.last_market_ms, started_ms)
         return 4 if self.meta and now_ms - silent_since > NO_DATA_EXIT_MS else 0
 
+    def failing(self, now_ms: int, started_ms: int) -> int:
+        """3 or 4 once the feed has plainly failed (never connected in NEVER_CONNECTED_EXIT_MS, or no market
+        data for NO_DATA_EXIT_MS), so the recorder stops early and the chunk script can restart or escalate."""
+        if not self.counters["connects"]:
+            return 3 if now_ms - started_ms > NEVER_CONNECTED_EXIT_MS else 0
+        return self.exit_code(now_ms, started_ms)
+
 
 class Schedule:
     """When each REST lookup is due. The 15-minute contracts are looked for QUARTER_TRIES_S after each
@@ -696,10 +705,18 @@ class Schedule:
 
 
 async def maintain(feed: Feed, until_ms: int, *, stop: asyncio.Event) -> None:
-    """Market discovery, settlements and status records beside the socket loop; a REST wait never stalls the feed."""
+    """Market discovery, settlements and status records beside the socket loop; a REST wait never stalls the
+    feed. Stops the recorder early once the feed has plainly failed."""
     schedule = Schedule()
+    started = feed.now_ms()
     while not stop.is_set() and feed.now_ms() < until_ms:
         now = feed.now_ms()
+        code = feed.failing(now, started)
+        if code:
+            feed.note("never connected" if code == 3 else "no book or trade message for half an hour")
+            feed.write_status(now, note=f"stopping early (exit {code})")
+            stop.set()
+            break
         try:
             job = schedule.due(now, feed.crypto_found)
             if job == "crypto":
