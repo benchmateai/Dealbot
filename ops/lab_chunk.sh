@@ -132,6 +132,7 @@ if [ -n "$WANT_WS" ]; then start_ws || true; fi
 
 REST_FAILS=0
 WS_FAILS=0
+WS_LAST_RC=0
 NEXT=$(( $(date +%s) + PUBLISH_SECONDS ))
 while [ -n "$LAB_PID$WS_PID" ]; do
   sleep 5
@@ -143,7 +144,7 @@ while [ -n "$LAB_PID$WS_PID" ]; do
     fi
   fi
   if [ -n "$WS_PID" ] && ! kill -0 "$WS_PID" 2>/dev/null; then
-    WRC=0; wait "$WS_PID" || WRC=$?; WS_PID=""
+    WRC=0; wait "$WS_PID" || WRC=$?; WS_PID=""; WS_LAST_RC=$WRC
     if [ "$WRC" -ne 0 ]; then
       WS_FAILS=$(( WS_FAILS + 1 )); say "the live feed exited with code $WRC (failure $WS_FAILS of $WS_RESTARTS)" >&2
       if [ "$WS_FAILS" -lt "$WS_RESTARTS" ]; then sleep 30; start_ws || true; fi
@@ -159,4 +160,6 @@ FINAL=1
 publish
 if [ "$REST_FAILS" -ge "$REST_RESTARTS" ]; then say "the REST recorder failed $REST_FAILS times this chunk" >&2; exit 5; fi
 if [ -n "$WANT_WS" ] && [ "$WS_FAILS" -ge "$WS_RESTARTS" ]; then say "the live feed failed $WS_FAILS times this chunk" >&2; exit 6; fi
+# a feed that ended the chunk never having connected (3) or gone quiet (4) has failed, whatever the count
+if [ -n "$WANT_WS" ] && { [ "$WS_LAST_RC" -eq 3 ] || [ "$WS_LAST_RC" -eq 4 ]; }; then say "the live feed ended the chunk with exit $WS_LAST_RC" >&2; exit 6; fi
 say "done ($LAB_FEEDS) $(git log -1 --format='%h %s')"
