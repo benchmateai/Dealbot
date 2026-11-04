@@ -66,11 +66,13 @@ def test_an_exit_fill_counts_for_the_position_it_closes_and_the_window_starts_cl
 
 
 def test_the_shadow_rows_count_only_bets_after_the_rules_were_registered(tmp_path):
-    from reports.shadow import REGISTERED_MS
+    from reports.shadow import LATE_STOP_REGISTERED_MS, REGISTERED_MS
 
     write(tmp_path, [{"kind": "heartbeat", "ts": REGISTERED_MS - 60_000, "equity_usd": 9_990.0}])
     rows = build(tmp_path, now_ms=REGISTERED_MS, since_ms=REGISTERED_MS - 120_000)
     shadows = {r["id"]: r for r in rows if r["table"] == "shadow"}
-    assert set(shadows) == {"desk", "capped", "capped_exit"}
-    assert shadows["capped"]["cap_points"] == 10 and shadows["capped_exit"]["exit_minutes"] == 3
+    assert set(shadows) == {"desk", "capped", "capped_exit", "late_stop"}
+    assert shadows["capped"]["cap_points"] == 10 and shadows["capped_exit"]["exit_minutes"] == 3 and shadows["late_stop"]["late_seconds"] == 60
     assert shadows["desk"]["test_trades"] == 0 and shadows["desk"]["registered_ms"] == REGISTERED_MS
+    # the late stop has its own test window, and carries the desk's result on the same bets
+    assert shadows["late_stop"]["registered_ms"] == LATE_STOP_REGISTERED_MS and shadows["late_stop"]["desk_same_trades"] == 0
