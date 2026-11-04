@@ -1,68 +1,68 @@
 {
  "decisions": {
-  "enter_long": 3,
-  "enter_short": 5,
-  "exit": 2,
-  "hold": 231
+  "enter_long": 6,
+  "enter_short": 7,
+  "exit": 6,
+  "hold": 317
  },
- "equity_end": 9918.4863,
+ "equity_end": 9938.6117,
  "equity_start": 9913.7006,
- "executed": 9,
+ "executed": 18,
  "feed": {
-  "errors": 49,
-  "polls": 888,
-  "rate_limits": 49
+  "errors": 63,
+  "polls": 1248,
+  "rate_limits": 63
  },
  "fills": {
-  "buy": 4,
-  "sell": 5,
-  "settle": 5
+  "buy": 8,
+  "sell": 10,
+  "settle": 6
  },
  "first_ts": 1793763120000,
- "judge_calls": 241,
+ "judge_calls": 336,
  "judge_failures": {
-  "jev_budget": 7
+  "jev_budget": 12
  },
- "last_ts": 1793767620000,
+ "last_ts": 1793769420000,
  "models": {
-  "jev-1.14.0": 241
+  "jev-1.14.0": 336
  },
- "positions_closed": 7,
- "positions_opened": 7,
- "realized_pnl_usd": 4.7858,
+ "positions_closed": 12,
+ "positions_opened": 12,
+ "realized_pnl_usd": 24.9111,
  "records": {
-  "answer": 241,
-  "decision": 241,
-  "fill": 14,
-  "heartbeat": 38,
-  "order": 9,
-  "outcome": 1221,
-  "position_closed": 7,
-  "position_opened": 7,
-  "question": 241,
-  "rejection": 514,
-  "settlement": 10,
-  "snapshot": 241,
-  "tape": 372,
+  "answer": 336,
+  "decision": 336,
+  "fill": 24,
+  "heartbeat": 53,
+  "order": 18,
+  "outcome": 1696,
+  "position_closed": 12,
+  "position_opened": 12,
+  "question": 336,
+  "rejection": 722,
+  "settlement": 14,
+  "snapshot": 336,
+  "tape": 520,
   "trial": 1,
   "veto": 1
  },
  "rejections": {
-  "below_threshold": 231,
-  "benched": 38,
-  "insufficient_data": 2,
-  "jev_budget": 7,
-  "no_contract": 17,
-  "outside_trade_window": 219
+  "below_threshold": 317,
+  "benched": 59,
+  "insufficient_data": 3,
+  "jev_budget": 12,
+  "no_contract": 23,
+  "outside_trade_window": 308
  },
  "settlements": {
-  "official": 10,
+  "official": 14,
   "provisional": 0
  },
  "since_ms": 1793763109000,
- "span_minutes": 75.0,
+ "span_minutes": 105.0,
  "stalled": false,
- "until_ms": 1793767620761,
+ "until_ms": 1793769420222,
  "vetoes": {
   "fees_plus_gas": 1
  }
