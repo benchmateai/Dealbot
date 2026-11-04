@@ -56,3 +56,29 @@ def test_the_cap_skips_far_disagreements_and_the_exit_sells_before_the_close(tmp
     assert s["capped_exit"]["all"]["skipped"] == 2 and s["capped_exit"]["all"]["sold_early"] == 1
     # d1 opened before registration (in-sample); d2 and d3 after it (the test)
     assert s["desk"]["in_sample"]["trades"] == 1 and s["desk"]["test"]["trades"] == 2
+
+
+def test_the_late_stop_sells_only_bets_still_losing_in_the_last_minute_and_counts_only_after_its_registration(tmp_path):
+    from reports.shadow import LATE_STOP_S
+
+    records = []
+    # a YES bet at 0.30 still losing with under a minute left: sold at the bid instead of expiring worthless
+    records += trade("s1", "KXETH15M", T0, action="enter_long", prob=0.40, yes_bid=0.28, yes_ask=0.30, left=600, fill_yes=0.30, qty=10,
+                     path=[(0.20, 0.22, 300), (0.12, 0.14, LATE_STOP_S - 10)], close={"realized": -3.0, "payout": 0.0})
+    # a YES bet winning in the last minute: left alone, it settles as the desk had it
+    records += trade("s2", "KXBTC15M", T0 + 600_000, action="enter_long", prob=0.60, yes_bid=0.48, yes_ask=0.50, left=600, fill_yes=0.50, qty=10,
+                     path=[(0.40, 0.42, 300), (0.80, 0.82, LATE_STOP_S - 20)], close={"realized": 5.0, "payout": 1.0})
+    # a NO bet losing at 5 minutes but not yet in the last minute when it settled: unchanged
+    records += trade("s3", "KXETH15M", T0 + 1_200_000, action="enter_short", prob=0.40, yes_bid=0.58, yes_ask=0.60, left=600, fill_yes=0.58, qty=10,
+                     path=[(0.70, 0.72, 300)], close={"realized": -4.2, "payout": 1.0})
+    write(tmp_path, records)
+    report = evaluate(tmp_path, since_ms=T0 - 60_000, registered_ms=T0 - 60_000, late_stop_registered_ms=T0 + 300_000)
+    by_id = {t["id"]: t for t in report["trades"]}
+    assert by_id["s1"]["late_stop"] == {"result": "sold_losing", "pnl_usd": round(10 * (0.12 - 0.30) - 0.1 - taker_fee_usd(10, 0.12), 2)}
+    assert by_id["s2"]["late_stop"] == by_id["s2"]["desk"] and by_id["s2"]["late_stop"]["result"] == "won"
+    assert by_id["s3"]["late_stop"] == by_id["s3"]["desk"]
+    late = report["strategies"]["late_stop"]
+    # only s2 and s3 opened after the late stop's registration: its test, and the desk's result on the same bets
+    assert late["test"]["trades"] == 2 and late["test"]["sold_losing"] == 0 and late["desk_same"]["trades"] == 2
+    assert late["test"]["pnl_usd"] == late["desk_same"]["pnl_usd"] and late["all"]["sold_losing"] == 1
+    assert report["strategies"]["capped"]["registered_ms"] == T0 - 60_000 and late["registered_ms"] == T0 + 300_000

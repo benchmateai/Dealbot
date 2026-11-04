@@ -94,7 +94,7 @@
 
   <section class="pm-shadow" id="shadow" aria-labelledby="shadow-title">
     <h2 id="shadow-title">Shadow test</h2>
-    <p class="pm-note">The analyst's two rules, run on the desk's own markets without trading. Only bets placed from <b data-draw="sh-when" data-source="shadows" data-field="registered_ms" data-where="id=desk">—</b>, when the rules were fixed, count. A shadow can skip the desk's bets or sell them sooner, never add new ones.</p>
+    <p class="pm-note">Rule changes tested on paper on the desk's own bets, without trading. Each counts only bets placed after it was fixed: the analyst's two rules from <b data-draw="sh-when" data-source="shadows" data-field="registered_ms" data-where="id=desk">—</b>, your late stop from <b data-draw="sh-late-when" data-source="shadows" data-field="registered_ms" data-where="id=late_stop">—</b>. A shadow can skip the desk's bets or sell them sooner, never add new ones.</p>
     <div class="pm-tiles">
       <div class="pm-tile">
         <div class="pm-tile-label">Live desk, as traded</div>
@@ -110,6 +110,11 @@
         <div class="pm-tile-label">Same, and sell <b data-draw="sh-exit-min" data-source="shadows" data-field="exit_minutes" data-where="id=capped_exit">—</b> minutes before the close</div>
         <div class="pm-tile-value dash-skeleton" data-draw="sh-exit" data-source="shadows" data-field="test_pnl_usd" data-where="id=capped_exit">—</div>
         <div class="pm-tile-sub"><b data-draw="sh-exit-n" data-source="shadows" data-field="test_trades" data-where="id=capped_exit">—</b> closed, <b data-draw="sh-exit-skip" data-source="shadows" data-field="test_skipped" data-where="id=capped_exit">—</b> skipped</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Sell a bet still losing <b data-draw="sh-late-s" data-source="shadows" data-field="late_seconds" data-where="id=late_stop">—</b> seconds before the close</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="sh-late" data-source="shadows" data-field="test_pnl_usd" data-where="id=late_stop">—</div>
+        <div class="pm-tile-sub"><b data-draw="sh-late-n" data-source="shadows" data-field="test_trades" data-where="id=late_stop">—</b> closed; the desk on the same bets <b data-draw="sh-late-desk" data-source="shadows" data-field="desk_same_pnl_usd" data-where="id=late_stop">—</b></div>
       </div>
     </div>
   </section>
@@ -171,7 +176,7 @@
   dash.calc('shadows', {
     inputs: ['paper'],
     title: 'Shadow test',
-    description: 'The live desk and the two shadow rules, over bets placed after the rules were fixed.',
+    description: 'The live desk and the shadow rules, each over bets placed after it was fixed.',
     fn: (paper) => paper.filter((r) => r.table === 'shadow'),
   });
 
@@ -241,6 +246,11 @@
   shadowFigure('sh-exit', 'capped_exit', 'test_pnl_usd', signed, true);
   shadowFigure('sh-exit-n', 'capped_exit', 'test_trades', count);
   shadowFigure('sh-exit-skip', 'capped_exit', 'test_skipped', count);
+  shadowFigure('sh-late-when', 'late_stop', 'registered_ms', when);
+  shadowFigure('sh-late-s', 'late_stop', 'late_seconds', count);
+  shadowFigure('sh-late', 'late_stop', 'test_pnl_usd', signed, true);
+  shadowFigure('sh-late-n', 'late_stop', 'test_trades', count);
+  shadowFigure('sh-late-desk', 'late_stop', 'desk_same_pnl_usd', signed, true);
 
   dash.draw('bets-state', () => {
     const d = dash.data('trades');
