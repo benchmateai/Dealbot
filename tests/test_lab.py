@@ -787,3 +787,30 @@ def test_markouts_use_each_set_s_book_age_and_block_trades_never_fill():
     r = Resting("M", "yes", 0.50, 10, 0, 0.0)
     assert apply_trade(r, {"ts": 1, "yes_price": 0.40, "count": 5, "taker_side": "no", "block": True}) == 0
     assert apply_trade(r, {"ts": 1, "yes_price": 0.40, "count": 5, "taker_side": "no"}) == 5
+
+
+def test_ws_feed_stops_early_once_it_has_plainly_failed(tmp_path):
+    from lab.ws_recorder import NEVER_CONNECTED_EXIT_MS, NO_DATA_EXIT_MS
+
+    clock = {"ms": T0}
+    feed = _feed(tmp_path, clock)
+    assert feed.failing(T0 + NEVER_CONNECTED_EXIT_MS - 1, T0) == 0
+    assert feed.failing(T0 + NEVER_CONNECTED_EXIT_MS + 1, T0) == 3
+    feed.counters["connects"] = 1
+    feed.watch("M", {"set": "E"})
+    assert feed.failing(T0 + NEVER_CONNECTED_EXIT_MS + 1, T0) == 0
+    assert feed.failing(T0 + NO_DATA_EXIT_MS + 1, T0) == 4
+
+
+def test_ws_feed_keeps_only_the_programs_of_the_markets_it_watches(tmp_path):
+    from lab.ws_recorder import E_MAX
+
+    clock = {"ms": T0}
+    feed = _feed(tmp_path, clock)
+    programs = [{"market_ticker": f"M{i}", "incentive_type": "liquidity", "period_reward": 1_000_000 * (i + 1), "start_date": "2026-11-03T00:00:00Z",
+                 "end_date": "2026-11-05T00:00:00Z", "target_size_fp": "1000.00"} for i in range(40)]
+    feed.apply_incentives(programs, T0)
+    feed.store.close()
+    rec = next(r for r in read_lab(tmp_path) if r["kind"] == "incentives")
+    kept = {p["market_ticker"] for p in rec["programs"]}
+    assert rec["active_programs"] == 40 and kept == {f"M{i}" for i in range(40 - E_MAX, 40)} == {t for t, m in feed.meta.items() if "E" in m["sets"]}
