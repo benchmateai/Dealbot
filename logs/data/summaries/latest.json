@@ -1,67 +1,67 @@
 {
  "decisions": {
-  "enter_long": 1,
-  "enter_short": 3,
+  "enter_long": 2,
+  "enter_short": 4,
   "exit": 1,
-  "hold": 129
+  "hold": 224
  },
- "equity_end": 9939.5883,
+ "equity_end": 9936.8168,
  "equity_start": 9939.9909,
- "executed": 5,
+ "executed": 7,
  "feed": {
-  "errors": 31,
-  "polls": 528,
-  "rate_limits": 31
+  "errors": 67,
+  "polls": 888,
+  "rate_limits": 67
  },
  "fills": {
-  "buy": 2,
-  "sell": 3,
-  "settle": 3
+  "buy": 3,
+  "sell": 4,
+  "settle": 5
  },
  "first_ts": 1793769732000,
- "judge_calls": 134,
+ "judge_calls": 231,
  "judge_failures": {
-  "jev_budget": 4
+  "jev_budget": 6
  },
- "last_ts": 1793772420000,
+ "last_ts": 1793774220000,
  "models": {
-  "jev-1.14.0": 134
+  "jev-1.14.0": 231
  },
- "positions_closed": 4,
- "positions_opened": 4,
- "realized_pnl_usd": 1.6475,
+ "positions_closed": 6,
+ "positions_opened": 6,
+ "realized_pnl_usd": -2.2242,
  "records": {
-  "answer": 134,
-  "decision": 134,
-  "fill": 8,
-  "heartbeat": 23,
-  "order": 5,
-  "outcome": 666,
-  "position_closed": 4,
-  "position_opened": 4,
-  "question": 134,
-  "rejection": 305,
-  "settlement": 6,
-  "snapshot": 134,
-  "tape": 225,
+  "answer": 231,
+  "decision": 231,
+  "fill": 12,
+  "heartbeat": 38,
+  "order": 7,
+  "outcome": 1147,
+  "position_closed": 6,
+  "position_opened": 6,
+  "question": 231,
+  "rejection": 511,
+  "settlement": 10,
+  "snapshot": 231,
+  "tape": 374,
   "trial": 1
  },
  "rejections": {
-  "below_threshold": 129,
-  "benched": 17,
-  "insufficient_data": 2,
+  "below_threshold": 224,
+  "benched": 30,
+  "insufficient_data": 3,
   "insufficient_ticks": 13,
-  "jev_budget": 4,
-  "no_contract": 6,
-  "outside_trade_window": 134
+  "jev_budget": 6,
+  "no_contract": 11,
+  "outside_trade_window": 224
  },
  "settlements": {
-  "official": 6,
+  "official": 10,
   "provisional": 0
  },
  "since_ms": 1793769722000,
- "span_minutes": 44.8,
+ "span_minutes": 74.8,
  "stalled": false,
- "until_ms": 1793772429809,
+ "until_ms": 1793774231637,
  "vetoes": {}
 }
