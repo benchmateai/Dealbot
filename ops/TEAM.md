@@ -92,6 +92,12 @@ it. `reports/shadow.py` replays the desk's own log under two rules registered at
 3 minutes before the close). Their results before 15:15Z were known when they were chosen; only trades
 opened after it test them. The rules are not retuned during the week.
 
+On 2026-11-04 the owner asked for a stop-loss. Replayed on the week's first 130 bets, fixed stops at
+75, 50, 33 and 25% of the entry price all lost more than the desk (these contracts often halve and
+recover), so the owner chose to test the one rule that helped on paper instead: `late_stop`, selling a
+bet still losing 60 seconds before the close. It counts only bets opened from 09:15Z on 2026-11-04,
+and `reports/shadow.py` prints the desk's result on the same bets beside it.
+
 ## Shadow lab
 
 The owner then asked for six next-round strategies to run beside the live test, read-only and on paper

@@ -15,6 +15,16 @@ capped -6.30, capped_exit -18.84), so only trades opened from REGISTERED_MS on t
 exit rule, selling a bet once its price halved, was dropped before registration (-17.16 in-sample:
 these cheap contracts often halve and recover); it is not part of the test.
 
+A third rule came from the owner on 2026-11-04 (a stop-loss, so losers are sold early too):
+
+  late_stop    the desk's own bets, but one still losing (its sell price below what it cost) is sold at
+               the first quote with LATE_STOP_S (60) seconds or less left, not held to settlement
+
+Before it was fixed, the week's first 130 bets were replayed with stops at 75, 50, 33 and 25% of the
+entry price; each lost more than the desk (-62.36 to -79.34 against -59.12), because these contracts
+often halve and recover, and only this rule helped (-52.13). So it is judged only on bets opened from
+LATE_STOP_REGISTERED_MS on, and the desk's own result on the same bets is reported beside it.
+
 Everything else is the desk's own: its entry decisions and fills, its exits and settlements, and the
 quotes it logged every block while holding. A shadow can only skip a trade or leave it early; it
 never takes a trade the desk did not, since the desk asks Jev nothing while it holds a position. An
@@ -29,6 +39,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 from dashboard.money import FILL_GRACE_MS, WEEK_START_MS
@@ -36,12 +47,15 @@ from kalshi.api import taker_fee_usd
 from logs.writer import read_events
 
 REGISTERED_MS = 1_793_718_900_000  # 2026-11-03T15:15:00Z: trades opened from here on test the rules
+LATE_STOP_REGISTERED_MS = 1_793_783_700_000  # 2026-11-04T09:15:00Z: the late stop's own test starts here
 CAP = 0.10
 EXIT_BEFORE_S = 180
+LATE_STOP_S = 60
 STRATEGIES = {
     "desk": "the live desk, as traded",
     "capped": f"skip entries more than {CAP * 100:.0f} points from the market",
     "capped_exit": f"capped, and sell {EXIT_BEFORE_S // 60} minutes before the close",
+    "late_stop": f"sell a bet still losing {LATE_STOP_S} seconds before the close",
 }
 
 
@@ -123,6 +137,13 @@ def shadow_outcome(p: dict, strategy: str) -> tuple[str, float | None]:
     """(result, P&L after fees) of one desk position under a strategy; ("skipped", 0.0) when it would not have been taken."""
     if strategy == "desk":
         return p["result"], p["pnl"]
+    if strategy == "late_stop":
+        for ts, bid, ask, left in p["path"]:
+            sell = bid if p["sign"] > 0 else 1.0 - ask
+            if left is not None and left <= LATE_STOP_S and sell < p["bet_price"]:
+                pnl = p["contracts"] * (sell - p["bet_price"]) - p["entry_fee"] - taker_fee_usd(p["contracts"], sell)
+                return "sold_losing", round(pnl, 2)
+        return p["result"], p["pnl"]
     if p["gap"] is not None and p["gap"] > CAP:
         return "skipped", 0.0
     if strategy == "capped":
@@ -137,20 +158,28 @@ def shadow_outcome(p: dict, strategy: str) -> tuple[str, float | None]:
     return p["result"], p["pnl"]
 
 
-def evaluate(log_dir: str | Path, *, since_ms: int = WEEK_START_MS, registered_ms: int = REGISTERED_MS) -> dict:
+def _stats(outcomes: list[tuple[str, float | None]]) -> dict:
+    closed = [(r, v) for r, v in outcomes if r not in ("open", "skipped")]
+    return {
+        "trades": len(closed), "open": sum(r == "open" for r, _ in outcomes), "skipped": sum(r == "skipped" for r, _ in outcomes),
+        "won": sum(1 for _, v in closed if v > 0), "lost": sum(1 for _, v in closed if v <= 0),
+        "sold_early": sum(r == "sold_early" for r, _ in outcomes), "sold_losing": sum(r == "sold_losing" for r, _ in outcomes),
+        "pnl_usd": round(sum(v for _, v in closed), 2),
+    }
+
+
+def evaluate(log_dir: str | Path, *, since_ms: int = WEEK_START_MS, registered_ms: int = REGISTERED_MS,
+             late_stop_registered_ms: int = LATE_STOP_REGISTERED_MS) -> dict:
     positions = _positions(log_dir, since_ms)
-    report: dict = {"since_ms": since_ms, "registered_ms": registered_ms, "rules": {"cap": CAP, "exit_before_s": EXIT_BEFORE_S}, "strategies": {}, "trades": []}
+    report: dict = {"since_ms": since_ms, "registered_ms": registered_ms, "late_stop_registered_ms": late_stop_registered_ms,
+                    "rules": {"cap": CAP, "exit_before_s": EXIT_BEFORE_S, "late_stop_s": LATE_STOP_S}, "strategies": {}, "trades": []}
     for name, label in STRATEGIES.items():
-        stats = {}
-        for part, keep in (("all", lambda p: True), ("in_sample", lambda p: p["opened_ms"] < registered_ms), ("test", lambda p: p["opened_ms"] >= registered_ms)):
-            outcomes = [shadow_outcome(p, name) for p in positions if keep(p)]
-            closed = [(r, v) for r, v in outcomes if r not in ("open", "skipped")]
-            stats[part] = {
-                "trades": len(closed), "open": sum(r == "open" for r, _ in outcomes), "skipped": sum(r == "skipped" for r, _ in outcomes),
-                "won": sum(1 for _, v in closed if v > 0), "lost": sum(1 for _, v in closed if v <= 0),
-                "sold_early": sum(r == "sold_early" for r, _ in outcomes), "pnl_usd": round(sum(v for _, v in closed), 2),
-            }
-        report["strategies"][name] = {"label": label, **stats}
+        reg = late_stop_registered_ms if name == "late_stop" else registered_ms
+        stats = {part: _stats([shadow_outcome(p, name) for p in positions if keep(p)])
+                 for part, keep in (("all", lambda p: True), ("in_sample", lambda p: p["opened_ms"] < reg), ("test", lambda p: p["opened_ms"] >= reg))}
+        report["strategies"][name] = {"label": label, "registered_ms": reg, **stats}
+    # the desk on exactly the late stop's bets, so the two can be compared like for like
+    report["strategies"]["late_stop"]["desk_same"] = _stats([shadow_outcome(p, "desk") for p in positions if p["opened_ms"] >= late_stop_registered_ms])
     for p in positions:
         report["trades"].append({
             "id": p["id"], "sym": p["sym"], "opened_ms": p["opened_ms"], "bet": p["bet"], "bet_price": round(p["bet_price"], 4),
@@ -164,7 +193,9 @@ def one_line(report: dict, part: str = "all") -> str:
     bits = []
     for name, s in report["strategies"].items():
         x = s[part]
-        bits.append(f"{name} {x['pnl_usd']:+.2f} ({x['trades']} closed, {x['won']} up" + (f", {x['skipped']} skipped" if x["skipped"] else "") + (f", {x['sold_early']} sold 3 min before the close" if x["sold_early"] else "") + ")")
+        bits.append(f"{name} {x['pnl_usd']:+.2f} ({x['trades']} closed, {x['won']} up" + (f", {x['skipped']} skipped" if x["skipped"] else "")
+                    + (f", {x['sold_early']} sold 3 min before the close" if x["sold_early"] else "")
+                    + (f", {x['sold_losing']} sold losing in the last minute" if x.get("sold_losing") else "") + ")")
     return " | ".join(bits)
 
 
@@ -179,7 +210,11 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(json.dumps(report, indent=1))
     print(f"shadow (since the week began): {one_line(report, 'all')}")
-    print(f"shadow (test, trades opened from the rules' registration on): {one_line(report, 'test')}")
+    print(f"shadow (test, trades opened from each rule's registration on): {one_line(report, 'test')}")
+    late, same = report["strategies"]["late_stop"]["test"], report["strategies"]["late_stop"]["desk_same"]
+    print(f"late stop (bets opened from {time.strftime('%Y-%m-%d %H:%MZ', time.gmtime(report['late_stop_registered_ms'] / 1000))}): "
+          f"late_stop {late['pnl_usd']:+.2f} ({late['trades']} closed, {late['won']} up, {late['sold_losing']} sold losing) against the desk's "
+          f"{same['pnl_usd']:+.2f} on the same bets ({same['trades']} closed, {same['won']} up)")
     return 0
 
 
