@@ -1,0 +1,52 @@
+{
+ "pumpfun": {
+  "pairs": 174446,
+  "median_abs_err": 0.0031940271870134485,
+  "p90_abs_err": 0.015405922874955347
+ },
+ "pumpswap": {
+  "pairs": 36309,
+  "median_abs_err": 0.00699763272775944,
+  "p90_abs_err": 0.024104904385879422
+ },
+ "raydium_launchlab": {
+  "pairs": 3181,
+  "median_abs_err": 0.010428837504581567,
+  "p90_abs_err": 0.06987893910671139
+ },
+ "raydium_cpmm": {
+  "pairs": 1913,
+  "median_abs_err": 0.0008127683938599084,
+  "p90_abs_err": 0.029741382310835784
+ },
+ "meteora_damm_v2": {
+  "pairs": 1355,
+  "median_abs_err": 0.004053490246783253,
+  "p90_abs_err": 0.04475602030957715
+ },
+ "meteora_dbc": {
+  "pairs": 571,
+  "median_abs_err": 0.027105731889048634,
+  "p90_abs_err": 0.10215908209657776
+ },
+ "raydium_v4": {
+  "pairs": 279,
+  "median_abs_err": 5.08115892574601e-05,
+  "p90_abs_err": 0.006672549988317122
+ },
+ "raydium_clmm": {
+  "pairs": 198,
+  "median_abs_err": 0.004517931827310417,
+  "p90_abs_err": 0.04671348211668935
+ },
+ "meteora_dlmm": {
+  "pairs": 47,
+  "median_abs_err": 0.0032163048821651774,
+  "p90_abs_err": 0.027446826183091577
+ },
+ "orca_whirlpool": {
+  "pairs": 27,
+  "median_abs_err": 0.002181804663306197,
+  "p90_abs_err": 0.03562826506847805
+ }
+}
