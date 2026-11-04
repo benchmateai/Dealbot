@@ -272,6 +272,7 @@ def test_ws_feed_keeps_books_detects_gaps_and_writes_normalized_records(tmp_path
     feed.handle({"type": "trade", "sid": 3, "seq": 1, "msg": {"market_ticker": "ETH-1", "yes_price_dollars": "0.5200", "count_fp": "3.00", "taker_outcome_side": "no", "ts_ms": T0 + 4_000}})
     feed.handle({"type": "cfbenchmarks_value", "sid": 1, "seq": 1, "msg": {"index_id": "ETHUSD_RTI", "data": json.dumps({"value": "2001.5"}), "avg_60s_data": {"value": "2001.40000000"}}})
     feed.write_books(T0 + 5_000)
+    feed.flush_trades(T0 + 5_000)
     store.close()
     recs = list(read_lab(tmp_path))
     book = next(r for r in recs if r["kind"] == "book")
@@ -814,3 +815,51 @@ def test_ws_feed_keeps_only_the_programs_of_the_markets_it_watches(tmp_path):
     rec = next(r for r in read_lab(tmp_path) if r["kind"] == "incentives")
     kept = {p["market_ticker"] for p in rec["programs"]}
     assert rec["active_programs"] == 40 and kept == {f"M{i}" for i in range(40 - E_MAX, 40)} == {t for t, m in feed.meta.items() if "E" in m["sets"]}
+
+
+def test_ws_feed_keeps_trades_only_where_a_strategy_fills_and_merges_the_prints_of_one_sweep(tmp_path):
+    clock = {"ms": T0}
+    feed = _feed(tmp_path, clock)
+    feed.watch("BTC-Q", {"series": "KXBTC15M", "close_ms": T0 + 900_000, "set": "15m"})
+    feed.watch("ETH-Q", {"series": "KXETH15M", "close_ms": T0 + 900_000, "set": "15m"})
+    feed.watch("INC", {"set": "E"})
+    cmds = feed.connected()
+    subs = {c["params"]["channels"][0]: c["params"]["market_tickers"] for c in cmds if c["params"].get("market_tickers")}
+    assert subs == {"orderbook_delta": ["BTC-Q", "ETH-Q", "INC"], "trade": ["ETH-Q", "INC"]}
+    feed.handle({"type": "subscribed", "msg": {"channel": "trade", "sid": 3}})
+    feed.watch("BTC-Q", {"set": "F"})  # joins a set that fills from trades: its trades are added
+    assert feed.outbox[-1]["params"] == {"sids": [3], "market_tickers": ["BTC-Q"], "action": "add_markets"}
+    feed.unwatch("BTC-Q", "F")
+    assert feed.outbox[-1]["params"] == {"sids": [3], "market_tickers": ["BTC-Q"], "action": "delete_markets"} and "BTC-Q" in feed.meta
+    sweep = {"market_ticker": "ETH-Q", "yes_price_dollars": "0.5200", "taker_outcome_side": "yes", "ts_ms": T0 + 10}
+    for count in ("1.00", "0.50", "2.00"):
+        feed.handle({"type": "trade", "sid": 3, "msg": {**sweep, "count_fp": count}})
+    feed.handle({"type": "trade", "sid": 3, "msg": {**sweep, "yes_price_dollars": "0.5300", "count_fp": "1.00"}})  # through the next level
+    feed.handle({"type": "trade", "sid": 3, "msg": {**sweep, "market_ticker": "BTC-Q", "count_fp": "9.00"}})  # not kept
+    feed.write_books(T0 + 100)  # not yet: prints are gathered for TRADE_FLUSH_MS
+    feed.write_books(T0 + 250)
+    feed.store.close()
+    trades = [r for r in read_lab(tmp_path) if r["kind"] == "trade"]
+    assert [(r["yes_price"], r["count"], r["n"]) for r in trades] == [(0.52, 3.5, 3), (0.53, 1.0, 1)]
+
+
+def test_ws_feed_writes_the_btc_book_slowly_until_its_last_three_minutes(tmp_path):
+    clock = {"ms": T0}
+    feed = _feed(tmp_path, clock)
+    close = T0 + 900_000
+    for t, series in (("BTC-Q", "KXBTC15M"), ("ETH-Q", "KXETH15M")):
+        feed.watch(t, {"series": series, "close_ms": close, "set": "15m"})
+        feed.handle(_snap(t, [[f"0.{40 + i:02d}00", "1.00"] for i in range(20)], [["0.4000", "1.00"]]))
+    for second in range(0, 900, 1):
+        clock["ms"] = T0 + second * 1000
+        feed.mark_alive(clock["ms"])
+        for t in ("BTC-Q", "ETH-Q"):
+            feed.books[t].changed = True  # a busy book
+        feed.write_books(clock["ms"])
+    feed.store.close()
+    books = [r for r in read_lab(tmp_path) if r["kind"] == "book"]
+    times = {t: [(r["ts"] - T0) // 1000 for r in books if r["ticker"] == t] for t in ("BTC-Q", "ETH-Q")}
+    assert [x for x in times["BTC-Q"] if x < 720] == list(range(0, 720, 60))  # once a minute ...
+    assert [x for x in times["BTC-Q"] if x >= 720][:3] == [720, 722, 724]  # ... then every 2 s for B
+    assert [x for x in times["ETH-Q"] if x < 720][:3] == [0, 10, 20]  # C's book every 10 s throughout
+    assert all(len(r["yes"]) == 10 for r in books)
