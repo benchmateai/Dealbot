@@ -3,6 +3,10 @@ for a new position (no position open, nothing resting) or manage the one open po
 Jev call per candidate per block and at most one order per block. On a binary-contract feed each
 block also logs a `tape` record of every series' contract and quotes, for shadow strategies to
 replay; it is logging only and can never change or stop a decision.
+
+Desk v2 (KALSHI_FORECAST=anchored, the default for Kalshi from 2026-11-05) asks no model: the same tape
+record feeds policy/anchored.py's forecaster, every settlement resolves its forecasts, and the funnel's
+ForecastStage and FinalPick trade the market-anchored forecast and the late stop.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ from desk.persist import save_checkpoint
 from desk.modes import Executor
 from feed.base import MarketFeed, Tick
 from filter.funnel import Candidate, Funnel, FunnelContext, Rejection
-from filter.stages import FinalPick, FreeCut, HardFacts, JevStage, OneCall
+from filter.stages import FinalPick, ForecastStage, FreeCut, HardFacts, JevStage, OneCall
 from policy.binary import BinaryCosts
 from judge.client import Backoff, Judge
 from logs.writer import LogWriter
@@ -81,6 +85,7 @@ class Desk:
         executor: Executor,
         log: LogWriter,
         trial_id: str = "",
+        forecaster=None,
     ) -> None:
         if battery.bot != cfg.bot:
             raise ValueError(f"battery is for {battery.bot!r}, desk is configured for {cfg.bot!r}")
@@ -104,19 +109,23 @@ class Desk:
         self._order_type = "limit" if cfg.bot == "house" else "market"
         self._bot_fee_bps = cfg.limits.fee_bps_for(self._order_type)
         self._binary = cfg.fee_model == "kalshi"
-        pick_kind = "binary" if self._binary else "spot"
+        anchored = self._binary and cfg.kalshi_forecast == "anchored"
+        if anchored and forecaster is None:
+            raise ValueError("KALSHI_FORECAST=anchored needs the desk's forecaster (policy/anchored.py)")
+        self._forecaster = forecaster if anchored else None
+        pick_kind = "anchored" if anchored else "binary" if self._binary else "spot"
         binary_costs = BinaryCosts(taker_rate=cfg.kalshi_taker_rate, maker_rate=cfg.kalshi_maker_rate, margin=cfg.limits.min_edge_margin, model_weight=cfg.binary_model_weight)
         free_cut = dict(max_spread_bps=cfg.max_spread_bps, rv_min_bps=cfg.rv_min_bps, rv_max_bps=cfg.rv_max_bps, min_ticks=cfg.min_ticks, max_stale_ms=cfg.max_stale_ms, spread_basis="payout" if cfg.fee_model == "kalshi" else "price")
         self._scan_funnel = Funnel([
             FreeCut(**free_cut),
             OneCall(broker, feed, min_equity_usd=cfg.min_equity_usd, max_feed_lag_ms=cfg.max_feed_lag_ms),
             HardFacts(gate, EDGE[cfg.bot], cfg.order_qty, order_type=self._order_type),
-            JevStage(judge, battery, backoff, max_candidates=cfg.max_jev_candidates),
+            ForecastStage(forecaster) if anchored else JevStage(judge, battery, backoff, max_candidates=cfg.max_jev_candidates),
             FinalPick(kind=pick_kind, binary_costs=binary_costs),
         ])
         self._manage_funnel = Funnel([
             FreeCut(**free_cut, manage=True),
-            JevStage(judge, battery, backoff, max_candidates=1),
+            ForecastStage(forecaster) if anchored else JevStage(judge, battery, backoff, max_candidates=1),
             FinalPick(kind=pick_kind, binary_costs=binary_costs),
         ])
 
@@ -200,7 +209,9 @@ class Desk:
         marks = self._marks()
         equity = self._broker.equity(marks)
         self._book.mark(equity, block.ts_ms)
-        self._tape(block)
+        contracts = self._tape(block)
+        if self._forecaster is not None:
+            self._forecast(block, contracts)
         self._resolver.resolve_due(block.number, self._feed, ts_ms=block.ts_ms)
         self._sync_book(block)
         if self._fault is None:
@@ -214,7 +225,19 @@ class Desk:
         if self._state_file:
             save_checkpoint(self._state_file, self.checkpoint())
 
-    def _tape(self, block: Block) -> None:
+    def _forecast(self, block: Block, contracts: dict) -> None:
+        """Feed this block's tape record to the forecaster (v2). A failure leaves no forecast this block, so
+        nothing can be entered on it, and is logged once; it never stops the desk."""
+        try:
+            self._forecaster.observe_tape(block.ts_ms, contracts or {})
+        except Exception as exc:  # noqa: BLE001 - a broken forecast must not stop the desk managing a position
+            self._forecaster.latest = {}
+            failed = self.__dict__.setdefault("_forecast_failed", set())
+            if type(exc).__name__ not in failed:
+                failed.add(type(exc).__name__)
+                self._log.write("error", {"where": "forecast", "blk": block.number, "detail": f"{type(exc).__name__}: {exc}"}, ts_ms=block.ts_ms)
+
+    def _tape(self, block: Block) -> dict:
         """Every series' contract and quotes this block, so a shadow strategy can be replayed on every block
         and not only where this desk asked Jev. Logging only: it reads the feed and changes nothing, and a
         failure is swallowed (with one warning per series) rather than allowed near a decision.
@@ -224,7 +247,7 @@ class Desk:
         replay can apply the desk's own staleness rule to every block."""
         extra_state = getattr(self._feed, "extra_state", None)
         if extra_state is None:
-            return
+            return {}
         snapshot_history = getattr(self._feed, "snapshot_history", None)
         contracts = {}
         for sym in self._cfg.symbols:
@@ -247,6 +270,7 @@ class Desk:
                 self._log.write("tape", {"blk": block.number, "contracts": contracts}, ts_ms=block.ts_ms)
             except Exception as exc:  # noqa: BLE001
                 self._tape_warn("write", exc)
+        return contracts
 
     def _tape_warn(self, what: str, exc: Exception) -> None:
         failed = self.__dict__.setdefault("_tape_failed", set())
@@ -467,6 +491,8 @@ class Desk:
             self._log.write("position_closed", {"decision_id": closed.decision_id, "sym": closed.sym, "blk": block.number, "position": closed.to_dict(), "realized_pnl_usd": bpos.realized_pnl_usd, "fees_usd": bpos.fees_usd, "exit_decision_id": order.decision_id}, ts_ms=block.ts_ms)
 
     def _apply_settlement(self, settlement, block: Block) -> None:
+        if self._forecaster is not None and getattr(settlement, "ticker", None):
+            self._forecaster.observe_settlement(settlement.ticker, settlement.payout)
         settle = getattr(self._broker, "settle", None)
         fill = settle(settlement.sym, settlement.payout, settlement.ts) if settle is not None else None
         position = self._book.position

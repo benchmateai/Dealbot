@@ -23,6 +23,8 @@ KINDS: dict[str, tuple[str, ...]] = {
     "settlement": ("sym", "ticker", "payout"),
     "error": ("where",),
     "tape": ("blk", "contracts"),
+    "forecast": ("decision_id", "sym", "model", "weight"),     # desk v2: the forecast a decision used
+    "forecaster": ("model", "weight", "resolved"),             # desk v2: the forecaster's state at start
 }
 
 

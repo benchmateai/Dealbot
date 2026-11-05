@@ -45,6 +45,7 @@ from pathlib import Path
 from dashboard.money import FILL_GRACE_MS, WEEK_START_MS
 from kalshi.api import taker_fee_usd
 from logs.writer import read_events
+from reports.runs import v2_start_ms
 
 REGISTERED_MS = 1_793_718_900_000  # 2026-11-03T15:15:00Z: trades opened from here on test the rules
 LATE_STOP_REGISTERED_MS = 1_793_783_700_000  # 2026-11-04T09:15:00Z: the late stop's own test starts here
@@ -169,9 +170,13 @@ def _stats(outcomes: list[tuple[str, float | None]]) -> dict:
 
 
 def evaluate(log_dir: str | Path, *, since_ms: int = WEEK_START_MS, registered_ms: int = REGISTERED_MS,
-             late_stop_registered_ms: int = LATE_STOP_REGISTERED_MS) -> dict:
-    positions = _positions(log_dir, since_ms)
-    report: dict = {"since_ms": since_ms, "registered_ms": registered_ms, "late_stop_registered_ms": late_stop_registered_ms,
+             late_stop_registered_ms: int = LATE_STOP_REGISTERED_MS, until_ms: int | None | bool = False) -> dict:
+    """The shadow rules judge the first desk's bets only: bets opened from desk v2's start (`until_ms`, found in
+    the log by default) are v2's own, with the late stop built in, so the comparison is frozen there."""
+    if until_ms is False:
+        until_ms = v2_start_ms(log_dir)
+    positions = [p for p in _positions(log_dir, since_ms) if until_ms is None or p["opened_ms"] < until_ms]
+    report: dict = {"since_ms": since_ms, "until_ms": until_ms, "registered_ms": registered_ms, "late_stop_registered_ms": late_stop_registered_ms,
                     "rules": {"cap": CAP, "exit_before_s": EXIT_BEFORE_S, "late_stop_s": LATE_STOP_S}, "strategies": {}, "trades": []}
     for name, label in STRATEGIES.items():
         reg = late_stop_registered_ms if name == "late_stop" else registered_ms
@@ -209,6 +214,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(json.dumps(report, indent=1))
+    if report["until_ms"] is not None:
+        print(f"shadow: frozen at desk v2's start ({time.strftime('%Y-%m-%d %H:%MZ', time.gmtime(report['until_ms'] / 1000))}); "
+              "v2 trades its own forecast with the late stop built in, so these rules judge the first desk's bets only")
     print(f"shadow (since the week began): {one_line(report, 'all')}")
     print(f"shadow (test, trades opened from each rule's registration on): {one_line(report, 'test')}")
     late, same = report["strategies"]["late_stop"]["test"], report["strategies"]["late_stop"]["desk_same"]

@@ -27,15 +27,18 @@ from judge.client import Backoff, make_judge
 from logs.redact import Redactor
 from logs.writer import LogWriter
 from outcomes.resolver import OutcomeResolver
+from policy.anchored import AnchoredForecaster
 from questions import load_battery
 from risk.gate import RiskGate
 from trials.fingerprint import strategy_spec
 from trials.registry import TrialRegistry
 
 
-def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None, feed=None, trial_id: str | None = None) -> tuple[Desk, LogWriter]:
-    """Wire every component. `judge` and `feed` can be injected (tests, the pre-flight); by default they
-    come from JUDGE_URL and FEED. With `trial_id` given, nothing is written to the trial registry."""
+def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None, feed=None, trial_id: str | None = None, forecaster=None) -> tuple[Desk, LogWriter]:
+    """Wire every component. `judge`, `feed` and v2's `forecaster` can be injected (tests, the pre-flight); by
+    default they come from JUDGE_URL and FEED, and the forecaster is warmed from the run's own log, so a
+    restarted v2 desk forecasts exactly as if it had run throughout. With `trial_id` given, nothing is
+    written to the trial registry."""
     assert_desk_cannot_see_jev_key(os.environ)
     log = LogWriter(cfg.log_dir, Redactor([cfg.desk_secret]))
     kalshi_opts = {"underlying": cfg.kalshi_underlying, "base_url": cfg.kalshi_base_url, "block_ms": cfg.block_ms, "trade_window_s": cfg.kalshi_trade_window_s, "min_time_left_s": cfg.kalshi_min_time_left_s, "rv_window_blocks": cfg.rv_window_blocks, "settle_wait_s": cfg.kalshi_settle_wait_s}
@@ -44,6 +47,10 @@ def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None, feed=None, trial_i
         if hasattr(feed, "start"):
             feed.start()
     battery = load_battery(cfg.bot)
+    if cfg.fee_model == "kalshi" and cfg.kalshi_forecast == "anchored" and forecaster is None:
+        forecaster = AnchoredForecaster(track_index_gap=False)
+        replayed = forecaster.warm_from_log(cfg.log_dir, until_ms=start_ms)
+        log.write("forecaster", {"replayed_records": replayed, **forecaster.state()}, ts_ms=start_ms)
     if trial_id is None:
         registry = TrialRegistry(cfg.trials_file)
         spec = strategy_spec(cfg, battery)
@@ -69,6 +76,7 @@ def build_desk(cfg: DeskConfig, *, start_ms: int, judge=None, feed=None, trial_i
         executor=make_executor(cfg.mode, broker, log),
         log=log,
         trial_id=trial_id,
+        forecaster=forecaster,
     )
     desk.warmup(start_ms)
     return desk, log

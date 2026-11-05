@@ -9,11 +9,13 @@ Every row carries a `table` column, so one file feeds the whole page:
            position is "NO at 21c", its stake is what the bet cost, its result won, lost, sold or open
   equity   the equity curve, the last reading in each 10-minute slot
   day      one row per UTC day: change in equity, trades closed, wins, fees
-  shadow   one row per strategy in reports.shadow (the live desk and the shadow rules), counted
+  shadow   (v1 only) one row per strategy in reports.shadow (the live desk and the shadow rules), counted
            only over bets placed after the rules were registered, with the rules' own numbers
+  previous (v2 only) one row: the first desk's final result, from the measured week's start to the switch
 Numbers come straight from the desk's own log; nothing here trades or decides. Only events from
-`since_ms` on count (by default WEEK_START_MS, the start of the measured week): the bankroll is the
-first equity reading from then, and a position carried in from before shows in equity, not as a bet.
+`since_ms` on count: by default desk v2's start once it has taken over (reports.runs), else WEEK_START_MS,
+the start of the first measured week. The bankroll is the first equity reading from then, and a position
+carried in from before shows in equity, not as a bet.
 A fill belongs to its own decision's position when that is a position (the opening fill and the
 settlement), otherwise to the position open on that contract (an exit is its own decision).
 """
@@ -28,13 +30,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from logs.writer import read_events
+from reports.runs import WEEK1_START_MS, v2_start_ms
 
 JEV_USD_PER_INPUT_TOKEN = 0.042 / 1_000_000  # TypeSafe's price per input token; output tokens are free
 SLOT_MS = 600_000
-# The measured week starts with the first chunk after the fix for the doubled desk (1f1a3f4): from
-# 06:42 to 08:23Z on 2026-11-03 two to four desk processes wrote into one log, so that stretch is
-# kept in the record but left out of the results.
-WEEK_START_MS = 1_793_694_300_000  # 2026-11-03T08:25:00Z
+WEEK_START_MS = WEEK1_START_MS  # 2026-11-03T08:25:00Z, the first desk's measured week (see reports/runs.py)
 FILL_GRACE_MS = 60_000  # a fill is stamped when it filled, a few seconds before its decision's record
 WEEK_MS = 7 * 86_400_000
 MARKETS = {"KXETH15M": "ETH 15-min", "KXBTC15M": "BTC 15-min"}
@@ -44,8 +44,14 @@ def _day(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
-def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | None = None, since_ms: int = WEEK_START_MS) -> list[dict]:
+def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | None = None, since_ms: int | None = None,
+          until_ms: int | None = None, v2_ms: int | None | bool = False) -> list[dict]:
     now = now_ms if now_ms is not None else int(time.time() * 1000)
+    if v2_ms is False:
+        v2_ms = v2_start_ms(log_dir)
+    if since_ms is None:
+        since_ms = v2_ms if v2_ms is not None else WEEK_START_MS
+    on_v2 = v2_ms is not None and since_ms >= v2_ms and until_ms is None  # until_ms set: a closed window (the first desk's)
     trades: OrderedDict[str, dict] = OrderedDict()
     fills: dict[str, list[dict]] = {}  # by position; an opening fill waits here under its own decision id
     open_on: dict[str, str] = {}  # contract series -> the decision id of the position open on it
@@ -59,6 +65,8 @@ def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | No
     for e in read_events(log_dir):
         kind, ts = e.get("kind"), e.get("ts")
         if not isinstance(ts, int) or ts < since_ms - (FILL_GRACE_MS if kind == "fill" else 0):
+            continue
+        if until_ms is not None and ts >= until_ms:
             continue
         if kind == "heartbeat" and isinstance(e.get("equity_usd"), (int, float)):
             eq = float(e["equity_usd"])
@@ -129,16 +137,21 @@ def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | No
         "jev_calls": jev_calls, "jev_cost_usd": round(jev_tokens * JEV_USD_PER_INPUT_TOKEN, 4),
         "best_pnl_usd": None if best is None else best["pnl_usd"], "worst_pnl_usd": None if worst is None else worst["pnl_usd"],
         "updated_ms": now, "week_started_ms": since_ms, "week_ends_ms": since_ms + WEEK_MS,
-        "week_day": max(1, min(7, (now - since_ms) // 86_400_000 + 1)),
+        "week_day": max(1, min(7, (now - since_ms) // 86_400_000 + 1)), "desk": "v2" if on_v2 else "v1",
     }
     rows: list[dict] = [summary]
     for t in sorted(trades.values(), key=lambda t: t["opened_ms"], reverse=True):
         rows.append({k: v for k, v in t.items() if k != "gross_usd"})
     for slot, (ts, eq) in equity.items():
         rows.append({"table": "equity", "id": f"e{slot}", "t_ms": ts, "equity_usd": round(eq, 2)})
+    if on_v2:
+        v1 = build(log_dir, start_cash=start_cash, now_ms=now, since_ms=WEEK_START_MS, until_ms=v2_ms, v2_ms=v2_ms)[0]
+        rows.append({"table": "previous", "id": "v1", "from_ms": WEEK_START_MS, "to_ms": v2_ms,
+                     **{k: v1[k] for k in ("start_usd", "equity_usd", "net_pnl_usd", "realized_pnl_usd", "trades_closed", "trades_open", "wins", "losses", "win_rate", "fees_usd", "jev_calls")}})
     from reports.shadow import CAP, EXIT_BEFORE_S, LATE_STOP_S, REGISTERED_MS, evaluate  # here: reports.shadow imports this module
 
-    for name, st in evaluate(log_dir, since_ms=since_ms).get("strategies", {}).items():
+    shadow_strategies = {} if on_v2 or until_ms is not None else evaluate(log_dir, since_ms=since_ms, until_ms=v2_ms).get("strategies", {})
+    for name, st in shadow_strategies.items():
         test = st["test"]
         row = {
             "table": "shadow", "id": name, "test_pnl_usd": test["pnl_usd"], "test_trades": test["trades"], "test_won": test["won"],
@@ -164,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-dir", default="logs/data")
     parser.add_argument("--out", default="/tmp/dealbot-dashboard/money.json")
     parser.add_argument("--start-cash", type=float, default=10_000.0, help="bankroll when the log has no equity reading yet")
-    parser.add_argument("--since-ms", type=int, default=WEEK_START_MS, help="start of the measured window (default: the measured week)")
+    parser.add_argument("--since-ms", type=int, default=None, help="start of the measured window (default: desk v2's start, or the first measured week)")
     args = parser.parse_args(argv)
     rows = build(args.log_dir, start_cash=args.start_cash, since_ms=args.since_ms)
     out = Path(args.out)

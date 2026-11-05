@@ -397,7 +397,7 @@ def test_ws_signer_handles_rsa_and_ed25519_keys_from_the_environment():
             assert h["KALSHI-ACCESS-KEY"] == "kid" and h["KALSHI-ACCESS-TIMESTAMP"] == "1700000000000" and len(h["KALSHI-ACCESS-SIGNATURE"]) > 40
 
 
-def test_report_waits_for_the_live_feed_then_scores_b_c_e_f(tmp_path):
+def test_report_waits_for_the_live_feed_then_scores_e_f_and_names_the_dropped(tmp_path):
     from lab import report
 
     lab, tape = tmp_path / "lab", tmp_path / "tape"
@@ -406,14 +406,15 @@ def test_report_waits_for_the_live_feed_then_scores_b_c_e_f(tmp_path):
     store.write("lab_status", {"rest": {"requests": 3}}, ts_ms=T0)
     store.close()
     before = report.build(tape, lab)
-    assert all("waits for the live feed" in before["strategies"][k]["line"] for k in "BCEF") and before["live_feed"] is None
+    assert all("waits for the live feed" in before["strategies"][k]["line"] for k in "EF") and before["live_feed"] is None
     ws = LabStore(lab, stream="ws")
     ws.write("lab_status", {"source": "ws", "ws": {"connects": 1}, "rest": {"requests": 2}}, ts_ms=T0 + 1)
     ws.close()
     after = report.build(tape, lab)
     assert after["live_feed"]["ws"] == {"connects": 1} and after["recorder"]["rest"] == {"requests": 3}
-    assert [after["strategies"][k]["line"].split(" ")[0] for k in "BCEF"] == ["B", "C", "E", "F"]
-    assert not any("waits" in after["strategies"][k]["line"] for k in "BCEF") and after["strategies"]["E"]["summary"]["markets"] == 0
+    assert sorted(after["strategies"]) == ["A", "E", "F"] and sorted(after["dropped"]) == ["B", "C", "D"]  # dropped 2026-11-05
+    assert [after["strategies"][k]["line"].split(" ")[0] for k in "EF"] == ["E", "F"]
+    assert not any("waits" in after["strategies"][k]["line"] for k in "EF") and after["strategies"]["E"]["summary"]["markets"] == 0
 
 
 def test_ws_run_records_resubscribes_after_a_drop_and_stops_on_time(tmp_path):
