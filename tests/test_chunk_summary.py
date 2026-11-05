@@ -50,3 +50,13 @@ def test_a_deciding_chunk_counts_calls_decisions_fills_and_settlements(tmp_path)
     assert s["judge_failures"] == {"jev_timeout": 1} and "outside_trade_window" not in s["rejections"]
     path = write(s, tmp_path / "summaries")
     assert json.loads(path.read_text())["judge_calls"] == 1 and (tmp_path / "summaries" / "latest.json").exists()
+
+
+def test_feed_counters_add_up_across_desk_restarts(tmp_path):
+    # each desk process counts from 0; the summary adds what every process counted inside the window
+    log = RawLog(tmp_path)
+    for ts, polls, errors in ((T0, 10, 0), (T0 + 60_000, 500, 3), (T0 + 120_000, 5, 0), (T0 + 180_000, 100, 2)):
+        log.write("heartbeat", {"equity_usd": 10_000.0, "feed": {"polls": polls, "errors": errors, "rate_limits": 0}}, ts_ms=ts)
+    log.close()
+    s = summarize(tmp_path, since_ms=T0, until_ms=T0 + 200_000)
+    assert s["feed"] == {"polls": 490 + 5 + 95, "errors": 3 + 0 + 2, "rate_limits": 0}

@@ -37,8 +37,8 @@ def summarize(log_dir: str | Path, *, since_ms: int, until_ms: int | None = None
     settlements = {"official": 0, "provisional": 0}
     realized = 0.0
     equity: list[float] = []
-    feed_first: dict | None = None
-    feed_last: dict | None = None
+    feed: dict[str, float] = {}     # the feed's counters added up across the window
+    feed_prev: dict | None = None
     first_ts = last_ts = None
     models: collections.Counter[str] = collections.Counter()
     for e in read_events(log_dir):
@@ -72,13 +72,17 @@ def summarize(log_dir: str | Path, *, since_ms: int, until_ms: int | None = None
             if isinstance(e.get("equity_usd"), (int, float)):
                 equity.append(float(e["equity_usd"]))
             if isinstance(e.get("feed"), dict):
-                feed_first = feed_first or e["feed"]
-                feed_last = e["feed"]
+                for k, v in e["feed"].items():
+                    if feed_prev is None:
+                        feed.setdefault(k, 0)
+                        continue
+                    prev = feed_prev.get(k, 0)
+                    # the desk's counters start again from 0 whenever the desk restarts: a drop is a restart, and
+                    # the new value is what the new process counted since (last minus first went negative)
+                    feed[k] = feed.get(k, 0) + (v - prev if v >= prev else v)
+                feed_prev = e["feed"]
     span_ms = 0 if first_ts is None else last_ts - first_ts
     judge_failures = {k: v for k, v in rejections.items() if k.startswith("jev_") or k == "battery_fault"}
-    feed = {}
-    if feed_last:
-        feed = {k: feed_last.get(k, 0) - (feed_first or {}).get(k, 0) for k in feed_last}
     return {
         "since_ms": since_ms,
         "until_ms": until,
