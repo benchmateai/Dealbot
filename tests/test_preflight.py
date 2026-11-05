@@ -9,9 +9,20 @@ KALSHI = {"DESK_MODE": "paper", "DESK_BOT": "kalshi", "FEED": "kalshi", "DESK_SY
 
 
 def test_the_default_kalshi_desk_opens_a_position_on_sane_data():
+    # desk v2 (the default): no Jev call; its forecast decides, logged beside each decision
     result = run_scenario(KALSHI)
     assert result.ok, result.summary()
-    assert result.opened == 1 and result.judge_calls > 10 and not result.blockers, result.summary()
+    assert result.opened == 1 and result.judge_calls == 0 and not result.blockers, result.summary()
+    forecasts = [e for e in result.events if e["kind"] == "forecast"]
+    assert forecasts and all(f["model"] == "anchored-1" for f in forecasts)
+    entry = [e for e in result.events if e["kind"] == "decision" and e["action"] == "enter_long"][0]
+    assert entry["executed"] and entry["model"] == "anchored-1" and entry["prob"] == pytest.approx(0.99)
+
+
+def test_the_first_desk_still_runs_on_request():
+    result = run_scenario({**KALSHI, "KALSHI_FORECAST": "blend"})
+    assert result.ok and result.opened == 1 and result.judge_calls > 10 and not result.blockers, result.summary()
+    assert not [e for e in result.events if e["kind"] == "forecast"]
 
 
 @pytest.mark.parametrize(
@@ -34,8 +45,10 @@ def test_the_default_spot_desk_opens_a_position_on_sane_data():
 
 
 def test_each_block_tapes_both_series_without_changing_what_the_desk_does(monkeypatch):
+    # the first desk: the tape is logging only (v2 forecasts from it by design; see the next test)
     from desk.desk import TAPE_FIELDS, Desk
 
+    KALSHI = {**globals()["KALSHI"], "KALSHI_FORECAST": "blend"}
     result = run_scenario(KALSHI)
     tapes = [e for e in result.events if e["kind"] == "tape"]
     assert [e["blk"] for e in tapes] == sorted({e["blk"] for e in tapes}) and len(tapes) == result.blocks

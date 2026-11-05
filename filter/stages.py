@@ -4,6 +4,7 @@
 2. OneCall    one cheap call each: feed health, resting orders, account equity.
 3. HardFacts  code only: best-case edge vs fees+gas, and a risk pre-check with a full-size order.
 4. JevStage   one Jev call per surviving candidate (bounded), with the block deadline.
+   (desk v2: ForecastStage instead, no model call; the market-anchored forecast of policy/anchored.py)
 5. FinalPick  the policy scores actions; below-threshold candidates are logged as hold decisions;
               exactly one candidate survives.
 """
@@ -16,6 +17,7 @@ from dataclasses import replace
 from broker.base import Order
 from filter.funnel import Candidate, FunnelContext, Rejection
 from judge.client import Backoff, Judge, JudgeError, JudgeMalformed, JudgeRateLimited, JudgeTimeout
+from policy.anchored import MODEL_VERSION, final_pick_anchored
 from policy.binary import BinaryCosts, final_pick_binary
 from policy.decide import final_pick
 from policy.thresholds import EdgeModel
@@ -199,12 +201,50 @@ class JevStage:
         return kept, rejected
 
 
+class ForecastStage:
+    """Desk v2's stand-in for JevStage: no model call. It names the decision, logs the snapshot and the
+    forecast the pick will use (policy/anchored.py: the market price moved toward the settlement model by
+    the fitted weight) and passes every candidate on, so both series are considered each block. An entry
+    candidate is held out only when there is no usable forecast for its contract (stale or missing quote)
+    or the weight is still 0 (fewer than MIN_ROWS resolved forecasts): then q is the market and no entry
+    could clear the bar anyway. Manage candidates always pass; the late stop needs only the quote."""
+
+    name = "forecast"
+
+    def __init__(self, forecaster, *, model_version: str = MODEL_VERSION) -> None:
+        self._forecaster = forecaster
+        self._version = model_version
+
+    def run(self, candidates: list[Candidate], ctx: FunnelContext) -> tuple[list[Candidate], list[Rejection]]:
+        kept, rejected = [], []
+        fc = self._forecaster
+        for c in candidates:
+            decision_id = ctx.decision_id(c.sym)
+            contract = c.state.get("contract") if isinstance(c.state, dict) else None
+            f = fc.latest.get(c.sym)
+            if f is not None and (not contract or f.get("ticker") != contract.get("ticker")):
+                f = None
+            if ctx.log is not None:
+                ctx.log.write("snapshot", {"decision_id": decision_id, "bot": ctx.bot, "phase": ctx.phase, "sym": c.sym, "blk": ctx.block, "snapshot": c.snapshot.to_dict(), "tokens": c.snapshot.tokens(), "state": c.state}, ts_ms=ctx.now_ms)
+                record = {k: (round(v, 6) if isinstance(v, float) else v) for k, v in (f or {}).items() if k != "ts"}  # the writer stamps ts
+                ctx.log.write("forecast", {"decision_id": decision_id, "bot": ctx.bot, "phase": ctx.phase, "sym": c.sym, "blk": ctx.block, "model": self._version, **record, "weight": round(fc.weight, 4), "resolved": len(fc.resolved_rows)}, ts_ms=ctx.now_ms)
+            if ctx.phase == "entry":
+                if f is None:
+                    rejected.append(Rejection(c.sym, self.name, "forecast_unavailable", "no usable quote or model for this contract this block"))
+                    continue
+                if fc.weight == 0.0:
+                    rejected.append(Rejection(c.sym, self.name, "forecast_warming_up", f"weight 0 until {fc.min_rows} resolved forecasts ({len(fc.resolved_rows)} so far)"))
+                    continue
+            kept.append(replace(c, decision_id=decision_id, answers={"forecast": f} if f else {}, judge={"model": self._version}))
+        return kept, rejected
+
+
 class FinalPick:
     name = "final_pick"
 
     def __init__(self, *, kind: str = "spot", binary_costs: BinaryCosts | None = None) -> None:
-        if kind not in ("spot", "binary"):
-            raise ValueError("kind must be spot or binary")
+        if kind not in ("spot", "binary", "anchored"):
+            raise ValueError("kind must be spot, binary or anchored")
         self._kind = kind
         self._costs = binary_costs or BinaryCosts()
 
@@ -214,7 +254,9 @@ class FinalPick:
         for c in candidates:
             try:
                 contract = c.state.get("contract") if isinstance(c.state, dict) else None
-                if self._kind == "binary" and contract:
+                if self._kind == "anchored" and contract:
+                    pick = final_pick_anchored(ctx.phase, (c.answers or {}).get("forecast"), contract, self._costs, position=ctx.position)
+                elif self._kind == "binary" and contract:
                     pick = final_pick_binary(ctx.bot, ctx.phase, c.answers or {}, c.snapshot.to_dict(), contract, self._costs, position_sign=position_sign)
                 else:
                     pick = final_pick(ctx.bot, ctx.phase, c.answers or {}, c.snapshot.to_dict())

@@ -54,7 +54,7 @@
   <header class="pm-head" id="top">
     <p class="pm-eyebrow">Paper money · Kalshi 15-minute crypto · no real orders</p>
     <h1 class="pm-title">Dealbot paper money</h1>
-    <p class="pm-lede">After fees the desk stands at <b data-draw="net-lede" data-source="paper" data-field="net_pnl_usd" data-where="table=summary" class="dash-skeleton">—</b>, with <b data-draw="closed-lede" data-source="paper" data-field="trades_closed" data-where="table=summary" class="dash-skeleton">—</b> bets settled and <b data-draw="open-lede" data-source="paper" data-field="trades_open" data-where="table=summary" class="dash-skeleton">—</b> open.</p>
+    <p class="pm-lede"><b data-draw="desk-name" data-source="paper" data-field="desk" data-where="table=summary" class="dash-skeleton">—</b> has traded since <b data-draw="since" data-source="paper" data-field="week_started_ms" data-where="table=summary" class="dash-skeleton">—</b>. After fees it stands at <b data-draw="net-lede" data-source="paper" data-field="net_pnl_usd" data-where="table=summary" class="dash-skeleton">—</b>, with <b data-draw="closed-lede" data-source="paper" data-field="trades_closed" data-where="table=summary" class="dash-skeleton">—</b> bets settled and <b data-draw="open-lede" data-source="paper" data-field="trades_open" data-where="table=summary" class="dash-skeleton">—</b> open.</p>
   </header>
 
   <section class="pm-card pm-hero" id="result" aria-labelledby="result-label">
@@ -85,36 +85,45 @@
       <div data-draw="fees" data-source="paper" data-field="fees_usd" data-where="table=summary" class="pm-tile-value dash-skeleton">—</div>
       <div class="pm-tile-sub">already taken out of the result</div>
     </div>
-    <div class="pm-tile">
-      <div class="pm-tile-label">Jev cost</div>
-      <div data-draw="jevcost" data-source="paper" data-field="jev_cost_usd" data-where="table=summary" class="pm-tile-value dash-skeleton">—</div>
-      <div class="pm-tile-sub"><b data-draw="jevcalls" data-source="paper" data-field="jev_calls" data-where="table=summary">—</b> judge calls, real TypeSafe spend</div>
+  </section>
+
+  <section class="pm-shadow" id="previous" aria-labelledby="previous-title">
+    <h2 id="previous-title">The first desk</h2>
+    <span data-draw="previous-state" data-source="previous"></span>
+    <p class="pm-note">From Nov 3 the first desk bet against the market using Jev's odds. Kalshi's own price turned out to be the better forecast, so on Nov 5 the desk switched to v2: the market price, nudged by a model of how these contracts settle only as far as past results allow. v2 holds each bet to the close and sells one still losing a minute before.</p>
+    <div class="pm-tiles">
+      <div class="pm-tile">
+        <div class="pm-tile-label">First desk's final result</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="v1-net" data-source="previous" data-field="net_pnl_usd" data-where="id=v1">—</div>
+        <div class="pm-tile-sub"><b data-draw="v1-n" data-source="previous" data-field="trades_closed" data-where="id=v1">—</b> bets, <b data-draw="v1-wins" data-source="previous" data-field="wins" data-where="id=v1">—</b> won, until <b data-draw="v1-end" data-source="previous" data-field="to_ms" data-where="id=v1">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">First desk's fees and Jev calls</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="v1-fees" data-source="previous" data-field="fees_usd" data-where="id=v1">—</div>
+        <div class="pm-tile-sub"><b data-draw="v1-jev" data-source="previous" data-field="jev_calls" data-where="id=v1">—</b> Jev calls; v2 makes none</div>
+      </div>
     </div>
   </section>
 
-  <section class="pm-shadow" id="shadow" aria-labelledby="shadow-title">
-    <h2 id="shadow-title">Shadow test</h2>
-    <p class="pm-note">Rule changes tested on paper on the desk's own bets, without trading. Each counts only bets placed after it was fixed: the analyst's two rules from <b data-draw="sh-when" data-source="shadows" data-field="registered_ms" data-where="id=desk">—</b>, your late stop from <b data-draw="sh-late-when" data-source="shadows" data-field="registered_ms" data-where="id=late_stop">—</b>. A shadow can skip the desk's bets or sell them sooner, never add new ones.</p>
+  <section class="pm-shadow" id="lab" aria-labelledby="lab-title">
+    <h2 id="lab-title">Kalshi's liquidity payments (strategy E, paper)</h2>
+    <span data-draw="lab-state" data-source="lab"></span>
+    <p class="pm-note">Kalshi pays traders who keep orders resting in some markets. Strategy E replays the recorded live feed as if it had kept orders there: the payments it would have earned, less what the bets it got filled on are worth now. No orders are placed. Rebuilt each morning; as of <b data-draw="lab-when" data-source="lab" data-field="updated_ms" data-where="id=E">—</b>.</p>
     <div class="pm-tiles">
       <div class="pm-tile">
-        <div class="pm-tile-label">Live desk, as traded</div>
-        <div class="pm-tile-value dash-skeleton" data-draw="sh-desk" data-source="shadows" data-field="test_pnl_usd" data-where="id=desk">—</div>
-        <div class="pm-tile-sub"><b data-draw="sh-desk-n" data-source="shadows" data-field="test_trades" data-where="id=desk">—</b> bets closed</div>
+        <div class="pm-tile-label">E, realistic result</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="e-net" data-source="lab" data-field="net_usd_realistic" data-where="id=E">—</div>
+        <div class="pm-tile-sub">over <b data-draw="e-hours" data-source="lab" data-field="hours" data-where="id=E">—</b> hours: payments <b data-draw="e-pay" data-source="lab" data-field="payable_usd" data-where="id=E">—</b>, fills now worth <b data-draw="e-marked" data-source="lab" data-field="fills_marked_usd" data-where="id=E">—</b></div>
       </div>
       <div class="pm-tile">
-        <div class="pm-tile-label">Skip bets more than <b data-draw="sh-cap" data-source="shadows" data-field="cap_points" data-where="id=capped">—</b> points from the market</div>
-        <div class="pm-tile-value dash-skeleton" data-draw="sh-capped" data-source="shadows" data-field="test_pnl_usd" data-where="id=capped">—</div>
-        <div class="pm-tile-sub"><b data-draw="sh-capped-n" data-source="shadows" data-field="test_trades" data-where="id=capped">—</b> closed, <b data-draw="sh-capped-skip" data-source="shadows" data-field="test_skipped" data-where="id=capped">—</b> skipped</div>
+        <div class="pm-tile-label">Money E ties up</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="e-cap" data-source="lab" data-field="capital_avg_usd" data-where="id=E">—</div>
+        <div class="pm-tile-sub">on average, <b data-draw="e-cap-peak" data-source="lab" data-field="capital_peak_usd" data-where="id=E">—</b> at most; best case <b data-draw="e-best" data-source="lab" data-field="net_usd_upper_bound" data-where="id=E">—</b></div>
       </div>
       <div class="pm-tile">
-        <div class="pm-tile-label">Same, and sell <b data-draw="sh-exit-min" data-source="shadows" data-field="exit_minutes" data-where="id=capped_exit">—</b> minutes before the close</div>
-        <div class="pm-tile-value dash-skeleton" data-draw="sh-exit" data-source="shadows" data-field="test_pnl_usd" data-where="id=capped_exit">—</div>
-        <div class="pm-tile-sub"><b data-draw="sh-exit-n" data-source="shadows" data-field="test_trades" data-where="id=capped_exit">—</b> closed, <b data-draw="sh-exit-skip" data-source="shadows" data-field="test_skipped" data-where="id=capped_exit">—</b> skipped</div>
-      </div>
-      <div class="pm-tile">
-        <div class="pm-tile-label">Sell a bet still losing <b data-draw="sh-late-s" data-source="shadows" data-field="late_seconds" data-where="id=late_stop">—</b> seconds before the close</div>
-        <div class="pm-tile-value dash-skeleton" data-draw="sh-late" data-source="shadows" data-field="test_pnl_usd" data-where="id=late_stop">—</div>
-        <div class="pm-tile-sub"><b data-draw="sh-late-n" data-source="shadows" data-field="test_trades" data-where="id=late_stop">—</b> closed; the desk on the same bets <b data-draw="sh-late-desk" data-source="shadows" data-field="desk_same_pnl_usd" data-where="id=late_stop">—</b></div>
+        <div class="pm-tile-label">Lab A: v2's forecast, BTC and ETH at once</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="a-pnl" data-source="lab" data-field="pnl_usd" data-where="id=A">—</div>
+        <div class="pm-tile-sub"><b data-draw="a-n" data-source="lab" data-field="trades" data-where="id=A">—</b> paper trades since Nov 3, held to the close</div>
       </div>
     </div>
   </section>
@@ -173,11 +182,11 @@
     fn: (paper) => paper.filter((r) => r.table === 'day'),
   });
 
-  dash.calc('shadows', {
+  dash.calc('previous', {
     inputs: ['paper'],
-    title: 'Shadow test',
-    description: 'The live desk and the shadow rules, each over bets placed after it was fixed.',
-    fn: (paper) => paper.filter((r) => r.table === 'shadow'),
+    title: 'The first desk',
+    description: "The first desk's final result, from the measured week's start to desk v2's.",
+    fn: (paper) => paper.filter((r) => r.table === 'previous'),
   });
 
   const summary = () => {
@@ -219,13 +228,18 @@
   figure('best', 'best_pnl_usd', signed, true);
   figure('worst', 'worst_pnl_usd', signed, true);
   figure('fees', 'fees_usd', usd);
-  figure('jevcost', 'jev_cost_usd', small);
-  figure('jevcalls', 'jev_calls', count);
+  figure('since', 'week_started_ms', when);
+  dash.draw('desk-name', (el) => {
+    const d = dash.data('paper');
+    const s = summary();
+    if (d.status === 'ok' || d.status === 'error') el.classList.remove('dash-skeleton');
+    el.textContent = !s ? '—' : s.desk === 'v2' ? 'Desk v2' : 'The first desk';
+  });
   figure('weekday', 'week_day', count);
   figure('updated', 'updated_ms', when);
 
-  const shadowFigure = (name, id, field, fmt, sign) => dash.draw(name, (el) => {
-    const d = dash.data('shadows');
+  const rowFigure = (name, source, id, field, fmt, sign) => dash.draw(name, (el) => {
+    const d = dash.data(source);
     const row = d.status === 'ok' && Array.isArray(d.data) ? d.data.find((r) => r.id === id) : null;
     const v = row ? row[field] : null;
     el.classList.remove('pm-up', 'pm-down');
@@ -235,22 +249,33 @@
     el.textContent = fmt(n);
     if (sign) { el.classList.toggle('pm-up', n > 0); el.classList.toggle('pm-down', n < 0); }
   });
-  shadowFigure('sh-when', 'desk', 'registered_ms', when);
-  shadowFigure('sh-desk', 'desk', 'test_pnl_usd', signed, true);
-  shadowFigure('sh-desk-n', 'desk', 'test_trades', count);
-  shadowFigure('sh-cap', 'capped', 'cap_points', count);
-  shadowFigure('sh-capped', 'capped', 'test_pnl_usd', signed, true);
-  shadowFigure('sh-capped-n', 'capped', 'test_trades', count);
-  shadowFigure('sh-capped-skip', 'capped', 'test_skipped', count);
-  shadowFigure('sh-exit-min', 'capped_exit', 'exit_minutes', count);
-  shadowFigure('sh-exit', 'capped_exit', 'test_pnl_usd', signed, true);
-  shadowFigure('sh-exit-n', 'capped_exit', 'test_trades', count);
-  shadowFigure('sh-exit-skip', 'capped_exit', 'test_skipped', count);
-  shadowFigure('sh-late-when', 'late_stop', 'registered_ms', when);
-  shadowFigure('sh-late-s', 'late_stop', 'late_seconds', count);
-  shadowFigure('sh-late', 'late_stop', 'test_pnl_usd', signed, true);
-  shadowFigure('sh-late-n', 'late_stop', 'test_trades', count);
-  shadowFigure('sh-late-desk', 'late_stop', 'desk_same_pnl_usd', signed, true);
+  rowFigure('v1-net', 'previous', 'v1', 'net_pnl_usd', signed, true);
+  rowFigure('v1-n', 'previous', 'v1', 'trades_closed', count);
+  rowFigure('v1-wins', 'previous', 'v1', 'wins', count);
+  rowFigure('v1-end', 'previous', 'v1', 'to_ms', when);
+  rowFigure('v1-fees', 'previous', 'v1', 'fees_usd', usd);
+  rowFigure('v1-jev', 'previous', 'v1', 'jev_calls', count);
+  const hours = d3.format('.1f');
+  rowFigure('e-net', 'lab', 'E', 'net_usd_realistic', signed, true);
+  rowFigure('e-hours', 'lab', 'E', 'hours', hours);
+  rowFigure('e-pay', 'lab', 'E', 'payable_usd', usd);
+  rowFigure('e-marked', 'lab', 'E', 'fills_marked_usd', signed, true);
+  rowFigure('e-cap', 'lab', 'E', 'capital_avg_usd', whole);
+  rowFigure('e-cap-peak', 'lab', 'E', 'capital_peak_usd', whole);
+  rowFigure('e-best', 'lab', 'E', 'net_usd_upper_bound', signed);
+  rowFigure('a-pnl', 'lab', 'A', 'pnl_usd', signed, true);
+  rowFigure('a-n', 'lab', 'A', 'trades', count);
+  rowFigure('lab-when', 'lab', 'E', 'updated_ms', when);
+  dash.draw('lab-state', () => {
+    const d = dash.data('lab');
+    const none = d.status === 'error' || (d.status === 'ok' && (!Array.isArray(d.data) || d.data.length === 0));
+    for (const sec of document.querySelectorAll('#lab')) sec.hidden = none;
+  });
+  dash.draw('previous-state', () => {
+    const d = dash.data('previous');
+    const none = d.status === 'ok' && d.data.length === 0;
+    for (const sec of document.querySelectorAll('#previous')) sec.hidden = none;
+  });
 
   dash.draw('bets-state', () => {
     const d = dash.data('trades');

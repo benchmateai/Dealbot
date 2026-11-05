@@ -32,7 +32,8 @@ from desk.config import ConfigError, DeskConfig
 
 # Checks that fire on healthy data at the start of every contract or by design; never a defect alone.
 BENIGN_CHECKS = frozenset(
-    {"insufficient_data", "insufficient_ticks", "rv_unavailable", "outside_trade_window", "no_contract", "benched", "not_best", "below_threshold", "jev_budget"}
+    {"insufficient_data", "insufficient_ticks", "rv_unavailable", "outside_trade_window", "no_contract", "benched", "not_best", "below_threshold", "jev_budget",
+     "forecast_unavailable", "forecast_warming_up"}
 )
 SCENARIO_EPOCH_MS = 1_700_000_100_000  # any fixed instant; contract 0 of the simulated series opens here
 
@@ -60,8 +61,24 @@ class ScenarioResult:
         return "\n".join(lines)
 
 
+def _confident_forecaster():
+    """Desk v2's stand-in for the confident judge: its real forecaster with the weight pinned and every usable
+    contract forecast at YES 0.99, so anything that still stops an entry is configuration, not the model."""
+    from policy.anchored import AnchoredForecaster
+
+    class ConfidentForecaster(AnchoredForecaster):
+        def observe_tape(self, ts, contracts):
+            out = super().observe_tape(ts, contracts)
+            for f in out.values():
+                f["q"] = 0.99
+            return out
+
+    return ConfidentForecaster(fixed_weight=1.0, track_index_gap=False)
+
+
 def run_scenario(env: Mapping[str, str], *, blocks: int | None = None) -> ScenarioResult:
-    """Run the desk on simulated, sane data with this environment's configuration and a confident judge."""
+    """Run the desk on simulated, sane data with this environment's configuration and a confident judge (desk
+    v2: a confident forecast)."""
     from feed.synthetic import DEFAULT_PRICES, SyntheticFeed
     from judge.scripted import ScriptedJudge
     from logs.writer import read_events
@@ -109,7 +126,8 @@ def run_scenario(env: Mapping[str, str], *, blocks: int | None = None) -> Scenar
 
         from desk.run import build_desk
 
-        desk, log = build_desk(cfg, start_ms=t0 + cfg.block_ms, judge=judge, feed=feed, trial_id="preflight")
+        forecaster = _confident_forecaster() if binary and cfg.kalshi_forecast == "anchored" else None
+        desk, log = build_desk(cfg, start_ms=t0 + cfg.block_ms, judge=judge, feed=feed, trial_id="preflight", forecaster=forecaster)
         polls = max(1, round(cfg.block_ms / max(1, cfg.feed_poll_ms)))
         try:
             for block in BlockClock(cfg.block_ms, t0 + cfg.block_ms, realtime=False).blocks(n_blocks):

@@ -6,7 +6,8 @@ Prints "OK ...", "WARN ..." or "ALERT ..." with the reasons and a few numbers, a
 (0 otherwise) so a caller can branch on it.
 
 ALERT means someone should look now: nothing pushed to the run branch for over 75 minutes (the
-chunk script publishes every 30), the desk reporting a fault, no Jev calls for two hours, more than
+chunk script publishes every 30), the desk reporting a fault, no Jev calls for two hours (desk v2, which
+asks no model, logs a forecast per candidate instead and is held to the same rule on those), more than
 a fifth of the last hour's Jev calls failing, a position still open 35 minutes after it was taken
 (a 15-minute contract settles within about 17), the day's loss at the risk gate's limit, or the same
 decision logged twice in the last two hours (two desks writing to one log, as on 2026-11-03).
@@ -60,8 +61,11 @@ def check(log_dir: str | Path, *, commit_ms: int | None, now_ms: int | None = No
         return [e for e in events if end - ms < e["ts"] <= end]
 
     hour, two_hours = window(HOUR_MS), window(2 * HOUR_MS)
-    calls_1h = sum(1 for e in hour if e.get("kind") == "answer")
-    calls_2h = sum(1 for e in two_hours if e.get("kind") == "answer")
+    v2 = any(e.get("kind") == "forecast" for e in window(24 * HOUR_MS))
+    brain, label = ("forecast", "forecasts") if v2 else ("answer", "Jev calls")
+    jev_1h = sum(1 for e in hour if e.get("kind") == "answer")
+    calls_1h = sum(1 for e in hour if e.get("kind") == brain)
+    calls_2h = sum(1 for e in two_hours if e.get("kind") == brain)
     failures_1h = sum(1 for e in hour if _judge_failure(e))
     entries_1h = sum(1 for e in hour if e.get("kind") == "decision" and e.get("executed") and str(e.get("action", "")).startswith("enter"))
     settled_1h = sum(1 for e in hour if e.get("kind") == "position_closed")
@@ -80,10 +84,10 @@ def check(log_dir: str | Path, *, commit_ms: int | None, now_ms: int | None = No
     if position and isinstance(position.get("entry_ts"), int) and end - position["entry_ts"] > STUCK_POSITION_MIN * MINUTE_MS:
         alerts.append(f"{position.get('sym')} position open {(end - position['entry_ts']) // MINUTE_MS} min; a 15-minute contract settles within about 17")
     if end - first_ts >= 2 * HOUR_MS - 5 * MINUTE_MS and calls_2h == 0:
-        alerts.append("no Jev calls in two hours")
+        alerts.append(f"no {label} in two hours")
     elif end - first_ts >= HOUR_MS - 5 * MINUTE_MS and calls_1h == 0:
-        warns.append("no Jev calls in the last hour")
-    asked = calls_1h + failures_1h
+        warns.append(f"no {label} in the last hour")
+    asked = jev_1h + failures_1h
     if asked >= 5 and failures_1h / asked > FAIL_SHARE_ALERT:
         alerts.append(f"{failures_1h} of {asked} Jev calls failed in the last hour")
     day_pnl = float(last.get("day_pnl_usd") or 0.0)
@@ -102,7 +106,7 @@ def check(log_dir: str | Path, *, commit_ms: int | None, now_ms: int | None = No
         warns.append(f"{limited} of {polls} feed polls rate-limited since the desk started")
     stats = {
         "log_end_ms": end, "commit_age_min": None if commit_ms is None else (now - commit_ms) // MINUTE_MS,
-        "jev_calls_1h": calls_1h, "jev_failures_1h": failures_1h, "entries_1h": entries_1h, "settled_1h": settled_1h,
+        "jev_calls_1h": jev_1h, "forecasts_1h": calls_1h if v2 else 0, "brain": label, "brain_calls_1h": calls_1h, "jev_failures_1h": failures_1h, "entries_1h": entries_1h, "settled_1h": settled_1h,
         "equity_usd": round(equity, 2), "net_usd": round(equity - start_cash, 2), "day_pnl_usd": round(day_pnl, 2),
         "open_position": None if not position else f"{'YES' if float(position.get('qty') or 0) > 0 else 'NO'} {position.get('sym')}",
     }
@@ -115,7 +119,7 @@ def _verdict(alerts: list[str], warns: list[str], stats: dict) -> dict:
     if stats:
         age = "" if stats["commit_age_min"] is None else f"pushed {stats['commit_age_min']} min ago, "
         parts.append(
-            f"{age}last hour: {stats['jev_calls_1h']} Jev calls, {stats['entries_1h']} entries, {stats['settled_1h']} closed; "
+            f"{age}last hour: {stats['brain_calls_1h']} {stats['brain']}, {stats['entries_1h']} entries, {stats['settled_1h']} closed; "
             f"equity {stats['equity_usd']:,.2f} ({stats['net_usd']:+.2f} overall, {stats['day_pnl_usd']:+.2f} today)"
             + (f"; open: {stats['open_position']}" if stats["open_position"] else "")
         )
