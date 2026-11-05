@@ -420,11 +420,11 @@
   {
    "evaluation": null,
    "first_seen_ms": 1793852388000,
-   "last_seen_ms": 1793879736000,
+   "last_seen_ms": 1793886360000,
    "modes": [
     "paper"
    ],
-   "runs": 5,
+   "runs": 6,
    "spec": {
     "battery_version": "7af437155918",
     "block_seconds": 12.0,
