@@ -119,6 +119,7 @@ def _positions(log_dir: str | Path, since_ms: int) -> list[dict]:
         if quote.get("yes_bid") is not None and quote.get("yes_ask") is not None:
             mid = (float(quote["yes_bid"]) + float(quote["yes_ask"])) / 2
         p["p_yes"], p["mid"] = p_yes, mid
+        p["ticker"] = quote.get("ticker")
         p["entry_left_s"] = None if quote.get("expires_in_s") is None else float(quote["expires_in_s"])
         p["gap"] = None if p_yes is None or mid is None else round(abs(p_yes - mid), 4)
         p["pnl"] = None if p["result"] == "open" else round(p["gross"] - p["fees"], 2)
