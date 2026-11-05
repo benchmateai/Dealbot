@@ -6,17 +6,19 @@ market-anchored forecast instead (see "Desk v2"). Paper money only. House rules,
 place a live order; ask the owner before adding any API key (trading-only, withdrawals disabled);
 keep secrets out of code and logs; show the owner every change as a diff.
 
-The measured week runs from 2026-11-03T08:25:00Z to 2026-11-10T08:25:00Z; the final report and
-verdict follow at 08:55Z. It started at 06:20:24Z, but from 06:42 to 08:23Z every restart of the
+The first desk's measured week ran from 2026-11-03T08:25:00Z until desk v2 took over at
+2026-11-05T04:19:48Z; v2's week runs to 2026-11-12T04:20Z, and the final report and verdict follow at
+04:50Z. The first week started at 06:20:24Z, but from 06:42 to 08:23Z every restart of the
 desk left the previous desk running (the chunk script killed a wrapper shell, not the desk), so two
 to four desks traded side by side and wrote every decision twice into one log. That stretch stays
 in the run branch's record and is left out of the results (fixed in 1f1a3f4; reports/health.py now
 raises an ALERT if a decision is ever logged twice).
 
 On 2026-11-05 the owner switched the desk to v2 as soon as it passed its tests. The first desk's week
-closed at the switch with its result kept for the record; v2's measured week runs seven days from its
-first block (`reports/runs.py` finds it in the log), and the stop and final-report tasks are re-timed to
-it.
+closed at the switch with its result kept for the record (-60.42 USD after fees on 250 closed bets, its
+last open bet then settling a winner under v2). v2's measured week runs seven days from its first block,
+2026-11-05T04:19:48Z (`reports/runs.py` finds it in the log), and the stop and final-report tasks are
+re-timed to it.
 
 ## Who does what
 
@@ -42,8 +44,8 @@ Each teammate does one job on a schedule and hands everything else up. The deter
 | Dealbot analyst (daily) | `trig_012LJKTfeFq9HcsRRwTToX1c` | 12:41Z | the analyst |
 | Dealbot morning report | `trig_01BCqah4duYaj4kiukYhoD6J` | 06:31 Arizona (13:31Z) | the coordinator |
 | Dealbot supervisor check | `trig_01WRrVejPmbJuufYScvmqRsF` | 01:06, 07:06, 19:06Z | the coordinator |
-| Paper run: stop after one week | `trig_01GZynojVUiE1qCcTVikWBML` | 2026-11-10T08:25Z | the coordinator |
-| Paper run: final weekly report and verdict | `trig_0185uWBZUeyYdDopGG326NDd` | 2026-11-10T08:55Z | the coordinator |
+| Paper run: stop after one week | `trig_01GZynojVUiE1qCcTVikWBML` | 2026-11-12T04:20Z (v2's week) | the coordinator |
+| Paper run: final weekly report and verdict | `trig_0185uWBZUeyYdDopGG326NDd` | 2026-11-12T04:50Z | the coordinator |
 
 ## Where things live
 
