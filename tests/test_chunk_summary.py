@@ -60,3 +60,15 @@ def test_feed_counters_add_up_across_desk_restarts(tmp_path):
     log.close()
     s = summarize(tmp_path, since_ms=T0, until_ms=T0 + 200_000)
     assert s["feed"] == {"polls": 490 + 5 + 95, "errors": 3 + 0 + 2, "rate_limits": 0}
+
+
+def test_a_v2_window_with_forecasts_and_no_judge_calls_is_not_stalled(tmp_path):
+    log = RawLog(tmp_path)
+    for k in range(40):
+        ts = T0 + k * 60_000
+        log.write("heartbeat", {"equity_usd": 10_000.0, "feed": {"polls": k, "errors": 0, "rate_limits": 0}}, ts_ms=ts)
+        log.write("forecast", {"decision_id": f"d{k}", "sym": "KXETH15M", "model": "anchored-1", "weight": 0.5}, ts_ms=ts)
+    log.close()
+    s = summarize(tmp_path, since_ms=T0, until_ms=T0 + 41 * 60_000)
+    assert s["judge_calls"] == 0 and s["forecasts"] == 40 and s["stalled"] is False
+    assert "forecasts 40" in one_line(s) and "STALLED" not in one_line(s)
