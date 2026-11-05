@@ -16,6 +16,17 @@ from policy.weights import WEIGHTS
 from questions.schema import Battery
 
 
+def _forecast_spec(cfg) -> dict:
+    """Desk v2's forecast and its fixed parameters; the first desk (blend) keeps its old spec, so its trial id
+    is unchanged."""
+    if getattr(cfg, "kalshi_forecast", "blend") != "anchored":
+        return {}
+    from policy import anchored as a
+
+    return {"forecast": "anchored", "forecast_model": a.MODEL_VERSION, "horizons_s": list(a.HORIZONS_S), "min_rows": a.MIN_ROWS,
+            "refit_every": a.REFIT_EVERY, "entry_window_s": list(a.TRADE_WINDOW_S), "late_stop_s": a.LATE_STOP_S}
+
+
 def strategy_spec(cfg, battery: Battery) -> dict:
     bot = cfg.bot
     return {
@@ -45,7 +56,7 @@ def strategy_spec(cfg, battery: Battery) -> dict:
         "warmup_blocks": cfg.warmup_blocks,
         "heartbeat_every_blocks": cfg.heartbeat_every_blocks,
         "fee_model": cfg.fee_model,
-        "kalshi": None if cfg.fee_model != "kalshi" else {"base_url": cfg.kalshi_base_url, "underlying": dict(cfg.kalshi_underlying), "trade_window_s": cfg.kalshi_trade_window_s, "min_time_left_s": cfg.kalshi_min_time_left_s, "taker_rate": cfg.kalshi_taker_rate, "maker_rate": cfg.kalshi_maker_rate, "model_weight": cfg.binary_model_weight},
+        "kalshi": None if cfg.fee_model != "kalshi" else {"base_url": cfg.kalshi_base_url, "underlying": dict(cfg.kalshi_underlying), "trade_window_s": cfg.kalshi_trade_window_s, "min_time_left_s": cfg.kalshi_min_time_left_s, "taker_rate": cfg.kalshi_taker_rate, "maker_rate": cfg.kalshi_maker_rate, "model_weight": cfg.binary_model_weight, **_forecast_spec(cfg)},
         "jev_model": cfg.jev_model,
         "feed": {"kind": cfg.feed, "replay_path": cfg.replay_path, "synthetic_seed": cfg.synthetic_seed, "synthetic_tick_ms": cfg.synthetic_tick_ms},
     }

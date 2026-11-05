@@ -1,7 +1,9 @@
 """A, the control: the repaired 15-minute model, anchored on the market price, trading as a taker only when its
 fitted weight says the model adds anything to the price.
 
-It replays the paper desk's per-block tape (paper-run branch). The model is lab/model.py's: the
+It replays the paper desk's per-block tape (paper-run branch) through policy/anchored.py's forecaster, the
+same class the paper desk trades from v2 on (2026-11-05), so this replay and the desk cannot drift apart.
+The model: the
 probability that the sixty-second settlement average ends at or above the strike, with variance from an
 exponentially weighted volatility (30-minute half-life) instead of the desk's 4-minute window, the part
 of the average already fixed counted inside the last minute, and Coinbase's spot corrected toward the
@@ -21,26 +23,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
-from collections import defaultdict
 from pathlib import Path
-from statistics import median
 
 from kalshi.api import taker_fee_usd
-from lab.model import EwmaVol, brier, fit_weight, log_loss, p_contract, pool
 from lab.store import read_lab
 from logs.writer import read_events
+from policy.anchored import HORIZONS_S, MIN_ROWS, TRADE_WINDOW_S, AnchoredForecaster, brier, log_loss
 
 REGISTERED_MS = 1_793_739_600_000  # 2026-11-03T21:00:00Z
-HORIZONS_S = (420, 300, 180, 60)
-MIN_ROWS = 300
-REFIT_EVERY = 25
 CONTRACTS = 10
 MARGIN = 0.5
-STALE_QUOTE_MS = 24_000
-CORR_WINDOW = 50
-TRADE_WINDOW_S = (60, 600)
 
 
 def _min_edge(price: float, spread: float) -> float:
@@ -63,79 +56,37 @@ def evaluate(tape_dir: str | Path, lab_dir: str | Path | None = None, *, since_m
                 timeline.append((r["ts"], 0, {**r, "kind": "lab_settled"}))
     timeline.sort(key=lambda t: (t[0], t[1]))
 
-    vols: dict[str, EwmaVol] = defaultdict(EwmaVol)
-    gaps: dict[str, list[float]] = defaultdict(list)       # sym -> recent (settlement value - Coinbase) in bps
-    window_spots: dict[str, list[float]] = defaultdict(list)  # ticker -> log spots seen in its last minute
-    sym_of: dict[str, str] = {}
-    pending_rows: dict[str, list[dict]] = defaultdict(list)  # ticker -> horizon rows awaiting the outcome
-    recorded: set[tuple[str, int]] = set()
-    resolved_rows: list[dict] = []
-    outcomes: dict[str, int] = {}
-    weight, weight_loss, last_fit_n = 0.0, None, 0
+    fc = AnchoredForecaster()  # the paper desk's own forecaster (v2), here also fed the lab's settlement values
     positions: dict[str, dict] = {}
-    trades: list[dict] = []
-
-    def corr_bps(sym: str) -> float:
-        g = gaps[sym][-CORR_WINDOW:]
-        return median(g) if g else 0.0
 
     for ts, _, e in timeline:
         if e["kind"] == "settlement":
             t = e["ticker"]
-            if t in outcomes:
+            y = fc.observe_settlement(t, e.get("payout"))
+            if y is None:
                 continue
-            y = 1 if float(e.get("payout") or 0.0) >= 0.5 else 0
-            outcomes[t] = y
-            for row in pending_rows.pop(t, []):
-                resolved_rows.append({**row, "y": y})
             pos = positions.get(t)
             if pos and pos["result"] is None:
                 won = (y == 1) == (pos["side"] == "YES")
                 pos["result"] = "won" if won else "lost"
                 pos["pnl"] = round(CONTRACTS * ((1.0 if won else 0.0) - pos["price"]) - pos["fee"], 2)
-            if len(resolved_rows) >= MIN_ROWS and len(resolved_rows) - last_fit_n >= REFIT_EVERY:
-                weight, weight_loss = fit_weight((r["m"], r["p"], r["y"]) for r in resolved_rows)
-                last_fit_n = len(resolved_rows)
             continue
         if e["kind"] == "lab_settled":
             for ticker, result, value in e.get("rows") or []:
-                sym = sym_of.get(ticker)
-                spots = window_spots.pop(ticker, None)
-                if sym and value and spots:
-                    gaps[sym].append(1e4 * (math.log(float(value)) - sum(spots) / len(spots)))
+                fc.observe_settlement_value(ticker, value)
             continue
-        for sym, c in (e.get("contracts") or {}).items():
-            spot, ticker, tau = c.get("spot"), c.get("ticker"), c.get("expires_in_s")
-            if not spot or not ticker or tau is None:
+        for sym, f in fc.observe_tape(ts, e.get("contracts") or {}).items():
+            ticker, tau = f["ticker"], f["tau"]
+            if ts < registered_ms or ticker in positions or not TRADE_WINDOW_S[0] <= tau <= TRADE_WINDOW_S[1] or fc.weight == 0.0:
                 continue
-            vols[sym].update(ts, float(spot))
-            sym_of[ticker] = sym
-            log_spot = math.log(float(spot))
-            if tau <= 60:
-                window_spots[ticker].append(log_spot)
-            bid, ask, qts = c.get("yes_bid"), c.get("yes_ask"), c.get("quote_ts")
-            if bid is None or ask is None or qts is None or ts - qts > STALE_QUOTE_MS or not 0 < bid <= ask < 1 or tau <= 0:
-                continue
-            adj_spot = float(spot) * math.exp(corr_bps(sym) / 1e4)
-            obs = window_spots[ticker]
-            obs_mean = (sum(obs) / len(obs) + corr_bps(sym) / 1e4) if (tau < 60 and obs) else None
-            p = p_contract(c.get("strike_type") or "greater_or_equal", c.get("strike"), None, adj_spot, float(tau), vols[sym].s2_per_s, observed_log_mean=obs_mean)
-            if p is None:
-                continue
-            m = (bid + ask) / 2
-            for h in HORIZONS_S:
-                if (ticker, h) not in recorded and h - 24 < tau <= h:
-                    recorded.add((ticker, h))
-                    pending_rows[ticker].append({"ticker": ticker, "sym": sym, "h": h, "ts": ts, "m": m, "p": p, "desk": c.get("model_p_yes")})
-            if ts < registered_ms or ticker in positions or not TRADE_WINDOW_S[0] <= tau <= TRADE_WINDOW_S[1] or weight == 0.0:
-                continue
-            q = pool(m, p, weight)
+            q, bid, ask = f["q"], f["bid"], f["ask"]
             spread = ask - bid
             if q - ask >= _min_edge(ask, spread):
                 positions[ticker] = {"ticker": ticker, "ts": ts, "side": "YES", "price": ask, "fee": taker_fee_usd(CONTRACTS, ask), "q": round(q, 4), "result": None, "pnl": None}
             elif (1 - q) - (1 - bid) >= _min_edge(1 - bid, spread):
                 positions[ticker] = {"ticker": ticker, "ts": ts, "side": "NO", "price": 1 - bid, "fee": taker_fee_usd(CONTRACTS, 1 - bid), "q": round(q, 4), "result": None, "pnl": None}
 
+    resolved_rows = fc.resolved_rows
     scores = {}
     for h in HORIZONS_S:
         rows = [r for r in resolved_rows if r["h"] == h]
@@ -152,8 +103,8 @@ def evaluate(tape_dir: str | Path, lab_dir: str | Path | None = None, *, since_m
         }
     closed = [p for p in positions.values() if p["result"]]
     summary = {
-        "resolved_forecasts": len(resolved_rows), "weight": round(weight, 3), "weight_active": len(resolved_rows) >= MIN_ROWS,
-        "weight_fit_log_loss": None if weight_loss is None else round(weight_loss, 4), "corr_bps": {s: round(corr_bps(s), 2) for s in gaps},
+        "resolved_forecasts": len(resolved_rows), "weight": round(fc.weight, 3), "weight_active": len(resolved_rows) >= MIN_ROWS,
+        "weight_fit_log_loss": None if fc.weight_loss is None else round(fc.weight_loss, 4), "corr_bps": {s: round(fc.corr_bps(s), 2) for s in fc.gaps},
         "scores": scores, "trades": len(closed), "open": len(positions) - len(closed), "won": sum(p["result"] == "won" for p in closed),
         "pnl_usd": round(sum(p["pnl"] for p in closed), 2),
     }
