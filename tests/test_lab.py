@@ -252,6 +252,23 @@ def test_e_charges_fills_their_markout_and_stops_adding_past_its_cap(tmp_path):
     # 10 contracts a quote (a tenth of the target), refilled after each fill until the net position reaches 30
     assert s["contracts_filled"] == 30
     assert abs(s["markout_usd"] - 30 * (0.425 - 0.50)) < 1e-9
+    # realistic: the 30 held are marked where YES stands at the end (0.425); no maker fee in these series
+    assert s["fills_marked_usd"] == round(30 * (0.425 - 0.50), 2) and s["net_usd_realistic"] == round(s["payable_usd"] + s["fills_marked_usd"], 2)
+    assert s["held_markets"] == 1 and s["maker_fees_usd"] == 0.0 and s["capital_peak_usd"] >= 30 * 0.425 and s["hours"] > 0
+
+
+def test_e_marks_a_settled_market_at_its_result(tmp_path):
+    from lab.strategies import e_incentive
+
+    yes, no = [[0.50, 100.0]], [[0.45, 100.0]]
+    items = [("incentives", {"programs": [_program("M", 0.5, target="100.00")]}, T0),
+             _book(T0 + 1000, "M", None, None, yes=yes, no=no, set="E"),
+             ("trade", {"ticker": "M", "yes_price": 0.49, "count": 10.0, "taker_side": "no"}, T0 + 2000),  # fills our 10 YES at 0.50
+             _book(T0 + 3000, "M", None, None, yes=[[0.10, 100.0]], no=[[0.85, 100.0]], set="E"),
+             ("settled", {"series": "KXM", "event": "EV", "rows": [["M", "yes", None]]}, T0 + 4000)]
+    _write(tmp_path, items)
+    s = e_incentive.evaluate(tmp_path, registered_ms=0)["summary"]
+    assert s["contracts_filled"] == 10 and s["fills_marked_usd"] == round(10 * (1.0 - 0.50), 2)  # settled YES: worth $1, not the 0.125 mid
 
 
 def test_ws_feed_keeps_books_detects_gaps_and_writes_normalized_records(tmp_path):

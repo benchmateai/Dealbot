@@ -19,6 +19,12 @@ reference sketch: whole levels, one-cent ticks. The recording does not see a mar
 state, so E also counts any paused spell Kalshi would exclude. Reward less markouts is an upper bound on
 what E keeps.
 
+The realistic figure (2026-11-05) marks every fill to where its side stood at the end of the recording, or
+to its settlement, instead of only 5 minutes on: what E still holds can keep moving against it, as it did
+while election results came in. It also reports the money E ties up (its resting orders' collateral plus
+what its holdings are worth) and the fee: every series E has quoted so far is 'quadratic', which charges
+makers nothing (Kalshi's /series endpoint, fee_type), so no fee is taken.
+
     python -m lab.strategies.e_incentive --lab lab/data
 """
 
@@ -31,9 +37,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from lab.fills import EPS, apply_trade, place
+from lab.fills import EPS, apply_trade, place, side_mid
 from lab.recorder import _ts
-from lab.replay import Markouts, live_records
+from lab.replay import Markouts, live_records, settled_outcomes
 
 REGISTERED_MS = 1_793_743_200_000  # 2026-11-03T22:00:00Z
 QUOTE_FRACTION = 0.1
@@ -87,7 +93,15 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
     standing: dict[str, tuple[int, dict[str, float]]] = {}  # ticker -> (book time, program id -> reward a second)
     earned: dict[str, float] = defaultdict(float)    # program id -> USD
     samples = paying = 0
+    fills: list[dict] = []                           # every fill, to mark at the end
+    last_book: dict[str, dict] = {}
+    tied: dict[str, float] = {}                      # ticker -> resting collateral + what the holding is worth
+    capital_sum = capital_peak = 0.0
+    capital_n = 0
+    first_ts = last_ts = None
     for r in live_records(lab_dir, since_ms=max(since_ms, registered_ms), kinds=("book", "trade", "incentives")):
+        first_ts = r["ts"] if first_ts is None else first_ts
+        last_ts = r["ts"]
         if r["kind"] == "incentives":
             programs = defaultdict(list)
             for p in r.get("programs") or []:
@@ -100,10 +114,12 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
                 if q:
                     inv[r["ticker"]] += q if side == "yes" else -q
                     marks.fill(o.ticker, o.side, o.fills[-1])
+                    fills.append({"ticker": r["ticker"], "side": side, "price": o.price, "qty": q})
             continue
         if r["kind"] != "book":
             continue
         marks.book(r["ticker"], r["ts"], r)
+        last_book[r["ticker"]] = r
         if "E" not in (r.get("sets") or [r.get("set")]):
             continue
         t, ts = r["ticker"], r["ts"]
@@ -115,6 +131,7 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
         active = [p for p in programs.get(t, []) if (_ts(p.get("start_date")) or 0) <= ts < (_ts(p.get("end_date")) or 0)]
         if not active:
             live.pop(t, None)
+            tied[t] = _holding_value(inv[t], r)
             continue
         target = float(max(active, key=_per_side_per_s)["target_size_fp"])
         mine: dict[str, tuple[float, float]] = {}
@@ -130,6 +147,9 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
                 live[t][side] = o
                 quoted.add(t)
             mine[side] = (o.price, o.remaining)
+        tied[t] = sum(x.price * x.remaining for x in live[t].values() if x.remaining > 0) + _holding_value(inv[t], r)
+        capital = sum(tied.values())
+        capital_sum, capital_n, capital_peak = capital_sum + capital, capital_n + 1, max(capital_peak, capital)
         rates = {}
         for p in active:
             samples += 1
@@ -147,16 +167,37 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
             markout += m["qty"] * m["m300"]
     reward = sum(earned.values())
     payable = sum(math.floor(v * 100) / 100 for v in earned.values() if v >= MIN_PAYOUT_USD)
+    settled = settled_outcomes(lab_dir) if fills else {}
+    marked = 0.0
+    for f in fills:
+        payout = settled.get(f["ticker"], (None, None))[0]
+        value = (payout if f["side"] == "yes" else 1.0 - payout) if payout is not None else (
+            side_mid(last_book[f["ticker"]], f["side"]) if f["ticker"] in last_book else None)
+        if value is not None:
+            marked += f["qty"] * (value - f["price"])
     summary = {"markets": len(quoted), "programs": len(earned), "samples": samples, "paying_samples": paying,
                "reward_usd": round(reward, 2), "payable_usd": round(payable, 2), "contracts_filled": filled,
-               "markout_usd": round(markout, 2), "net_usd_upper_bound": round(payable + markout, 2)}
+               "markout_usd": round(markout, 2), "net_usd_upper_bound": round(payable + markout, 2),
+               "hours": round((last_ts - first_ts) / 3.6e6, 1) if first_ts is not None else 0.0,
+               "fills_marked_usd": round(marked, 2), "net_usd_realistic": round(payable + marked, 2), "maker_fees_usd": 0.0,
+               "capital_peak_usd": round(capital_peak, 2), "capital_avg_usd": round(capital_sum / capital_n, 2) if capital_n else 0.0,
+               "held_markets": sum(1 for v in inv.values() if abs(v) > 0.5)}
     return {"summary": summary, "by_program": {k: round(v, 4) for k, v in sorted(earned.items(), key=lambda kv: -kv[1])}}
+
+
+def _holding_value(net_yes: float, book: dict) -> float:
+    """What E's holding in one market is worth on this book: its side's mid times the contracts."""
+    if abs(net_yes) < 1e-9:
+        return 0.0
+    mid = side_mid(book, "yes" if net_yes > 0 else "no")
+    return abs(net_yes) * (mid if mid is not None else 1.0)
 
 
 def one_line(s: dict) -> str:
     return (f"E incentive capture (upper bound): {s['markets']} markets, reward {s['reward_usd']:.2f} USD earned ({s['payable_usd']:.2f} payable at $1 a program) "
             f"in {s['paying_samples']} of {s['samples']} samples; {s['contracts_filled']:.0f} contracts filled, markout {s['markout_usd']:+.2f} at 5 minutes; "
-            f"net {s['net_usd_upper_bound']:+.2f}")
+            f"net {s['net_usd_upper_bound']:+.2f}; realistic, fills marked to the end: {s['fills_marked_usd']:+.2f}, net {s['net_usd_realistic']:+.2f} "
+            f"over {s['hours']:.1f} h on {s['capital_avg_usd']:,.0f} USD tied up on average ({s['capital_peak_usd']:,.0f} at most)")
 
 
 def main(argv: list[str] | None = None) -> int:
