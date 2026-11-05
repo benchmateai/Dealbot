@@ -12,6 +12,8 @@ Every row carries a `table` column, so one file feeds the whole page:
   shadow   (v1 only) one row per strategy in reports.shadow (the live desk and the shadow rules), counted
            only over bets placed after the rules were registered, with the rules' own numbers
   previous (v2 only) one row: the first desk's final result, from the measured week's start to the switch
+  rule     (v2 only) one row per paper rule in reports.shadow_v2 (v2 as traded and the owner's two rules of
+           2026-11-05), over v2's bets opened from the rules' registration
 Numbers come straight from the desk's own log; nothing here trades or decides. Only events from
 `since_ms` on count: by default desk v2's start once it has taken over (reports.runs), else WEEK_START_MS,
 the start of the first measured week. The bankroll is the first equity reading from then, and a position
@@ -148,6 +150,13 @@ def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | No
         v1 = build(log_dir, start_cash=start_cash, now_ms=now, since_ms=WEEK_START_MS, until_ms=v2_ms, v2_ms=v2_ms)[0]
         rows.append({"table": "previous", "id": "v1", "from_ms": WEEK_START_MS, "to_ms": v2_ms,
                      **{k: v1[k] for k in ("start_usd", "equity_usd", "net_pnl_usd", "realized_pnl_usd", "trades_closed", "trades_open", "wins", "losses", "win_rate", "fees_usd", "jev_calls")}})
+        from reports.shadow_v2 import evaluate as v2_rules  # here: reports.shadow_v2 imports this module through reports.shadow
+
+        report = v2_rules(log_dir)
+        for name, st in report.get("strategies", {}).items():
+            t = st["test"]
+            rows.append({"table": "rule", "id": name, "label": st["label"], "registered_ms": report["registered_ms"], "test_pnl_usd": t["pnl_usd"],
+                         "test_trades": t["trades"], "test_won": t["won"], "test_skipped": t["skipped"], "test_open": t["open"]})
     from reports.shadow import CAP, EXIT_BEFORE_S, LATE_STOP_S, REGISTERED_MS, evaluate  # here: reports.shadow imports this module
 
     shadow_strategies = {} if on_v2 or until_ms is not None else evaluate(log_dir, since_ms=since_ms, until_ms=v2_ms).get("strategies", {})

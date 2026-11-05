@@ -163,6 +163,13 @@ What v2 trades (`policy/anchored.py`, `KALSHI_FORECAST=anchored`, the Kalshi def
   the NO price (on the YES price it overstated cheap NO edges up to 30-fold and never blocked them);
 - one position at a time, as before; lab strategy A holds BTC and ETH at once, so it trades more.
 
+On 2026-11-05, after v2's first 44 bets (long shots +20.83 USD, favourites +4.95; the late stop saved
+5.13 on 22 long shots and cost 6.27 on the one favourite it sold, which then won), the owner chose two
+paper rules on v2's own bets, fixed in `reports/shadow_v2.py` and counted only on bets opened from
+2026-11-05T22:00Z: `late_stop_underdogs` (the late stop only on bets bought under 50 cents; favourites held
+to the close) and `skip_favourites` (skip bets bought above 70 cents). v2 itself trades on unchanged;
+`python3 -m reports.shadow_v2 --log-dir <logs/data>` prints both beside v2, and the dashboard shows them.
+
 `KALSHI_FORECAST=blend` runs the first desk again. The pre-flight runs v2 with a confident forecast in
 place of the confident judge.
 
