@@ -7,7 +7,8 @@ judge calls (answer records) and judge failures (jev_* rejections), decisions by
 executed, fills, positions opened and closed, settlements (official or provisional), realized P&L
 after fees (from the fills: a position_closed record carries the symbol's realized P&L to date, not
 the trade's), equity at the start and end, and the feed's poll, error and rate-limit counters.
-`stalled` is true when the window spans at least 30 minutes and the judge was never asked: the
+`stalled` is true when the window spans at least 30 minutes and the desk never thought: no judge call
+and, for desk v2 (which asks no model), no forecast record either: the
 signature of every defect found on 2026-11-03, where commits kept landing while nothing was decided.
 Writes summaries/chunk-<start>.json and summaries/latest.json and prints one line.
 """
@@ -32,7 +33,7 @@ def summarize(log_dir: str | Path, *, since_ms: int, until_ms: int | None = None
     rejections: collections.Counter[str] = collections.Counter()
     vetoes: collections.Counter[str] = collections.Counter()
     actions: collections.Counter[str] = collections.Counter()
-    executed = answers = opened = closed = 0
+    executed = answers = forecasts = opened = closed = 0
     fills: collections.Counter[str] = collections.Counter()
     settlements = {"official": 0, "provisional": 0}
     realized = 0.0
@@ -56,6 +57,8 @@ def summarize(log_dir: str | Path, *, since_ms: int, until_ms: int | None = None
         elif kind == "answer":
             answers += 1
             models[str(e.get("model"))] += 1
+        elif kind == "forecast":
+            forecasts += 1
         elif kind == "decision":
             actions[str(e.get("action"))] += 1
             executed += bool(e.get("executed"))
@@ -93,6 +96,7 @@ def summarize(log_dir: str | Path, *, since_ms: int, until_ms: int | None = None
         "rejections": dict(rejections.most_common()),
         "vetoes": dict(vetoes.most_common()),
         "judge_calls": answers,
+        "forecasts": forecasts,
         "judge_failures": judge_failures,
         "models": dict(models),
         "decisions": dict(actions),
@@ -105,16 +109,17 @@ def summarize(log_dir: str | Path, *, since_ms: int, until_ms: int | None = None
         "equity_start": equity[0] if equity else None,
         "equity_end": equity[-1] if equity else None,
         "feed": feed,
-        "stalled": span_ms >= STALL_MS and answers == 0,
+        "stalled": span_ms >= STALL_MS and answers == 0 and forecasts == 0,
     }
 
 
 def one_line(s: dict) -> str:
     top = ", ".join(f"{k} {v}" for k, v in list(s["rejections"].items())[:3]) or "none"
     eq = "n/a" if s["equity_end"] is None else f"{s['equity_end']:.2f}"
-    flag = " STALLED: the judge was never asked" if s["stalled"] else ""
+    flag = " STALLED: the desk never asked the judge or forecast" if s["stalled"] else ""
+    brain = f"forecasts {s['forecasts']}" if s.get("forecasts") else f"judge calls {s['judge_calls']}"
     return (
-        f"summary: {s['span_minutes']} min, judge calls {s['judge_calls']}, decisions {s['decisions'] or '{}'}, executed {s['executed']}, "
+        f"summary: {s['span_minutes']} min, {brain}, decisions {s['decisions'] or '{}'}, executed {s['executed']}, "
         f"opened {s['positions_opened']}, closed {s['positions_closed']}, realized {s['realized_pnl_usd']:+.2f} USD, equity {eq}, "
         f"top rejections: {top}, vetoes {sum(s['vetoes'].values())}, judge failures {sum(s['judge_failures'].values())}, "
         f"rate limits {s['feed'].get('rate_limits', 0)}{flag}"
