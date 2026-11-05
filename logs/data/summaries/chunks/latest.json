@@ -1,66 +1,66 @@
 {
  "decisions": {
-  "enter_long": 2,
+  "enter_long": 3,
   "enter_short": 6,
-  "exit": 5,
-  "hold": 282
+  "exit": 3,
+  "hold": 232
  },
- "equity_end": 9973.4912,
- "equity_start": 9972.2478,
- "executed": 12,
+ "equity_end": 9976.7086,
+ "equity_start": 9973.4912,
+ "executed": 7,
  "feed": {
-  "errors": 43,
-  "polls": 1272,
-  "rate_limits": 43
+  "errors": 49,
+  "polls": 1296,
+  "rate_limits": 49
  },
  "fills": {
-  "buy": 5,
-  "sell": 7,
-  "settle": 2
+  "buy": 3,
+  "sell": 4,
+  "settle": 1
  },
- "first_ts": 1793892972000,
- "forecasts": 297,
+ "first_ts": 1793899572000,
+ "forecasts": 245,
  "judge_calls": 0,
  "judge_failures": {},
- "last_ts": 1793899548000,
+ "last_ts": 1793906148000,
  "models": {},
- "positions_closed": 7,
- "positions_opened": 7,
- "realized_pnl_usd": 1.2434,
+ "positions_closed": 4,
+ "positions_opened": 4,
+ "realized_pnl_usd": 3.2173,
  "records": {
-  "decision": 295,
-  "fill": 14,
-  "forecast": 297,
+  "decision": 244,
+  "fill": 8,
+  "forecast": 245,
   "forecaster": 1,
-  "heartbeat": 54,
-  "order": 12,
-  "position_closed": 7,
-  "position_opened": 7,
-  "rejection": 910,
-  "settlement": 14,
-  "snapshot": 297,
-  "tape": 539,
+  "heartbeat": 55,
+  "order": 7,
+  "position_closed": 4,
+  "position_opened": 4,
+  "rejection": 1017,
+  "settlement": 16,
+  "snapshot": 245,
+  "tape": 541,
   "trial": 1,
-  "veto": 1
+  "veto": 5
  },
  "rejections": {
-  "below_threshold": 282,
-  "benched": 254,
-  "feed_lagging": 6,
-  "insufficient_data": 1,
+  "below_threshold": 232,
+  "benched": 391,
+  "feed_lagging": 7,
+  "insufficient_data": 6,
   "no_contract": 26,
-  "not_best": 2,
-  "outside_trade_window": 339
+  "not_best": 1,
+  "outside_trade_window": 354
  },
  "settlements": {
-  "official": 14,
+  "official": 16,
   "provisional": 0
  },
- "since_ms": 1793892955000,
+ "since_ms": 1793899568000,
  "span_minutes": 109.6,
  "stalled": false,
- "until_ms": 1793899552742,
+ "until_ms": 1793906156857,
  "vetoes": {
-  "fees_plus_gas": 1
+  "fees_plus_gas": 5
  }
 }
