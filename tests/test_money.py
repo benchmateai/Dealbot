@@ -111,3 +111,16 @@ def test_once_v2_takes_over_the_page_counts_v2_and_keeps_the_first_desk_as_one_l
     # before the switch nothing changes: the first desk's week and its shadow rows
     before = build(tmp_path, now_ms=v2 + 400_000, v2_ms=None)
     assert before[0]["desk"] == "v1" and before[0]["week_started_ms"] == WEEK_START and {r["table"] for r in before} >= {"summary", "trade", "shadow"}
+
+
+def test_lab_rows_carry_each_strategy_s_numbers_and_name_the_dropped():
+    from dashboard.lab import rows
+
+    report = {"strategies": {"E": {"line": "E ...", "summary": {"net_usd_realistic": 25.12, "hours": 23.5, "capital_avg_usd": 2431.69, "nested": {"x": 1}}},
+                             "A": {"line": "A ...", "summary": {"pnl_usd": 25.33, "trades": 141, "scores": {"60": {}}}}},
+              "dropped": {"B": "late-window harvest, dropped 2026-11-05: ..."}}
+    out = rows(report, now_ms=T0)
+    assert [r["id"] for r in out] == ["A", "E", "B"]
+    e = out[1]
+    assert e["net_usd_realistic"] == 25.12 and e["capital_avg_usd"] == 2431.69 and "nested" not in e and e["updated_ms"] == T0 and e["dropped"] is False
+    assert out[0]["trades"] == 141 and "scores" not in out[0] and out[2]["dropped"] is True

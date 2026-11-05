@@ -105,6 +105,29 @@
     </div>
   </section>
 
+  <section class="pm-shadow" id="lab" aria-labelledby="lab-title">
+    <h2 id="lab-title">Kalshi's liquidity payments (strategy E, paper)</h2>
+    <span data-draw="lab-state" data-source="lab"></span>
+    <p class="pm-note">Kalshi pays traders who keep orders resting in some markets. Strategy E replays the recorded live feed as if it had kept orders there: the payments it would have earned, less what the bets it got filled on are worth now. No orders are placed. Rebuilt each morning; as of <b data-draw="lab-when" data-source="lab" data-field="updated_ms" data-where="id=E">—</b>.</p>
+    <div class="pm-tiles">
+      <div class="pm-tile">
+        <div class="pm-tile-label">E, realistic result</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="e-net" data-source="lab" data-field="net_usd_realistic" data-where="id=E">—</div>
+        <div class="pm-tile-sub">over <b data-draw="e-hours" data-source="lab" data-field="hours" data-where="id=E">—</b> hours: payments <b data-draw="e-pay" data-source="lab" data-field="payable_usd" data-where="id=E">—</b>, fills now worth <b data-draw="e-marked" data-source="lab" data-field="fills_marked_usd" data-where="id=E">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Money E ties up</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="e-cap" data-source="lab" data-field="capital_avg_usd" data-where="id=E">—</div>
+        <div class="pm-tile-sub">on average, <b data-draw="e-cap-peak" data-source="lab" data-field="capital_peak_usd" data-where="id=E">—</b> at most; best case <b data-draw="e-best" data-source="lab" data-field="net_usd_upper_bound" data-where="id=E">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Lab A: v2's forecast, BTC and ETH at once</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="a-pnl" data-source="lab" data-field="pnl_usd" data-where="id=A">—</div>
+        <div class="pm-tile-sub"><b data-draw="a-n" data-source="lab" data-field="trades" data-where="id=A">—</b> paper trades since Nov 3, held to the close</div>
+      </div>
+    </div>
+  </section>
+
   <section class="pm-card" id="bets" aria-labelledby="bets-title">
     <h2 id="bets-title">Every bet</h2>
     <p class="pm-note">Newest first. Each contract pays $1 if its side is right at the 15-minute close; the stake is what the side cost. Profit or loss is after the Kalshi fee.</p>
@@ -215,9 +238,9 @@
   figure('weekday', 'week_day', count);
   figure('updated', 'updated_ms', when);
 
-  const previousFigure = (name, field, fmt, sign) => dash.draw(name, (el) => {
-    const d = dash.data('previous');
-    const row = d.status === 'ok' && Array.isArray(d.data) ? d.data.find((r) => r.id === 'v1') : null;
+  const rowFigure = (name, source, id, field, fmt, sign) => dash.draw(name, (el) => {
+    const d = dash.data(source);
+    const row = d.status === 'ok' && Array.isArray(d.data) ? d.data.find((r) => r.id === id) : null;
     const v = row ? row[field] : null;
     el.classList.remove('pm-up', 'pm-down');
     if (d.status === 'ok' || d.status === 'error') el.classList.remove('dash-skeleton');
@@ -226,12 +249,28 @@
     el.textContent = fmt(n);
     if (sign) { el.classList.toggle('pm-up', n > 0); el.classList.toggle('pm-down', n < 0); }
   });
-  previousFigure('v1-net', 'net_pnl_usd', signed, true);
-  previousFigure('v1-n', 'trades_closed', count);
-  previousFigure('v1-wins', 'wins', count);
-  previousFigure('v1-end', 'to_ms', when);
-  previousFigure('v1-fees', 'fees_usd', usd);
-  previousFigure('v1-jev', 'jev_calls', count);
+  rowFigure('v1-net', 'previous', 'v1', 'net_pnl_usd', signed, true);
+  rowFigure('v1-n', 'previous', 'v1', 'trades_closed', count);
+  rowFigure('v1-wins', 'previous', 'v1', 'wins', count);
+  rowFigure('v1-end', 'previous', 'v1', 'to_ms', when);
+  rowFigure('v1-fees', 'previous', 'v1', 'fees_usd', usd);
+  rowFigure('v1-jev', 'previous', 'v1', 'jev_calls', count);
+  const hours = d3.format('.1f');
+  rowFigure('e-net', 'lab', 'E', 'net_usd_realistic', signed, true);
+  rowFigure('e-hours', 'lab', 'E', 'hours', hours);
+  rowFigure('e-pay', 'lab', 'E', 'payable_usd', usd);
+  rowFigure('e-marked', 'lab', 'E', 'fills_marked_usd', signed, true);
+  rowFigure('e-cap', 'lab', 'E', 'capital_avg_usd', whole);
+  rowFigure('e-cap-peak', 'lab', 'E', 'capital_peak_usd', whole);
+  rowFigure('e-best', 'lab', 'E', 'net_usd_upper_bound', signed);
+  rowFigure('a-pnl', 'lab', 'A', 'pnl_usd', signed, true);
+  rowFigure('a-n', 'lab', 'A', 'trades', count);
+  rowFigure('lab-when', 'lab', 'E', 'updated_ms', when);
+  dash.draw('lab-state', () => {
+    const d = dash.data('lab');
+    const none = d.status === 'error' || (d.status === 'ok' && (!Array.isArray(d.data) || d.data.length === 0));
+    for (const sec of document.querySelectorAll('#lab')) sec.hidden = none;
+  });
   dash.draw('previous-state', () => {
     const d = dash.data('previous');
     const none = d.status === 'ok' && d.data.length === 0;
