@@ -106,8 +106,10 @@ def test_once_v2_takes_over_the_page_counts_v2_and_keeps_the_first_desk_as_one_l
     assert [r["id"] for r in rows if r["table"] == "trade"] == [d2] and not [r for r in rows if r["table"] == "shadow"]
     prev = [r for r in rows if r["table"] == "previous"]
     assert len(prev) == 1 and prev[0]["id"] == "v1" and prev[0]["to_ms"] == v2 and prev[0]["trades_closed"] == 1 and prev[0]["net_pnl_usd"] == -4.17
-    # the shadow rules judge the first desk's bets only
+    # the shadow rules judge the first desk's bets only; v2's own bets get the owner's two paper rules of Nov 5
     assert [t["id"] for t in evaluate(tmp_path, since_ms=T0)["trades"]] == [d1]
+    rules = {r["id"]: r for r in rows if r["table"] == "rule"}
+    assert set(rules) == {"desk", "late_stop_underdogs", "skip_favourites"} and all(r["registered_ms"] == 1_793_916_000_000 for r in rules.values())
     # before the switch nothing changes: the first desk's week and its shadow rows
     before = build(tmp_path, now_ms=v2 + 400_000, v2_ms=None)
     assert before[0]["desk"] == "v1" and before[0]["week_started_ms"] == WEEK_START and {r["table"] for r in before} >= {"summary", "trade", "shadow"}
