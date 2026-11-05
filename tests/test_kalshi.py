@@ -267,7 +267,8 @@ def test_kalshi_config_pairs_bot_and_feed(tmp_path):
 
 
 def test_desk_buys_a_contract_in_the_window_and_settles_it(tmp_path):
-    env = {"DESK_MODE": "paper", "DESK_BOT": "kalshi", "FEED": "kalshi", "DESK_SYMBOLS": "KXETH15M", "JUDGE_URL": "stub://local", "LOG_DIR": str(tmp_path / "logs"),
+    # the first desk (KALSHI_FORECAST=blend): Jev's probability blended with the formula decides
+    env = {"DESK_MODE": "paper", "DESK_BOT": "kalshi", "FEED": "kalshi", "KALSHI_FORECAST": "blend", "DESK_SYMBOLS": "KXETH15M", "JUDGE_URL": "stub://local", "LOG_DIR": str(tmp_path / "logs"),
            "ORDER_QTY": "10", "MAX_POSITION_UNITS": "50", "MAX_NOTIONAL_USD": "100", "PAPER_CASH_USD": "1000", "MIN_TICKS": "30"}
     cfg = DeskConfig.from_env(env)
     clock = {"now": T0}

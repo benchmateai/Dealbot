@@ -112,6 +112,10 @@ def check_fees_plus_gas(order: Order, ctx: RiskContext, lim: RiskLimits) -> Veto
     if order.reduce_only and not _increases_exposure(order, ctx.position_units):
         return None
     price = ctx.mid if order.price is None else order.price
+    if lim.fee_model == "kalshi" and order.side == "sell":
+        # Opening a short YES is buying NO, and the desk states that edge in bps of the NO price; measured on
+        # the YES price the dollars came out (1 - p) / p times too large, so cheap NO bets never met this check.
+        price = 1.0 - price
     notional = order.qty * price
     cost = lim.round_trip_cost_usd(order.qty, price, order.type)
     required = cost * (1.0 + lim.min_edge_margin)

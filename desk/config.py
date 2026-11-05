@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from judge.jev import JEV_KEY_ENV, STUB_MODEL, ModelNotPinnedError, ensure_pinned
+from policy.anchored import MODEL_VERSION as ANCHORED_MODEL_VERSION
 from risk.limits import RiskLimits
 
 MODES = ("shadow", "paper")
@@ -106,6 +107,9 @@ class DeskConfig:
     kalshi_taker_rate: float = 0.07
     kalshi_maker_rate: float = 0.0
     binary_model_weight: float = 0.5
+    # Kalshi only. "anchored" (desk v2, the default from 2026-11-05): policy/anchored.py's market-anchored
+    # forecast, no Jev call, hold to settlement with the late stop. "blend": the first desk, 50/50 formula and Jev.
+    kalshi_forecast: str = "blend"
 
     @property
     def block_ms(self) -> int:
@@ -156,6 +160,13 @@ class DeskConfig:
             jev_model = ensure_pinned(jev_model)
         except ModelNotPinnedError as exc:
             raise ConfigError(str(exc)) from exc
+        kalshi_forecast = _get(env, "KALSHI_FORECAST", "anchored" if binary else "blend")
+        if kalshi_forecast not in ("anchored", "blend"):
+            raise ConfigError("KALSHI_FORECAST must be anchored or blend")
+        if kalshi_forecast == "anchored" and not binary:
+            raise ConfigError("KALSHI_FORECAST=anchored is for DESK_BOT=kalshi only")
+        # The risk gate pins the version of whatever makes the decision: Jev, or v2's forecaster.
+        decision_model = ANCHORED_MODEL_VERSION if kalshi_forecast == "anchored" else jev_model
         fee_bps = _float(env, "FEE_BPS", "10")
         maker_fee_bps = _float(env, "MAKER_FEE_BPS", "2")
         gas_usd = _float(env, "GAS_USD", "0.05")
@@ -175,7 +186,7 @@ class DeskConfig:
                 maker_fee_bps=maker_fee_bps,
                 gas_usd=gas_usd,
                 min_edge_margin=_float(env, "MIN_EDGE_MARGIN", "0.5"),
-                pinned_model=jev_model,
+                pinned_model=decision_model,
                 max_stale_ms=_int(env, "MAX_STALE_MS", str(2 * block_ms)),
                 fee_model="kalshi" if binary else "bps",
                 kalshi_taker_rate=_float(env, "KALSHI_TAKER_RATE", "0.07"),
@@ -242,6 +253,7 @@ class DeskConfig:
             kalshi_taker_rate=_float(env, "KALSHI_TAKER_RATE", "0.07"),
             kalshi_maker_rate=_float(env, "KALSHI_MAKER_RATE", "0"),
             binary_model_weight=_float(env, "BINARY_MODEL_WEIGHT", "0.5"),
+            kalshi_forecast=kalshi_forecast,
         )
 
     def public_dict(self) -> dict:
