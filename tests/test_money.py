@@ -106,10 +106,14 @@ def test_once_v2_takes_over_the_page_counts_v2_and_keeps_the_first_desk_as_one_l
     assert [r["id"] for r in rows if r["table"] == "trade"] == [d2] and not [r for r in rows if r["table"] == "shadow"]
     prev = [r for r in rows if r["table"] == "previous"]
     assert len(prev) == 1 and prev[0]["id"] == "v1" and prev[0]["to_ms"] == v2 and prev[0]["trades_closed"] == 1 and prev[0]["net_pnl_usd"] == -4.17
-    # the shadow rules judge the first desk's bets only; v2's own bets get the owner's two paper rules of Nov 5
+    # the shadow rules judge the first desk's bets only; v2's own bets get the owner's paper rules of Nov 5 and 6
     assert [t["id"] for t in evaluate(tmp_path, since_ms=T0)["trades"]] == [d1]
     rules = {r["id"]: r for r in rows if r["table"] == "rule"}
-    assert set(rules) == {"desk", "late_stop_underdogs", "skip_favourites"} and all(r["registered_ms"] == 1_793_916_000_000 for r in rules.values())
+    later = ("skip_late_entries", "next_round")
+    assert set(rules) == {"desk", "late_stop_underdogs", "skip_favourites", *later}
+    assert all(r["registered_ms"] == 1_793_916_000_000 for k, r in rules.items() if k not in later)
+    # the third rule and the next round's pick have their own start, and carry v2's result on the same bets
+    assert all(rules[k]["registered_ms"] == 1_793_948_400_000 and rules[k]["desk_same_trades"] == 0 for k in later)
     # before the switch nothing changes: the first desk's week and its shadow rows
     before = build(tmp_path, now_ms=v2 + 400_000, v2_ms=None)
     assert before[0]["desk"] == "v1" and before[0]["week_started_ms"] == WEEK_START and {r["table"] for r in before} >= {"summary", "trade", "shadow"}

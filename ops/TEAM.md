@@ -167,8 +167,35 @@ On 2026-11-05, after v2's first 44 bets (long shots +20.83 USD, favourites +4.95
 5.13 on 22 long shots and cost 6.27 on the one favourite it sold, which then won), the owner chose two
 paper rules on v2's own bets, fixed in `reports/shadow_v2.py` and counted only on bets opened from
 2026-11-05T22:00Z: `late_stop_underdogs` (the late stop only on bets bought under 50 cents; favourites held
-to the close) and `skip_favourites` (skip bets bought above 70 cents). v2 itself trades on unchanged;
-`python3 -m reports.shadow_v2 --log-dir <logs/data>` prints both beside v2, and the dashboard shows them.
+to the close) and `skip_favourites` (skip bets bought above 70 cents). On 2026-11-06 they added a third,
+`skip_late_entries` (skip bets opened under 3 minutes before the close: lab A's forecast lost to Kalshi's
+price 3 minutes and 1 minute out), and `next_round` (rules 1 and 3 together, favourites kept), both counted
+only on bets opened from 2026-11-06T07:00Z and reported beside v2 on exactly the same bets. v2 itself
+trades on unchanged; `python3 -m reports.shadow_v2 --log-dir <logs/data>` prints them all beside v2, and
+the dashboard shows them.
+
+The next round (the owner's decision, 2026-11-06): v2 stays as it is until its week ends on 2026-11-12, so
+the test measures one configuration. Then the desk runs v2's forecast with entries only 3 to 10 minutes
+before the close, the late stop only on bets bought under 50 cents, and favourites kept (what `next_round`
+measures this week); lab strategy E is dropped unless its realistic result (payments less what its fills
+are worth) has recovered above zero by then. It is built on the branch `claude/next-round` (desk v3:
+`policy/anchored.py` DESK_RULES "v3"), off the desk's base branch until the switch; the final report says
+whether the week's numbers still support each part of it.
+
+Switching to v3 (the coordinator, after the final report, when the week still supports the pick; when it
+argues against any part, ask the owner first):
+1. Merge `claude/next-round` into `claude/desk-skeleton` with the whole suite passing, and push. Besides
+   the v3 rules it carries the reports' and the dashboard's split at v3's start (v2's week becomes one
+   `previous` row, as the first desk's did).
+2. Re-enable the supervisor, watchdog, analyst and morning report scheduled tasks (update_trigger
+   enabled true); the morning report's prompt then speaks of v3, and the paper rules end with v2.
+3. Ask the runner to start a new chunk: the desk logs a new paper trial (`rules: v3`), and its first
+   block starts v3's week. Check its first blocks as for v2 (forecasts logged, no entry under 180 s).
+4. Ask the lab runners to start again, without E unless its realistic result is above zero.
+5. Re-time the week: a stop-after-one-week task and a final report task for v3, seven days from its
+   first block, as for v2.
+6. Mirror `dashboard/money_page/index.html` into the money dashboard's `files/index.html`, refresh its
+   datasets, and tell the owner v3 has started and when its week ends.
 
 `KALSHI_FORECAST=blend` runs the first desk again. The pre-flight runs v2 with a confident forecast in
 place of the confident judge.
