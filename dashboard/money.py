@@ -12,8 +12,9 @@ Every row carries a `table` column, so one file feeds the whole page:
   shadow   (v1 only) one row per strategy in reports.shadow (the live desk and the shadow rules), counted
            only over bets placed after the rules were registered, with the rules' own numbers
   previous (v2 only) one row: the first desk's final result, from the measured week's start to the switch
-  rule     (v2 only) one row per paper rule in reports.shadow_v2 (v2 as traded and the owner's two rules of
-           2026-11-05), over v2's bets opened from the rules' registration
+  rule     (v2 only) one row per paper rule in reports.shadow_v2 (v2 as traded, the owner's two rules of
+           2026-11-05 and a third of 2026-11-06), each over v2's bets opened from its own registration; the
+           third also carries v2's result on exactly the same bets (desk_same_*)
 Numbers come straight from the desk's own log; nothing here trades or decides. Only events from
 `since_ms` on count: by default desk v2's start once it has taken over (reports.runs), else WEEK_START_MS,
 the start of the first measured week. The bankroll is the first equity reading from then, and a position
@@ -155,8 +156,11 @@ def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | No
         report = v2_rules(log_dir)
         for name, st in report.get("strategies", {}).items():
             t = st["test"]
-            rows.append({"table": "rule", "id": name, "label": st["label"], "registered_ms": report["registered_ms"], "test_pnl_usd": t["pnl_usd"],
-                         "test_trades": t["trades"], "test_won": t["won"], "test_skipped": t["skipped"], "test_open": t["open"]})
+            row = {"table": "rule", "id": name, "label": st["label"], "registered_ms": st["registered_ms"], "test_pnl_usd": t["pnl_usd"],
+                   "test_trades": t["trades"], "test_won": t["won"], "test_skipped": t["skipped"], "test_open": t["open"]}
+            if "desk_same" in st:  # v2 on exactly this rule's bets
+                row.update({"desk_same_pnl_usd": st["desk_same"]["pnl_usd"], "desk_same_trades": st["desk_same"]["trades"], "desk_same_won": st["desk_same"]["won"]})
+            rows.append(row)
     from reports.shadow import CAP, EXIT_BEFORE_S, LATE_STOP_S, REGISTERED_MS, evaluate  # here: reports.shadow imports this module
 
     shadow_strategies = {} if on_v2 or until_ms is not None else evaluate(log_dir, since_ms=since_ms, until_ms=v2_ms).get("strategies", {})
