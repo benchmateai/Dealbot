@@ -178,8 +178,23 @@ The next round (the owner's decision, 2026-11-06): v2 stays as it is until its w
 the test measures one configuration. Then the desk runs v2's forecast with entries only 3 to 10 minutes
 before the close, the late stop only on bets bought under 50 cents, and favourites kept (what `next_round`
 measures this week); lab strategy E is dropped unless its realistic result (payments less what its fills
-are worth) has recovered above zero by then. It is built on the branch `claude/next-round`, off the
-desk's base branch until the switch; the final report says whether the week's numbers still support it.
+are worth) has recovered above zero by then. It is built on the branch `claude/next-round` (desk v3:
+`policy/anchored.py` DESK_RULES "v3"), off the desk's base branch until the switch; the final report says
+whether the week's numbers still support each part of it.
+
+Switching to v3 (the coordinator, after the final report, when the week still supports the pick; when it
+argues against any part, ask the owner first):
+1. Merge `claude/next-round` into `claude/desk-skeleton` with the whole suite passing, and push. Besides
+   the v3 rules it carries the reports' and the dashboard's split at v3's start (v2's week becomes one
+   `previous` row, as the first desk's did).
+2. Re-enable the supervisor, watchdog and analyst scheduled tasks (update_trigger enabled true).
+3. Ask the runner to start a new chunk: the desk logs a new paper trial (`rules: v3`), and its first
+   block starts v3's week. Check its first blocks as for v2 (forecasts logged, no entry under 180 s).
+4. Ask the lab runners to start again, without E unless its realistic result is above zero.
+5. Re-time the week: a stop-after-one-week task and a final report task for v3, seven days from its
+   first block, as for v2.
+6. Mirror `dashboard/money_page/index.html` into the money dashboard's `files/index.html`, refresh its
+   datasets, and tell the owner v3 has started and when its week ends.
 
 `KALSHI_FORECAST=blend` runs the first desk again. The pre-flight runs v2 with a confident forecast in
 place of the confident judge.
