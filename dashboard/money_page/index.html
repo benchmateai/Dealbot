@@ -90,7 +90,7 @@
   <section class="pm-shadow" id="rules" aria-labelledby="rules-title">
     <h2 id="rules-title">Paper rules on v2's own bets</h2>
     <span data-draw="rules-state" data-source="rules"></span>
-    <p class="pm-note">The two rules you chose on Nov 5, tested on paper on the bets v2 places from <b data-draw="rules-when" data-source="rules" data-field="registered_ms" data-where="id=desk">—</b>. v2 itself trades unchanged; a rule can only keep a bet v2 sold or skip one it took.</p>
+    <p class="pm-note">The two rules you chose on Nov 5 count the bets v2 places from <b data-draw="rules-when" data-source="rules" data-field="registered_ms" data-where="id=desk">—</b>; the third and the next round's pick, chosen on Nov 6, count from <b data-draw="rules-when-3" data-source="rules" data-field="registered_ms" data-where="id=skip_late_entries">—</b>, beside v2 on the same bets. v2 itself trades unchanged; a rule can only keep a bet v2 sold or skip one it took.</p>
     <div class="pm-tiles">
       <div class="pm-tile">
         <div class="pm-tile-label">v2, as traded</div>
@@ -106,6 +106,16 @@
         <div class="pm-tile-label">Skip favorites (over 70¢)</div>
         <div class="pm-tile-value dash-skeleton" data-draw="r-skip" data-source="rules" data-field="test_pnl_usd" data-where="id=skip_favourites">—</div>
         <div class="pm-tile-sub"><b data-draw="r-skip-n" data-source="rules" data-field="test_trades" data-where="id=skip_favourites">—</b> closed, <b data-draw="r-skip-s" data-source="rules" data-field="test_skipped" data-where="id=skip_favourites">—</b> skipped</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">No new bets in the last 3 minutes</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="r-lateentry" data-source="rules" data-field="test_pnl_usd" data-where="id=skip_late_entries">—</div>
+        <div class="pm-tile-sub"><b data-draw="r-lateentry-n" data-source="rules" data-field="test_trades" data-where="id=skip_late_entries">—</b> closed, <b data-draw="r-lateentry-s" data-source="rules" data-field="test_skipped" data-where="id=skip_late_entries">—</b> skipped; v2 made <b data-draw="r-same" data-source="rules" data-field="desk_same_pnl_usd" data-where="id=skip_late_entries">—</b> on the same <b data-draw="r-same-n" data-source="rules" data-field="desk_same_trades" data-where="id=skip_late_entries">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Next round's pick</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="r-next" data-source="rules" data-field="test_pnl_usd" data-where="id=next_round">—</div>
+        <div class="pm-tile-sub">no bets in the last 3 minutes, late stop on long shots only, favorites kept; <b data-draw="r-next-n" data-source="rules" data-field="test_trades" data-where="id=next_round">—</b> closed</div>
       </div>
     </div>
   </section>
@@ -208,7 +218,7 @@
   dash.calc('rules', {
     inputs: ['paper'],
     title: 'Paper rules on v2',
-    description: "Desk v2 as traded beside the owner's two paper rules, over v2's bets placed from the rules' start.",
+    description: "Desk v2 as traded beside the owner's paper rules and the next round's pick, each over v2's bets placed from its own start.",
     fn: (paper) => paper.filter((r) => r.table === 'rule'),
   });
   dash.calc('previous', {
@@ -286,6 +296,14 @@
   rowFigure('r-skip', 'rules', 'skip_favourites', 'test_pnl_usd', signed, true);
   rowFigure('r-skip-n', 'rules', 'skip_favourites', 'test_trades', count);
   rowFigure('r-skip-s', 'rules', 'skip_favourites', 'test_skipped', count);
+  rowFigure('rules-when-3', 'rules', 'skip_late_entries', 'registered_ms', when);
+  rowFigure('r-lateentry', 'rules', 'skip_late_entries', 'test_pnl_usd', signed, true);
+  rowFigure('r-lateentry-n', 'rules', 'skip_late_entries', 'test_trades', count);
+  rowFigure('r-lateentry-s', 'rules', 'skip_late_entries', 'test_skipped', count);
+  rowFigure('r-same', 'rules', 'skip_late_entries', 'desk_same_pnl_usd', signed, true);
+  rowFigure('r-same-n', 'rules', 'skip_late_entries', 'desk_same_trades', count);
+  rowFigure('r-next', 'rules', 'next_round', 'test_pnl_usd', signed, true);
+  rowFigure('r-next-n', 'rules', 'next_round', 'test_trades', count);
   dash.draw('rules-state', () => {
     const d = dash.data('rules');
     const none = d.status === 'ok' && d.data.length === 0;
