@@ -25,7 +25,8 @@ v2 itself trades on unchanged.
                        late_stop_underdogs together, favourites kept; from LATE_ENTRY_REGISTERED_MS too.
 
 A rule can only keep a bet the desk sold or skip one it took; it never takes a bet the desk did not.
-Holding to the close pays no fee; a skipped bet counts 0.
+Holding to the close pays no fee; a skipped bet counts 0. Bets opened from desk v3's start (the owner's pick,
+built in) are v3's own, so the comparison is frozen there.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ import time
 from pathlib import Path
 
 from logs.writer import read_events
-from reports.runs import v2_start_ms
+from reports.runs import v2_start_ms, v3_start_ms
 from reports.shadow import _positions, _stats
 
 REGISTERED_MS = 1_793_916_000_000  # 2026-11-05T22:00:00Z: bets opened from here on test the first two rules
@@ -88,14 +89,18 @@ def outcome(p: dict, strategy: str, payouts: dict[str, float]) -> tuple[str, flo
     raise ValueError(f"unknown rule {strategy!r}")
 
 
-def evaluate(log_dir: str | Path, *, registered_ms: int = REGISTERED_MS, late_entry_registered_ms: int = LATE_ENTRY_REGISTERED_MS) -> dict:
+def evaluate(log_dir: str | Path, *, registered_ms: int = REGISTERED_MS, late_entry_registered_ms: int = LATE_ENTRY_REGISTERED_MS,
+             until_ms: int | None | bool = False) -> dict:
+    """v2's bets only: from v2's start to v3's (`until_ms`, found in the log by default)."""
     start = v2_start_ms(log_dir)
-    report: dict = {"v2_start_ms": start, "registered_ms": registered_ms, "late_entry_registered_ms": late_entry_registered_ms,
+    if until_ms is False:
+        until_ms = v3_start_ms(log_dir)
+    report: dict = {"v2_start_ms": start, "until_ms": until_ms, "registered_ms": registered_ms, "late_entry_registered_ms": late_entry_registered_ms,
                     "rules": {"underdog_below": UNDERDOG_BELOW, "favourite_above": FAVOURITE_ABOVE, "late_entry_s": LATE_ENTRY_S},
                     "strategies": {}, "trades": []}
     if start is None:
         return report
-    positions = [p for p in _positions(log_dir, start) if p["opened_ms"] >= start]
+    positions = [p for p in _positions(log_dir, start) if p["opened_ms"] >= start and (until_ms is None or p["opened_ms"] < until_ms)]
     payouts = _payouts(log_dir, start)
     for name, label in STRATEGIES.items():
         reg = late_entry_registered_ms if name in LATER_RULES else registered_ms
@@ -137,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
     if report["v2_start_ms"] is None:
         print("v2 rules: desk v2 has not started in this log")
         return 0
+    if report["until_ms"] is not None:
+        print(f"v2 rules: frozen at desk v3's start ({time.strftime('%Y-%m-%d %H:%MZ', time.gmtime(report['until_ms'] / 1000))}); v3 trades the owner's pick itself")
     first = time.strftime("%Y-%m-%d %H:%MZ", time.gmtime(report["registered_ms"] / 1000))
     third = time.strftime("%Y-%m-%d %H:%MZ", time.gmtime(report["late_entry_registered_ms"] / 1000))
     later = report["strategies"]

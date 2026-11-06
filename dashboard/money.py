@@ -11,14 +11,15 @@ Every row carries a `table` column, so one file feeds the whole page:
   day      one row per UTC day: change in equity, trades closed, wins, fees
   shadow   (v1 only) one row per strategy in reports.shadow (the live desk and the shadow rules), counted
            only over bets placed after the rules were registered, with the rules' own numbers
-  previous (v2 only) one row: the first desk's final result, from the measured week's start to the switch
+  previous (v2 and v3) one row per earlier desk's final result: the first desk's (id v1, from the measured
+           week's start to v2's), and on v3 also v2's (id v2, from v2's start to v3's)
   rule     (v2 only) one row per paper rule in reports.shadow_v2 (v2 as traded, the owner's two rules of
            2026-11-05 and a third of 2026-11-06), each over v2's bets opened from its own registration; the
            third also carries v2's result on exactly the same bets (desk_same_*)
 Numbers come straight from the desk's own log; nothing here trades or decides. Only events from
-`since_ms` on count: by default desk v2's start once it has taken over (reports.runs), else WEEK_START_MS,
-the start of the first measured week. The bankroll is the first equity reading from then, and a position
-carried in from before shows in equity, not as a bet.
+`since_ms` on count: by default the start of the desk running now (v3, else v2, once it has taken over:
+reports.runs), else WEEK_START_MS, the start of the first measured week. The bankroll is the first equity
+reading from then, and a position carried in from before shows in equity, not as a bet.
 A fill belongs to its own decision's position when that is a position (the opening fill and the
 settlement), otherwise to the position open on that contract (an exit is its own decision).
 """
@@ -33,7 +34,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from logs.writer import read_events
-from reports.runs import WEEK1_START_MS, v2_start_ms
+from reports.runs import WEEK1_START_MS, v2_start_ms, v3_start_ms
 
 JEV_USD_PER_INPUT_TOKEN = 0.042 / 1_000_000  # TypeSafe's price per input token; output tokens are free
 SLOT_MS = 600_000
@@ -48,13 +49,18 @@ def _day(ms: int) -> str:
 
 
 def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | None = None, since_ms: int | None = None,
-          until_ms: int | None = None, v2_ms: int | None | bool = False) -> list[dict]:
+          until_ms: int | None = None, v2_ms: int | None | bool = False, v3_ms: int | None | bool = False) -> list[dict]:
     now = now_ms if now_ms is not None else int(time.time() * 1000)
     if v2_ms is False:
         v2_ms = v2_start_ms(log_dir)
+    if v3_ms is False:
+        v3_ms = v3_start_ms(log_dir) if v2_ms is not None else None
     if since_ms is None:
-        since_ms = v2_ms if v2_ms is not None else WEEK_START_MS
-    on_v2 = v2_ms is not None and since_ms >= v2_ms and until_ms is None  # until_ms set: a closed window (the first desk's)
+        since_ms = v3_ms if v3_ms is not None else (v2_ms if v2_ms is not None else WEEK_START_MS)
+    # until_ms set: a closed window (an earlier desk's), which never carries the extra rows
+    on_v3 = v3_ms is not None and since_ms >= v3_ms and until_ms is None
+    on_v2 = not on_v3 and v2_ms is not None and since_ms >= v2_ms and until_ms is None
+    desk = "v3" if on_v3 else ("v2" if on_v2 else "v1")
     trades: OrderedDict[str, dict] = OrderedDict()
     fills: dict[str, list[dict]] = {}  # by position; an opening fill waits here under its own decision id
     open_on: dict[str, str] = {}  # contract series -> the decision id of the position open on it
@@ -140,17 +146,21 @@ def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | No
         "jev_calls": jev_calls, "jev_cost_usd": round(jev_tokens * JEV_USD_PER_INPUT_TOKEN, 4),
         "best_pnl_usd": None if best is None else best["pnl_usd"], "worst_pnl_usd": None if worst is None else worst["pnl_usd"],
         "updated_ms": now, "week_started_ms": since_ms, "week_ends_ms": since_ms + WEEK_MS,
-        "week_day": max(1, min(7, (now - since_ms) // 86_400_000 + 1)), "desk": "v2" if on_v2 else "v1",
+        "week_day": max(1, min(7, (now - since_ms) // 86_400_000 + 1)), "desk": desk,
     }
     rows: list[dict] = [summary]
     for t in sorted(trades.values(), key=lambda t: t["opened_ms"], reverse=True):
         rows.append({k: v for k, v in t.items() if k != "gross_usd"})
     for slot, (ts, eq) in equity.items():
         rows.append({"table": "equity", "id": f"e{slot}", "t_ms": ts, "equity_usd": round(eq, 2)})
+    earlier = [("v1", WEEK_START_MS, v2_ms)] if on_v2 or on_v3 else []
+    if on_v3:
+        earlier.append(("v2", v2_ms, v3_ms))
+    for name, frm, to in earlier:
+        prev = build(log_dir, start_cash=start_cash, now_ms=now, since_ms=frm, until_ms=to, v2_ms=v2_ms, v3_ms=v3_ms)[0]
+        rows.append({"table": "previous", "id": name, "from_ms": frm, "to_ms": to,
+                     **{k: prev[k] for k in ("start_usd", "equity_usd", "net_pnl_usd", "realized_pnl_usd", "trades_closed", "trades_open", "wins", "losses", "win_rate", "fees_usd", "jev_calls")}})
     if on_v2:
-        v1 = build(log_dir, start_cash=start_cash, now_ms=now, since_ms=WEEK_START_MS, until_ms=v2_ms, v2_ms=v2_ms)[0]
-        rows.append({"table": "previous", "id": "v1", "from_ms": WEEK_START_MS, "to_ms": v2_ms,
-                     **{k: v1[k] for k in ("start_usd", "equity_usd", "net_pnl_usd", "realized_pnl_usd", "trades_closed", "trades_open", "wins", "losses", "win_rate", "fees_usd", "jev_calls")}})
         from reports.shadow_v2 import evaluate as v2_rules  # here: reports.shadow_v2 imports this module through reports.shadow
 
         report = v2_rules(log_dir)
@@ -163,7 +173,7 @@ def build(log_dir: str | Path, *, start_cash: float = 10_000.0, now_ms: int | No
             rows.append(row)
     from reports.shadow import CAP, EXIT_BEFORE_S, LATE_STOP_S, REGISTERED_MS, evaluate  # here: reports.shadow imports this module
 
-    shadow_strategies = {} if on_v2 or until_ms is not None else evaluate(log_dir, since_ms=since_ms, until_ms=v2_ms).get("strategies", {})
+    shadow_strategies = {} if desk != "v1" or until_ms is not None else evaluate(log_dir, since_ms=since_ms, until_ms=v2_ms).get("strategies", {})
     for name, st in shadow_strategies.items():
         test = st["test"]
         row = {
@@ -190,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-dir", default="logs/data")
     parser.add_argument("--out", default="/tmp/dealbot-dashboard/money.json")
     parser.add_argument("--start-cash", type=float, default=10_000.0, help="bankroll when the log has no equity reading yet")
-    parser.add_argument("--since-ms", type=int, default=None, help="start of the measured window (default: desk v2's start, or the first measured week)")
+    parser.add_argument("--since-ms", type=int, default=None, help="start of the measured window (default: the running desk's start, v3 or v2, or the first measured week)")
     args = parser.parse_args(argv)
     rows = build(args.log_dir, start_cash=args.start_cash, since_ms=args.since_ms)
     out = Path(args.out)

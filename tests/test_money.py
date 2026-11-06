@@ -130,3 +130,51 @@ def test_lab_rows_carry_each_strategy_s_numbers_and_name_the_dropped():
     e = out[1]
     assert e["net_usd_realistic"] == 25.12 and e["capital_avg_usd"] == 2431.69 and "nested" not in e and e["updated_ms"] == T0 and e["dropped"] is False
     assert out[0]["trades"] == 141 and "scores" not in out[0] and out[2]["dropped"] is True
+
+
+def test_once_v3_takes_over_v2_becomes_one_line_too_and_its_paper_rules_stop(tmp_path):
+    from reports.runs import v3_start_ms
+    from reports.shadow_v2 import evaluate as v2_rules
+
+    T0 = WEEK_START
+    v2, v3 = T0 + 1_000_000, T0 + 3_000_000
+    d1, d2, d3 = "kalshi-1-KXETH15M", "kalshi-90-KXBTC15M", "kalshi-300-KXETH15M"
+
+    def bet(did, sym, ts, price, realized, payout):
+        return [
+            {"kind": "fill", "ts": ts + 2, "decision_id": did, "side": "buy", "qty": 10, "price": price, "fee_usd": 0.15, "realized_pnl_usd": 0.0},
+            {"kind": "position_opened", "ts": ts + 3, "decision_id": did, "sym": sym, "position": {"qty": 10.0, "entry_price": price}},
+            {"kind": "fill", "ts": ts + 300_000, "decision_id": did, "side": "settle", "qty": 10, "price": payout, "fee_usd": 0.0, "realized_pnl_usd": realized},
+            {"kind": "position_closed", "ts": ts + 300_000, "decision_id": did, "sym": sym, "settled": True, "payout": payout},
+        ]
+
+    write(tmp_path, [
+        {"kind": "trial", "ts": T0, "trial_id": "v1", "mode": "paper", "spec": {"kalshi": {"model_weight": 0.5}}},
+        {"kind": "heartbeat", "ts": T0, "equity_usd": 10_000.0},
+        *bet(d1, "KXETH15M", T0, 0.40, -4.0, 0.0),
+        {"kind": "heartbeat", "ts": T0 + 700_000, "equity_usd": 9_995.85},
+        {"kind": "trial", "ts": v2, "trial_id": "v2", "mode": "paper", "spec": {"kalshi": {"forecast": "anchored"}}},
+        {"kind": "heartbeat", "ts": v2, "equity_usd": 9_995.85},
+        *bet(d2, "KXBTC15M", v2, 0.70, 3.0, 1.0),
+        {"kind": "heartbeat", "ts": v2 + 400_000, "equity_usd": 9_998.70},
+        {"kind": "trial", "ts": v3, "trial_id": "v3", "mode": "paper", "spec": {"kalshi": {"forecast": "anchored", "rules": "v3"}}},
+        {"kind": "heartbeat", "ts": v3, "equity_usd": 9_998.70},
+        *bet(d3, "KXETH15M", v3, 0.30, 7.0, 1.0),
+        {"kind": "heartbeat", "ts": v3 + 400_000, "equity_usd": 10_005.55},
+    ])
+    assert v3_start_ms(tmp_path) == v3
+    rows = build(tmp_path, now_ms=v3 + 500_000)
+    s = rows[0]
+    assert s["desk"] == "v3" and s["week_started_ms"] == v3 and s["start_usd"] == 9_998.70 and s["net_pnl_usd"] == 6.85
+    assert [r["id"] for r in rows if r["table"] == "trade"] == [d3]
+    prev = {r["id"]: r for r in rows if r["table"] == "previous"}
+    assert set(prev) == {"v1", "v2"} and prev["v1"]["to_ms"] == v2 and prev["v2"]["from_ms"] == v2 and prev["v2"]["to_ms"] == v3
+    assert prev["v2"]["trades_closed"] == 1 and prev["v2"]["net_pnl_usd"] == 2.85 and prev["v1"]["net_pnl_usd"] == -4.15
+    # v3 builds the owner's pick in: the paper rules judge v2's bets only, so they leave the page
+    assert not [r for r in rows if r["table"] in ("rule", "shadow")]
+    report = v2_rules(tmp_path)
+    assert report["until_ms"] == v3 and [t["id"] for t in report["trades"]] == [d2]
+    # while v2 runs, nothing changes: v2's week, the first desk as one line, the rule rows
+    during = build(tmp_path, now_ms=v3 + 500_000, v3_ms=None)
+    assert during[0]["desk"] == "v2" and during[0]["week_started_ms"] == v2 and [r["id"] for r in during if r["table"] == "previous"] == ["v1"]
+    assert {r["id"] for r in during if r["table"] == "rule"} >= {"desk", "next_round"}

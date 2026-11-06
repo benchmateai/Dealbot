@@ -121,19 +121,20 @@
   </section>
 
   <section class="pm-shadow" id="previous" aria-labelledby="previous-title">
-    <h2 id="previous-title">The first desk</h2>
+    <h2 id="previous-title" data-draw="prev-title" data-source="previous">The first desk</h2>
     <span data-draw="previous-state" data-source="previous"></span>
-    <p class="pm-note">From Nov 3 the first desk bet against the market using Jev's odds. Kalshi's own price turned out to be the better forecast, so on Nov 5 the desk switched to v2: the market price, nudged by a model of how these contracts settle only as far as past results allow. v2 holds each bet to the close and sells one still losing a minute before.</p>
+    <p class="pm-note" data-prev="v1">From Nov 3 the first desk bet against the market using Jev's odds. Kalshi's own price turned out to be the better forecast, so on Nov 5 the desk switched to v2: the market price, nudged by a model of how these contracts settle only as far as past results allow. v2 holds each bet to the close and sells one still losing a minute before.</p>
+    <p class="pm-note" data-prev="v2" hidden>From Nov 5 desk v2 traded Kalshi's own price, nudged by a model of how these contracts settle, held each bet to the close and sold one still losing a minute before. On Nov 12 the desk switched to v3, your pick: no new bets in the last 3 minutes before the close, and the late stop only on long shots, so favorites are held to the close.</p>
     <div class="pm-tiles">
       <div class="pm-tile">
-        <div class="pm-tile-label">First desk's final result</div>
-        <div class="pm-tile-value dash-skeleton" data-draw="v1-net" data-source="previous" data-field="net_pnl_usd" data-where="id=v1">—</div>
-        <div class="pm-tile-sub"><b data-draw="v1-n" data-source="previous" data-field="trades_closed" data-where="id=v1">—</b> bets, <b data-draw="v1-wins" data-source="previous" data-field="wins" data-where="id=v1">—</b> won, until <b data-draw="v1-end" data-source="previous" data-field="to_ms" data-where="id=v1">—</b></div>
+        <div class="pm-tile-label"><span data-draw="prev-name" data-source="previous">First desk</span>'s final result</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="v1-net" data-source="previous" data-field="net_pnl_usd" data-where="id=last">—</div>
+        <div class="pm-tile-sub"><b data-draw="v1-n" data-source="previous" data-field="trades_closed" data-where="id=last">—</b> bets, <b data-draw="v1-wins" data-source="previous" data-field="wins" data-where="id=last">—</b> won, until <b data-draw="v1-end" data-source="previous" data-field="to_ms" data-where="id=last">—</b></div>
       </div>
       <div class="pm-tile">
-        <div class="pm-tile-label">First desk's fees and Jev calls</div>
-        <div class="pm-tile-value dash-skeleton" data-draw="v1-fees" data-source="previous" data-field="fees_usd" data-where="id=v1">—</div>
-        <div class="pm-tile-sub"><b data-draw="v1-jev" data-source="previous" data-field="jev_calls" data-where="id=v1">—</b> Jev calls; v2 makes none</div>
+        <div class="pm-tile-label"><span data-draw="prev-name-2" data-source="previous">First desk</span>'s fees and Jev calls</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="v1-fees" data-source="previous" data-field="fees_usd" data-where="id=last">—</div>
+        <div class="pm-tile-sub"><b data-draw="v1-jev" data-source="previous" data-field="jev_calls" data-where="id=last">—</b> Jev calls; the desks since make none</div>
       </div>
     </div>
   </section>
@@ -154,7 +155,7 @@
         <div class="pm-tile-sub">on average, <b data-draw="e-cap-peak" data-source="lab" data-field="capital_peak_usd" data-where="id=E">—</b> at most; best case <b data-draw="e-best" data-source="lab" data-field="net_usd_upper_bound" data-where="id=E">—</b></div>
       </div>
       <div class="pm-tile">
-        <div class="pm-tile-label">Lab A: v2's forecast, BTC and ETH at once</div>
+        <div class="pm-tile-label">Lab A: the desk's forecast, BTC and ETH at once</div>
         <div class="pm-tile-value dash-skeleton" data-draw="a-pnl" data-source="lab" data-field="pnl_usd" data-where="id=A">—</div>
         <div class="pm-tile-sub"><b data-draw="a-n" data-source="lab" data-field="trades" data-where="id=A">—</b> paper trades since Nov 3, held to the close</div>
       </div>
@@ -223,9 +224,13 @@
   });
   dash.calc('previous', {
     inputs: ['paper'],
-    title: 'The first desk',
-    description: "The first desk's final result, from the measured week's start to desk v2's.",
-    fn: (paper) => paper.filter((r) => r.table === 'previous'),
+    title: 'The previous desk',
+    description: "The latest earlier desk's final result: the first desk's while v2 runs, v2's once v3 runs.",
+    fn: (paper) => {
+      const prev = paper.filter((r) => r.table === 'previous');
+      const last = prev.reduce((a, r) => (!a || r.to_ms > a.to_ms ? r : a), null);
+      return last ? [{ ...last, desk: last.id, id: 'last' }] : [];
+    },
   });
 
   const summary = () => {
@@ -272,7 +277,7 @@
     const d = dash.data('paper');
     const s = summary();
     if (d.status === 'ok' || d.status === 'error') el.classList.remove('dash-skeleton');
-    el.textContent = !s ? '—' : s.desk === 'v2' ? 'Desk v2' : 'The first desk';
+    el.textContent = !s ? '—' : s.desk === 'v3' ? 'Desk v3' : s.desk === 'v2' ? 'Desk v2' : 'The first desk';
   });
   figure('weekday', 'week_day', count);
   figure('updated', 'updated_ms', when);
@@ -309,12 +314,24 @@
     const none = d.status === 'ok' && d.data.length === 0;
     for (const sec of document.querySelectorAll('#rules')) sec.hidden = none;
   });
-  rowFigure('v1-net', 'previous', 'v1', 'net_pnl_usd', signed, true);
-  rowFigure('v1-n', 'previous', 'v1', 'trades_closed', count);
-  rowFigure('v1-wins', 'previous', 'v1', 'wins', count);
-  rowFigure('v1-end', 'previous', 'v1', 'to_ms', when);
-  rowFigure('v1-fees', 'previous', 'v1', 'fees_usd', usd);
-  rowFigure('v1-jev', 'previous', 'v1', 'jev_calls', count);
+  rowFigure('v1-net', 'previous', 'last', 'net_pnl_usd', signed, true);
+  rowFigure('v1-n', 'previous', 'last', 'trades_closed', count);
+  rowFigure('v1-wins', 'previous', 'last', 'wins', count);
+  rowFigure('v1-end', 'previous', 'last', 'to_ms', when);
+  rowFigure('v1-fees', 'previous', 'last', 'fees_usd', usd);
+  rowFigure('v1-jev', 'previous', 'last', 'jev_calls', count);
+  const prevDesk = () => {
+    const d = dash.data('previous');
+    return d.status === 'ok' && Array.isArray(d.data) && d.data[0] ? d.data[0].desk : 'v1';
+  };
+  const PREV_NAMES = { v1: 'First desk', v2: 'Desk v2' };
+  dash.draw('prev-title', (el) => {
+    const k = prevDesk();
+    el.textContent = k === 'v2' ? 'Desk v2' : 'The first desk';
+    for (const note of document.querySelectorAll('#previous [data-prev]')) note.hidden = note.dataset.prev !== k;
+  });
+  dash.draw('prev-name', (el) => { el.textContent = PREV_NAMES[prevDesk()] || 'First desk'; });
+  dash.draw('prev-name-2', (el) => { el.textContent = PREV_NAMES[prevDesk()] || 'First desk'; });
   const hours = d3.format('.1f');
   rowFigure('e-net', 'lab', 'E', 'net_usd_realistic', signed, true);
   rowFigure('e-hours', 'lab', 'E', 'hours', hours);

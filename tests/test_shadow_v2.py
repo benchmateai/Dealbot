@@ -119,3 +119,15 @@ def test_nothing_to_judge_before_v2_starts(tmp_path):
     write(tmp_path, [{"kind": "heartbeat", "ts": V2, "equity_usd": 10_000.0}])
     report = evaluate(tmp_path)
     assert report["v2_start_ms"] is None and report["strategies"] == {}
+
+
+def test_the_rules_judge_v2_s_bets_only_and_freeze_at_v3_s_start(tmp_path):
+    v3 = REG + 3_600_000
+    records = [{"kind": "trial", "ts": V2, "trial_id": "v2", "mode": "paper", "spec": {"kalshi": {"forecast": "anchored"}}}]
+    records += bet("v2-bet", "M-1", REG + 1_000, yes=True, price=0.20, payout=1.0)
+    records.append({"kind": "trial", "ts": v3, "trial_id": "v3", "mode": "paper", "spec": {"kalshi": {"forecast": "anchored", "rules": "v3"}}})
+    records += bet("v3-bet", "M-2", v3 + 1_000, yes=True, price=0.20, payout=1.0, left=300)
+    write(tmp_path, records)
+    report = evaluate(tmp_path, registered_ms=REG)
+    assert report["until_ms"] == v3 and [t["id"] for t in report["trades"]] == ["v2-bet"]
+    assert report["strategies"]["desk"]["since_v2"]["trades"] == 1
