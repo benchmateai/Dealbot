@@ -187,7 +187,8 @@ argues against any part, ask the owner first):
 1. Merge `claude/next-round` into `claude/desk-skeleton` with the whole suite passing, and push. Besides
    the v3 rules it carries the reports' and the dashboard's split at v3's start (v2's week becomes one
    `previous` row, as the first desk's did).
-2. Re-enable the supervisor, watchdog and analyst scheduled tasks (update_trigger enabled true).
+2. Re-enable the supervisor, watchdog, analyst and morning report scheduled tasks (update_trigger
+   enabled true); the morning report's prompt then speaks of v3, and the paper rules end with v2.
 3. Ask the runner to start a new chunk: the desk logs a new paper trial (`rules: v3`), and its first
    block starts v3's week. Check its first blocks as for v2 (forecasts logged, no entry under 180 s).
 4. Ask the lab runners to start again, without E unless its realistic result is above zero.
