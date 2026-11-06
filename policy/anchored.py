@@ -21,10 +21,13 @@ w fitted by maximum likelihood on forecasts recorded at fixed horizons (420, 300
 each close) once their contracts settled, refitted every REFIT_EVERY new ones and held at 0 until MIN_ROWS
 exist. With w = 0, q is the market and nothing trades, which is the right answer in a calibrated market.
 
-The trade (final_pick_anchored). Entries between 60 and 600 seconds before the close, at the displayed
-price, when q clears the price by the desk's edge bar: (1 + margin) x (the taker fee + half the spread).
-Then hold to settlement, except the owner's late stop: a position still losing LATE_STOP_S seconds before
-the close is sold.
+The trade (final_pick_anchored), desk v3's rules (DESK_RULES), the owner's pick of 2026-11-06 for the round
+after v2's week. Entries between 180 and 600 seconds before the close (v2 entered from 60: inside 3 minutes
+its forecast graded worse than Kalshi's own mid), at the displayed price, when q clears the price by the
+desk's edge bar: (1 + margin) x (the taker fee + half the spread). Then hold to settlement, except the
+owner's late stop on long shots: a bet bought under LATE_STOP_BELOW (50 cents) still losing LATE_STOP_S
+seconds before the close is sold; a favourite is held to the close (v2 sold three favourites in their last
+minute and all three then won).
 """
 
 from __future__ import annotations
@@ -49,8 +52,10 @@ MIN_ROWS = 300
 REFIT_EVERY = 25
 STALE_QUOTE_MS = 24_000
 CORR_WINDOW = 50
-TRADE_WINDOW_S = (60, 600)
+DESK_RULES = "v3"              # the trade rules below; v2 traded (60, 600) and late-stopped every bet
+TRADE_WINDOW_S = (180, 600)
 LATE_STOP_S = 60
+LATE_STOP_BELOW = 0.50         # the late stop sells only bets bought under this price (their own side's)
 
 
 # ---- the settlement model ------------------------------------------------------------------------
@@ -302,8 +307,8 @@ def _late_stop(position, contract: Mapping, forecast: Mapping | None) -> tuple[b
 
 def final_pick_anchored(phase: str, forecast: Mapping | None, contract: Mapping, costs: BinaryCosts, *, position=None) -> Pick:
     """Entry: buy YES when q - ask >= min_edge(ask), or NO when (1 - q) - (1 - bid) >= min_edge(1 - bid), with
-    60 to 600 seconds left, on the forecast's own quote. Manage: hold to settlement, except sell a position
-    still losing LATE_STOP_S seconds before the close."""
+    TRADE_WINDOW_S (180 to 600) seconds left, on the forecast's own quote. Manage: hold to settlement, except
+    sell a bet bought under LATE_STOP_BELOW still losing LATE_STOP_S seconds before the close."""
     tau = contract.get("expires_in_s")
     if phase == "entry":
         if not forecast or forecast.get("ticker") != contract.get("ticker") or float(forecast.get("w") or 0.0) == 0.0 or tau is None:
@@ -327,6 +332,6 @@ def final_pick_anchored(phase: str, forecast: Mapping | None, contract: Mapping,
         return Pick(HOLD, 0.0, 1.0, 0.0, ())
     losing, sell, paid = stop
     score = ActionScore("exit", round(sell, 4), round(paid, 4), 0.0)
-    if losing and 0 < float(tau) <= LATE_STOP_S:
+    if losing and paid < LATE_STOP_BELOW and 0 < float(tau) <= LATE_STOP_S:
         return Pick("exit", sell, paid, 0.0, (score,))
     return Pick(HOLD, sell, paid, 0.0, (score,))

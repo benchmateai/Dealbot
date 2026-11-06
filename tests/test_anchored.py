@@ -16,7 +16,7 @@ from kalshi import BinaryPaperBroker
 from kalshi.api import taker_fee_usd
 from logs.writer import LogWriter, read_events
 from outcomes.resolver import OutcomeResolver
-from policy.anchored import LATE_STOP_S, MODEL_VERSION, TRADE_WINDOW_S, AnchoredForecaster, final_pick_anchored, pool
+from policy.anchored import DESK_RULES, LATE_STOP_BELOW, LATE_STOP_S, MODEL_VERSION, TRADE_WINDOW_S, AnchoredForecaster, final_pick_anchored, pool
 from policy.binary import BinaryCosts
 from questions import load_battery
 from risk import RiskGate
@@ -62,20 +62,26 @@ def test_entries_only_inside_the_window_with_a_fitted_weight_on_this_contract():
     assert final_pick_anchored("entry", sure, {**CONTRACT, "tradable": False}, COSTS).is_hold
 
 
-def test_late_stop_sells_a_losing_position_in_the_last_minute_and_holds_otherwise():
-    long_yes = OpenPosition("KXETH15M", 10.0, 0.62, T0, 1, "d", "kalshi")
+def test_late_stop_sells_a_losing_long_shot_in_the_last_minute_and_holds_otherwise():
+    long_shot = OpenPosition("KXETH15M", 10.0, 0.32, T0, 1, "d", "kalshi")    # YES bought at 0.32
     short_yes = OpenPosition("KXETH15M", -10.0, 0.60, T0, 1, "d", "kalshi")   # a NO bet bought at 0.40
+    favourite = OpenPosition("KXETH15M", 10.0, 0.62, T0, 1, "d", "kalshi")    # YES bought at 0.62
+    fav_no = OpenPosition("KXETH15M", -10.0, 0.20, T0, 1, "d", "kalshi")      # a NO bet bought at 0.80
 
     def pick(position, tau, bid, ask):
         return final_pick_anchored("manage", None, {**CONTRACT, "expires_in_s": tau, "yes_bid": bid, "yes_ask": ask}, COSTS, position=position)
 
-    assert pick(long_yes, LATE_STOP_S, 0.40, 0.42).action == "exit"          # bid 0.40 < 0.62 paid
-    assert pick(long_yes, 12, 0.40, 0.42).action == "exit"
-    assert pick(long_yes, LATE_STOP_S + 1, 0.40, 0.42).is_hold               # not yet the last minute
-    assert pick(long_yes, 0, 0.40, 0.42).is_hold                             # closed: wait for the settlement
-    assert pick(long_yes, 30, 0.95, 0.97).is_hold                            # winning: hold to settlement
+    assert 0.32 < LATE_STOP_BELOW <= 0.62
+    assert pick(long_shot, LATE_STOP_S, 0.20, 0.22).action == "exit"         # bid 0.20 < 0.32 paid
+    assert pick(long_shot, 12, 0.20, 0.22).action == "exit"
+    assert pick(long_shot, LATE_STOP_S + 1, 0.20, 0.22).is_hold              # not yet the last minute
+    assert pick(long_shot, 0, 0.20, 0.22).is_hold                            # closed: wait for the settlement
+    assert pick(long_shot, 30, 0.95, 0.97).is_hold                           # winning: hold to settlement
     assert pick(short_yes, 30, 0.68, 0.70).action == "exit"                  # NO worth 1 - 0.70 = 0.30 < 0.40
     assert pick(short_yes, 30, 0.48, 0.50).is_hold                           # NO worth 0.50 > 0.40
+    # a favourite is held to the close however it stands in its last minute, on either side
+    assert pick(favourite, 30, 0.40, 0.42).is_hold and pick(favourite, LATE_STOP_S, 0.10, 0.12).is_hold
+    assert pick(fav_no, 30, 0.68, 0.70).is_hold                              # NO worth 0.30 < 0.80 paid, held
     assert final_pick_anchored("manage", None, CONTRACT, COSTS, position=None).is_hold
 
 
@@ -141,6 +147,7 @@ def test_trial_spec_marks_v2_and_leaves_the_first_desk_spec_unchanged():
     v2 = strategy_spec(DeskConfig.from_env(base), lb("kalshi"))["kalshi"]
     v1 = strategy_spec(DeskConfig.from_env({**base, "KALSHI_FORECAST": "blend"}), lb("kalshi"))["kalshi"]
     assert v2["forecast"] == "anchored" and v2["late_stop_s"] == LATE_STOP_S and v2["entry_window_s"] == list(TRADE_WINDOW_S)
+    assert v2["rules"] == DESK_RULES == "v3" and v2["late_stop_below"] == LATE_STOP_BELOW and TRADE_WINDOW_S == (180, 600)
     assert "forecast" not in v1 and set(v1) == {"base_url", "underlying", "trade_window_s", "min_time_left_s", "taker_rate", "maker_rate", "model_weight"}
 
 
@@ -185,26 +192,39 @@ def _run(cfg, desk, feed, fake, log, clock, blocks, *, book_after=None):
     return list(read_events(cfg.log_dir))
 
 
-def test_v2_desk_enters_on_the_forecast_and_late_stops_a_loser_without_asking_jev(tmp_path):
+def test_v2_desk_enters_on_the_forecast_and_late_stops_a_losing_long_shot_without_asking_jev(tmp_path):
     clock = {"now": T0}
     fc = AnchoredForecaster(fixed_weight=1.0, track_index_gap=False)   # q = the model: spot ~2500 against a 2400 strike, YES ~1
     cfg, desk, feed, fake, log, judge = _v2_desk(tmp_path, clock, fc)
     fake.official_result = "yes"
-    events = _run(cfg, desk, feed, fake, log, clock, 82, book_after=(T0 + 900_000 - LATE_STOP_S * 1000, (0.40, 0.42, 100.0, 120.0)))
+    fake.book = (0.30, 0.32, 100.0, 120.0)                             # YES at 32 cents: a long shot
+    events = _run(cfg, desk, feed, fake, log, clock, 82, book_after=(T0 + 900_000 - LATE_STOP_S * 1000, (0.20, 0.22, 100.0, 120.0)))
     assert judge.calls == [] and not [e for e in events if e["kind"] == "answer"]
     entry = [e for e in events if e["kind"] == "decision" and e["action"] == "enter_long"][0]
     assert entry["executed"] and entry["model"] == MODEL_VERSION and entry["prob"] > 0.9
     opened = [e for e in events if e["kind"] == "position_opened"][0]
     assert 25 <= opened["blk"] <= 30, opened["blk"]          # the first block with 600 s or less to the close
     fills = [e for e in events if e["kind"] == "fill"]
-    assert [f["side"] for f in fills] == ["buy", "sell"] and fills[0]["price"] == 0.62 and fills[1]["price"] == pytest.approx(0.40, abs=0.001)
+    assert [f["side"] for f in fills] == ["buy", "sell"] and fills[0]["price"] == 0.32 and fills[1]["price"] == pytest.approx(0.20, abs=0.001)
     exit_ = [e for e in events if e["kind"] == "decision" and e["action"] == "exit"][0]
-    assert exit_["executed"] and exit_["phase"] == "manage" and exit_["prob"] == pytest.approx(0.40) and exit_["threshold"] == pytest.approx(0.62)
+    assert exit_["executed"] and exit_["phase"] == "manage" and exit_["prob"] == pytest.approx(0.20) and exit_["threshold"] == pytest.approx(0.32)
     held = [e for e in events if e["kind"] == "decision" and e["phase"] == "manage" and e["action"] == "hold"]
     assert held and all(e["ts"] < exit_["ts"] for e in held)  # held, not churned, until the last minute
     assert desk.book.position is None and fc.outcomes == {"KXETH15M-0": 1}
     forecasts = [e for e in events if e["kind"] == "forecast"]
     assert forecasts and {f["model"] for f in forecasts} == {MODEL_VERSION} and all(f["weight"] == 1.0 for f in forecasts)
+
+
+def test_v3_desk_holds_a_losing_favourite_through_its_last_minute_to_settlement(tmp_path):
+    clock = {"now": T0}
+    fc = AnchoredForecaster(fixed_weight=1.0, track_index_gap=False)
+    cfg, desk, feed, fake, log, judge = _v2_desk(tmp_path, clock, fc)
+    fake.official_result = "yes"                                       # YES bought at 62 cents, behind in its last minute, then wins
+    events = _run(cfg, desk, feed, fake, log, clock, 82, book_after=(T0 + 900_000 - LATE_STOP_S * 1000, (0.40, 0.42, 100.0, 120.0)))
+    fills = [e for e in events if e["kind"] == "fill"]
+    assert [f["side"] for f in fills] == ["buy", "settle"] and fills[0]["price"] == 0.62 and fills[1]["price"] == 1.0
+    assert not [e for e in events if e["kind"] == "decision" and e["action"] == "exit"]
+    assert desk.book.position is None and judge.calls == []
 
 
 def test_v2_desk_holds_a_winner_to_settlement(tmp_path):

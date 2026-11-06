@@ -24,7 +24,8 @@ def _forecast_spec(cfg) -> dict:
     from policy import anchored as a
 
     return {"forecast": "anchored", "forecast_model": a.MODEL_VERSION, "horizons_s": list(a.HORIZONS_S), "min_rows": a.MIN_ROWS,
-            "refit_every": a.REFIT_EVERY, "entry_window_s": list(a.TRADE_WINDOW_S), "late_stop_s": a.LATE_STOP_S}
+            "refit_every": a.REFIT_EVERY, "entry_window_s": list(a.TRADE_WINDOW_S), "late_stop_s": a.LATE_STOP_S,
+            "late_stop_below": a.LATE_STOP_BELOW, "rules": a.DESK_RULES}
 
 
 def strategy_spec(cfg, battery: Battery) -> dict:
