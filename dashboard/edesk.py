@@ -7,9 +7,12 @@ Rows, each with a `table` column like the rest of money.json:
   edesk         one row: the desk's totals (lab/strategies/e_desk.py), its start and the end of its week
   edesk_market  one row per market it quoted or holds: payments, contracts, holding, its value and P&L, status
   edesk_equity  its equity every 10 minutes
+  edesk_category one row per kind of market it quoted (sports, political, economic, crypto, other): its
+                payments, fills marked and net
   edesk_variant one row per variant replayed beside it (with --variants; the morning report adds them)
 Before the desk starts there is only the edesk row, with started false. Old edesk rows in the file are
-replaced; the desk v2 rows are left as they are.
+replaced; the desk v2 rows are left as they are. The replay stops at the end of the desk's week (WEEK_MS
+after --since-ms, unless --until-ms says otherwise), so the rows hold still once it is over.
 
 --health judges the recording the desk runs on, for the watchdog once the E desk is the round
 (ops/round.txt): ALERT when the live feed has written no E book for STALE_ALERT_S, WARN past STALE_WARN_S.
@@ -37,6 +40,8 @@ def rows(report: dict, *, now_ms: int) -> list[dict]:
     out = [{"table": "edesk", "id": "edesk", **flat, "ends_ms": s["start_ms"] + WEEK_MS, "week_day": day, "updated_ms": now_ms}]
     for m in report.get("markets") or []:
         out.append({"table": "edesk_market", "id": m["ticker"], **m})
+    for c in report.get("categories") or []:
+        out.append({"table": "edesk_category", "id": c["group"], **c})
     for ts, eq in report.get("equity") or []:
         out.append({"table": "edesk_equity", "id": f"q{ts}", "t_ms": ts, "equity_usd": eq})
     for name, v in (report.get("variants") or {}).items():
@@ -61,7 +66,7 @@ def health(lab_dir: str | Path, *, now_ms: int) -> tuple[str, int]:
     for r in read_lab(lab_dir, since_ms=now_ms - 6 * 3_600_000, kinds=["book"]):
         if "E" in (r.get("sets") or [r.get("set")]):
             newest = r["ts"] if newest is None else max(newest, r["ts"])
-    s = evaluate(lab_dir, since_ms=START_MS)["summary"] if now_ms >= START_MS else None
+    s = evaluate(lab_dir, since_ms=START_MS, until_ms=START_MS + WEEK_MS)["summary"] if now_ms >= START_MS else None
     money = "" if not s or not s["started"] else f" · E desk net {s['net_usd']:+.2f} (payments {s['payable_usd']:.2f}, fills marked {s['fills_marked_usd']:+.2f}), equity {s['equity_usd']:,.2f}"
     if newest is None:
         return f"health: ALERT · the live feed has written no E book in 6 hours{money}", 3
@@ -80,13 +85,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--variants", action="store_true", help="replay the variants beside the desk too (slower)")
     parser.add_argument("--health", action="store_true")
     parser.add_argument("--since-ms", type=int, default=START_MS)
+    parser.add_argument("--until-ms", type=int, default=None, help="where the replay stops (default: a week after --since-ms)")
     args = parser.parse_args(argv)
     now = int(time.time() * 1000)
     if args.health:
         line, code = health(args.lab, now_ms=now)
         print(line)
         return code
-    report = compare(args.lab, since_ms=args.since_ms) if args.variants else evaluate(args.lab, since_ms=args.since_ms)
+    until = args.until_ms if args.until_ms is not None else args.since_ms + WEEK_MS
+    report = compare(args.lab, since_ms=args.since_ms, until_ms=until) if args.variants else evaluate(args.lab, since_ms=args.since_ms, until_ms=until)
     new = rows(report, now_ms=now)
     if args.merge_into:
         merge(args.merge_into, new)
