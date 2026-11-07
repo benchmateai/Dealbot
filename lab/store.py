@@ -103,8 +103,11 @@ def seal(path: Path) -> Path:
 
 
 def read_lab(root: str | Path, *, since_ms: int = 0, until_ms: int | None = None, kinds: Iterable[str] | None = None) -> Iterator[dict]:
-    """Records from every hour file (sealed or open) in time order of the hours, skipping a partial last line."""
+    """Records from every hour file (sealed or open) in time order of the hours, skipping a partial last line.
+    With `kinds`, a line the store wrote (compact JSON) for another kind is passed over unparsed: most of a
+    recording is trades and index values that a replay of books does not read."""
     wanted = set(kinds) if kinds else None
+    needles = tuple(f'"kind":"{k}"' for k in wanted) if wanted else ()
     root = Path(root)
     files = sorted(set(root.glob("*/*.jsonl.gz")) | set(root.glob("*/*.jsonl")), key=lambda p: (p.parent.name, p.name.split(".")[0], p.suffix != ".gz"))
     for p in files:
@@ -115,6 +118,8 @@ def read_lab(root: str | Path, *, since_ms: int = 0, until_ms: int | None = None
         try:
             with opener(p, "rt", encoding="utf-8") as fh:
                 for line in fh:
+                    if needles and '"kind":"' in line and not any(n in line for n in needles):
+                        continue  # some other kind; a line in any other layout is parsed and checked below
                     try:
                         rec = json.loads(line)
                     except json.JSONDecodeError:

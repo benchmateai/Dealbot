@@ -147,6 +147,7 @@ def _write(tmp_path, items):
     store = LabStore(tmp_path)
     for kind, rec, ts in sorted(items, key=lambda x: x[2]):
         store.write(kind, rec, ts_ms=ts)
+    store.wait_sealed()  # records that span hours seal the finished ones in a thread: read only once that is done
     store.close()
 
 
@@ -881,3 +882,106 @@ def test_ws_feed_writes_the_btc_book_slowly_until_its_last_three_minutes(tmp_pat
     assert [x for x in times["BTC-Q"] if x >= 720][:3] == [720, 722, 724]  # ... then every 2 s for B
     assert [x for x in times["ETH-Q"] if x < 720][:3] == [0, 10, 20]  # C's book every 10 s throughout
     assert all(len(r["yes"]) == 10 for r in books)
+
+
+def _liq(ticker, reward=1_000_000, end="2026-11-05T00:00:00Z"):
+    return {"market_ticker": ticker, "incentive_type": "liquidity", "period_reward": reward, "start_date": "2026-11-03T00:00:00Z",
+            "end_date": end, "target_size_fp": "100.00"}
+
+
+class _EApi:
+    """Kalshi's REST for E: the program list, a batch market lookup, series and results."""
+
+    closes = {"KXA-1": "2026-11-03T21:00:00Z", "KXB-2": "2026-11-04T00:00:00Z", "KXC-3": "2026-11-10T00:00:00Z"}
+
+    def __init__(self, programs):
+        self.programs, self.calls = programs, []
+
+    def get(self, path, params=None):
+        self.calls.append(path)
+        if path == "/incentive_programs":
+            return {"incentive_programs": self.programs}
+        if path == "/markets":
+            return {"markets": [{"ticker": t, "event_ticker": t.split("-")[0] + "-EV", "close_time": self.closes[t]} for t in params["tickers"].split(",")]}
+        if path.startswith("/series/"):
+            s = path.rsplit("/", 1)[1]
+            return {"series": {"ticker": s, "category": "Politics" if s == "KXA" else "Sports", "title": f"{s} title",
+                               "settlement_sources": [{"name": f"{s} source", "url": "https://example.com"}]}}
+        if path.startswith("/markets/"):
+            return {"market": {"ticker": path.rsplit("/", 1)[1], "result": "yes", "expiration_value": None}}
+        return {}
+
+
+def test_ws_feed_looks_up_e_markets_and_their_series_then_records_their_results(tmp_path):
+    state = tmp_path / "ws_state.json"
+    clock = {"ms": T0}
+    api = _EApi([_liq("KXA-1", 2_000_000), _liq("KXB-2")])
+    feed = _feed(tmp_path, clock, api=api, state_path=state)
+    feed.refresh_incentives(T0)
+    assert (feed.meta["KXA-1"]["close_ms"], feed.meta["KXA-1"]["series"], feed.meta["KXA-1"]["event"]) == (T0 + H, "KXA", "KXA-EV")
+    assert api.calls.count("/markets") == 1 and sorted(c for c in api.calls if c.startswith("/series/")) == ["/series/KXA", "/series/KXB"]
+    assert feed.e_meta_needed(T0 + 1000) == ([], [])  # nothing left to ask
+    feed.handle(_snap("KXA-1", [["0.4000", "10.00"]], [["0.5000", "10.00"]]))
+    feed.write_books(clock["ms"])
+    clock["ms"] = T0 + H  # KXA-1 closes: it leaves E and its result is fetched later
+    feed.tick(clock["ms"])
+    assert "KXA-1" not in feed.meta and feed.pending_settle["KXA-1"][0] == T0 + H
+    feed.refresh_incentives(clock["ms"])  # its program runs on past the close: the closed market is not picked again
+    assert "KXA-1" not in feed.meta and "KXB-2" in feed.meta
+    feed.settle_due(T0 + H + 200_000)
+    api.programs = [_liq("KXC-3")]  # KXB-2 leaves the top programs before its close: its result is still wanted
+    feed.refresh_incentives(T0 + H + 300_000)
+    assert "KXB-2" not in feed.meta and feed.pending_settle["KXB-2"][0] == T0 + 4 * H and feed.meta["KXC-3"]["close_ms"] is not None
+    feed.store.wait_sealed()  # the records span two hours: the first is sealed in a thread
+    feed.store.close()
+    recs = list(read_lab(tmp_path))
+    book = next(r for r in recs if r["kind"] == "book")
+    assert (book["ticker"], book["close_ms"], book["series"]) == ("KXA-1", T0 + H, "KXA")
+    meta = {r["series"]: r for r in recs if r["kind"] == "series_meta"}
+    assert meta["KXA"]["category"] == "Politics" and meta["KXA"]["sources"] == ["KXA source"] and meta["KXC"]["category"] == "Sports"
+    assert [r["rows"] for r in recs if r["kind"] == "settled"] == [[["KXA-1", "yes", None]]]
+    again = _feed(tmp_path, clock, api=api, state_path=state)  # a restart keeps the series it looked up
+    assert set(again.series_info) == {"KXA", "KXB", "KXC"} and again.e_meta_needed(T0 + H + 400_000) == ([], [])
+
+
+def test_ws_feed_asks_again_for_e_details_only_after_a_wait(tmp_path):
+    from lab.ws_recorder import E_META_RETRY_S, E_SERIES_PER_PASS
+
+    class Down:
+        calls = []
+
+        def get(self, path, params=None):
+            self.calls.append(path)
+            return None if path != "/incentive_programs" else {"incentive_programs": [_liq(f"KX{c}-1") for c in "PQRS"]}
+
+    clock = {"ms": T0}
+    feed = _feed(tmp_path, clock, api=Down())
+    feed.refresh_incentives(T0)
+    assert len([c for c in Down.calls if c.startswith("/series/")]) == E_SERIES_PER_PASS and feed.counters["e_meta_failed"] == 1 + E_SERIES_PER_PASS
+    markets, series = feed.e_meta_needed(T0 + 60_000)
+    assert markets == [] and len(series) == 4 - E_SERIES_PER_PASS  # the failed ones wait; the series not yet asked go next
+    assert len(feed.e_meta_needed(T0 + E_META_RETRY_S * 1000)[0]) == 4
+
+
+def test_ws_schedule_runs_the_e_lookup_only_when_wanted_and_away_from_the_quarter():
+    from lab.ws_recorder import QUIET_S, Schedule
+
+    s = Schedule()
+    q = T0 + 900_000
+    for job in ("crypto", "settle", "incentives", "fade", "status"):
+        s.next[job] = q + 10 * H  # only the E lookup can be due
+    assert s.due(q + 100_000, lambda close: True) is None  # not wanted
+    assert s.due(q + 900_000 - (QUIET_S["e_meta"] - 5) * 1000, lambda close: True, lambda now: True) is None  # the next quarter is too close
+    assert s.due(q + 100_000, lambda close: True, lambda now: True) == "e_meta"
+    assert s.due(q + 101_000, lambda close: True, lambda now: True) is None  # not again until E_META_S has passed
+
+
+def test_reading_by_kind_passes_over_other_kinds_and_still_reads_any_layout(tmp_path):
+    store = LabStore(tmp_path)
+    store.write("index", {"value": 1.0, "note": 'mentions "kind":"book" inside'}, ts_ms=T0)
+    store.write("book", {"ticker": "M"}, ts_ms=T0 + 1)
+    store.close()
+    with open(tmp_path / "2026-11-03" / "20.jsonl", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"ts": T0 + 2, "kind": "book", "ticker": "SPACED"}) + "\n")  # json.dumps' default layout, with spaces
+    assert [r.get("ticker") for r in read_lab(tmp_path, kinds=["book"])] == ["M", "SPACED"]
+    assert [r["kind"] for r in read_lab(tmp_path)] == ["index", "book", "book"]
