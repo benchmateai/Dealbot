@@ -184,8 +184,14 @@ orders where Kalshi pays liquidity rewards.
 
 The E desk (`lab/strategies/e_desk.py`) quotes as lab E does and adds risk rules that stop it adding
 risk but never stop it pairing off what it holds: $250 per market, $5,000 of orders and holdings in all,
-nothing added in a market's last 3 hours, and no new risk in a market after a $40 loss there. A news rule
-(pause 15 minutes after a 5-cent move) runs beside it as the `news_pause` variant. Its week runs from
+nothing added in a market's last 3 hours, and no new risk in a market after a $40 loss there. Four
+variants, registered before its start, run beside it on the same recording and are never retuned
+mid-week: `news_pause` (pause 15 minutes after a 5-cent move), `calendar_blackout` (no new risk in
+economic and crypto markets an hour either side of the dated releases in CATALYSTS: inside the week only
+the Fed minutes, Nov 18 at 19:00Z), `headline_filter` (no new risk in Kalshi's Elections markets or in
+approval, impeachment and departure series) and `no_close_rule` (the main desk without the 3-hour close
+rule). Its report splits its money by kind of market (Kalshi's category for the series: sports,
+political, economic, crypto, other), and the page shows that split. Its week runs from
 2026-11-12T05:00Z (START_MS) to 2026-11-19T05:00Z. It sends nothing to Kalshi: each run replays its rules
 over the lab's live-feed recording on `shadow-run`, so the live-feed lab runner must keep recording. The
 hourly watchdog merges its rows into money.json (`dashboard/edesk.py`), and the page's E desk section
@@ -196,15 +202,26 @@ On E's first 81 hours (in sample, 2026-11-03 to 11-07) lab E, marked correctly, 
 $71.67, fills marked -$83.74; most of the loss one presidential-approval market that went to 98 cents
 against it), and the E desk's rules about -$2.
 
+The close rule needs each market's close time on its books. Until 2026-11-07 the live-feed recorder kept
+none for E's markets (the program list does not carry them) and recorded no E results, so the rule never
+acted in sample. Since then the recorder looks up each market E picks (close time, series, event) and
+each new series (a `series_meta` record with Kalshi's category), unwatches an E market at its close and
+fetches its result, also for a market that leaves E before it closes. With Kalshi's close times and
+results filled in afterwards, E's first 90 hours come to about -$4 for the main desk, +$8 without the
+close rule, and +$16 for the headline filter (which kept out 29 election and approval markets and earned
+$4.80 in payments); the calendar blackout had nothing to act on.
+
 Switching to the E desk (the coordinator, after the final report):
 1. On `claude/desk-skeleton`, set `ops/round.txt` to `edesk` and push (ops/ never restarts the desk).
 2. The desk runner stays stopped after v2's week. Never stop the lab runners: the E desk runs on the live
    feed, and lab E stays its control.
 3. Re-enable the supervisor, watchdog, analyst and morning report scheduled tasks (update_trigger
    enabled true), with the morning report's prompt rewritten for the E desk (`python3 -m
-   lab.strategies.e_desk --lab <lab copy> --variants` for its line and the variant's; lab E beside it).
-4. Schedule the E desk's final report for 2026-11-19T05:30Z: its result against lab E and the
-   news_pause variant, by market and program, with the money it tied up.
+   lab.strategies.e_desk --lab <lab copy> --variants` for its line, its split by kind of market and the
+   four variants' lines, replayed side by side in about two minutes by the week's end; lab E beside it).
+4. Schedule the E desk's final report for 2026-11-19T05:30Z: its result at the week's end (the replay
+   stops there by itself) against lab E and the four variants, by market, program and kind of market,
+   with the money it tied up.
 5. Refresh the money dashboard (the watchdog does it hourly) and tell the owner the E desk has started
    and when its week ends.
 

@@ -16,7 +16,7 @@ from lab.fills import MARKOUT_S, max_age_ms, side_mid
 from lab.store import read_lab
 from lab.strategies.maker_common import outcomes
 
-LIVE_KINDS = ("book", "trade", "index", "incentives")
+LIVE_KINDS = ("book", "trade", "index", "incentives", "series_meta")
 
 
 def live_records(lab_dir: str | Path, *, since_ms: int = 0, kinds: tuple[str, ...] = LIVE_KINDS) -> Iterator[dict]:
@@ -25,9 +25,9 @@ def live_records(lab_dir: str | Path, *, since_ms: int = 0, kinds: tuple[str, ..
     return read_lab(lab_dir, since_ms=since_ms, kinds=wanted)
 
 
-def settled_outcomes(lab_dir: str | Path, *, since_ms: int = 0) -> dict[str, tuple[float, float | None]]:
-    """ticker -> (YES payout, settlement value), from every settled record of either recorder."""
-    return outcomes(read_lab(lab_dir, since_ms=since_ms, kinds=("settled",)))
+def settled_outcomes(lab_dir: str | Path, *, since_ms: int = 0, until_ms: int | None = None) -> dict[str, tuple[float, float | None]]:
+    """ticker -> (YES payout, settlement value), from every settled record of either recorder (before `until_ms`)."""
+    return outcomes(read_lab(lab_dir, since_ms=since_ms, until_ms=until_ms, kinds=("settled",)))
 
 
 class Markouts:
