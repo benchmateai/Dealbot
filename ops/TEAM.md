@@ -174,28 +174,39 @@ only on bets opened from 2026-11-06T07:00Z and reported beside v2 on exactly the
 trades on unchanged; `python3 -m reports.shadow_v2 --log-dir <logs/data>` prints them all beside v2, and
 the dashboard shows them.
 
-The next round (the owner's decision, 2026-11-06): v2 stays as it is until its week ends on 2026-11-12, so
-the test measures one configuration. Then the desk runs v2's forecast with entries only 3 to 10 minutes
-before the close, the late stop only on bets bought under 50 cents, and favourites kept (what `next_round`
-measures this week); lab strategy E is dropped unless its realistic result (payments less what its fills
-are worth) has recovered above zero by then. It is built on the branch `claude/next-round` (desk v3:
-`policy/anchored.py` DESK_RULES "v3"), off the desk's base branch until the switch; the final report says
-whether the week's numbers still support each part of it.
+The next round (the owner's decisions of 2026-11-06 and 2026-11-07): v2 stays as it is until its week ends
+on 2026-11-12, so the test measures one configuration. On 2026-11-06 the owner picked desk v3 for the next
+round (v2's forecast with entries only 3 to 10 minutes out and the late stop on long shots only; built on
+the branch `claude/next-round`, now parked). By 2026-11-07 the forecast's edge had faded (its fitted
+weight fell from 0.55 to 0.15, lab A fell to about zero, and Kalshi's price scored as well or better at
+every horizon), so the owner chose the E desk instead: a paper desk for strategy E, resting two-sided
+orders where Kalshi pays liquidity rewards.
 
-Switching to v3 (the coordinator, after the final report, when the week still supports the pick; when it
-argues against any part, ask the owner first):
-1. Merge `claude/next-round` into `claude/desk-skeleton` with the whole suite passing, and push. Besides
-   the v3 rules it carries the reports' and the dashboard's split at v3's start (v2's week becomes one
-   `previous` row, as the first desk's did).
-2. Re-enable the supervisor, watchdog, analyst and morning report scheduled tasks (update_trigger
-   enabled true); the morning report's prompt then speaks of v3, and the paper rules end with v2.
-3. Ask the runner to start a new chunk: the desk logs a new paper trial (`rules: v3`), and its first
-   block starts v3's week. Check its first blocks as for v2 (forecasts logged, no entry under 180 s).
-4. Ask the lab runners to start again, without E unless its realistic result is above zero.
-5. Re-time the week: a stop-after-one-week task and a final report task for v3, seven days from its
-   first block, as for v2.
-6. Mirror `dashboard/money_page/index.html` into the money dashboard's `files/index.html`, refresh its
-   datasets, and tell the owner v3 has started and when its week ends.
+The E desk (`lab/strategies/e_desk.py`) quotes as lab E does and adds risk rules that stop it adding
+risk but never stop it pairing off what it holds: $250 per market, $5,000 of orders and holdings in all,
+nothing added in a market's last 3 hours, and no new risk in a market after a $40 loss there. A news rule
+(pause 15 minutes after a 5-cent move) runs beside it as the `news_pause` variant. Its week runs from
+2026-11-12T05:00Z (START_MS) to 2026-11-19T05:00Z. It sends nothing to Kalshi: each run replays its rules
+over the lab's live-feed recording on `shadow-run`, so the live-feed lab runner must keep recording. The
+hourly watchdog merges its rows into money.json (`dashboard/edesk.py`), and the page's E desk section
+shows them. `ops/round.txt` names the round: `v2` until the switch, then `edesk`, when the watchdog's
+health line judges the recording the E desk runs on instead of desk v2's pushes.
+
+On E's first 81 hours (in sample, 2026-11-03 to 11-07) lab E, marked correctly, made about -$12 (payments
+$71.67, fills marked -$83.74; most of the loss one presidential-approval market that went to 98 cents
+against it), and the E desk's rules about -$2.
+
+Switching to the E desk (the coordinator, after the final report):
+1. On `claude/desk-skeleton`, set `ops/round.txt` to `edesk` and push (ops/ never restarts the desk).
+2. The desk runner stays stopped after v2's week. Never stop the lab runners: the E desk runs on the live
+   feed, and lab E stays its control.
+3. Re-enable the supervisor, watchdog, analyst and morning report scheduled tasks (update_trigger
+   enabled true), with the morning report's prompt rewritten for the E desk (`python3 -m
+   lab.strategies.e_desk --lab <lab copy> --variants` for its line and the variant's; lab E beside it).
+4. Schedule the E desk's final report for 2026-11-19T05:30Z: its result against lab E and the
+   news_pause variant, by market and program, with the money it tied up.
+5. Refresh the money dashboard (the watchdog does it hourly) and tell the owner the E desk has started
+   and when its week ends.
 
 `KALSHI_FORECAST=blend` runs the first desk again. The pre-flight runs v2 with a confident forecast in
 place of the confident judge.
