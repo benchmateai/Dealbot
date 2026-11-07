@@ -20,7 +20,9 @@ state, so E also counts any paused spell Kalshi would exclude. Reward less marko
 what E keeps.
 
 The realistic figure (2026-11-05) marks every fill to where its side stood at the end of the recording, or
-to its settlement, instead of only 5 minutes on: what E still holds can keep moving against it, as it did
+to its settlement, instead of only 5 minutes on (the last book with both sides quoted: until 2026-11-07 a
+market whose book emptied as it closed dropped out of the marking, which left out a presidential-approval
+market E held on the losing side and overstated E by about $100): what E still holds can keep moving against it, as it did
 while election results came in. It also reports the money E ties up (its resting orders' collateral plus
 what its holdings are worth) and the fee: every series E has quoted so far is 'quadratic', which charges
 makers nothing (Kalshi's /series endpoint, fee_type), so no fee is taken.
@@ -94,7 +96,7 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
     earned: dict[str, float] = defaultdict(float)    # program id -> USD
     samples = paying = 0
     fills: list[dict] = []                           # every fill, to mark at the end
-    last_book: dict[str, dict] = {}
+    last_book: dict[str, dict] = {}                  # the latest book with both sides quoted: a closing market's book empties
     tied: dict[str, float] = {}                      # ticker -> resting collateral + what the holding is worth
     capital_sum = capital_peak = 0.0
     capital_n = 0
@@ -119,7 +121,8 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
         if r["kind"] != "book":
             continue
         marks.book(r["ticker"], r["ts"], r)
-        last_book[r["ticker"]] = r
+        if side_mid(r, "yes") is not None:
+            last_book[r["ticker"]] = r
         if "E" not in (r.get("sets") or [r.get("set")]):
             continue
         t, ts = r["ticker"], r["ts"]
