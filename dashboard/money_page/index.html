@@ -57,6 +57,51 @@
     <p class="pm-lede"><b data-draw="desk-name" data-source="paper" data-field="desk" data-where="table=summary" class="dash-skeleton">—</b> has traded since <b data-draw="since" data-source="paper" data-field="week_started_ms" data-where="table=summary" class="dash-skeleton">—</b>. After fees it stands at <b data-draw="net-lede" data-source="paper" data-field="net_pnl_usd" data-where="table=summary" class="dash-skeleton">—</b>, with <b data-draw="closed-lede" data-source="paper" data-field="trades_closed" data-where="table=summary" class="dash-skeleton">—</b> bets settled and <b data-draw="open-lede" data-source="paper" data-field="trades_open" data-where="table=summary" class="dash-skeleton">—</b> open.</p>
   </header>
 
+  <section class="pm-card" id="edesk" aria-labelledby="edesk-title">
+    <h2 id="edesk-title">E desk: Kalshi's liquidity payments</h2>
+    <span data-draw="edesk-state" data-source="edesk"></span>
+    <p class="pm-note" data-edesk="before">The next round, on paper, from <b data-draw="edesk-start" data-source="edesk" data-field="start_ms" data-where="id=edesk">—</b>. It keeps resting orders on both sides of the markets where Kalshi pays for them, collects the payments and marks whatever gets filled, and never places a real order. It adds nothing to a market already holding $250, keeps orders and holdings under $5,000 in all, adds nothing in a market's last 3 hours, and stops adding where it has lost $40.</p>
+    <p class="pm-note" data-edesk="running" hidden>Day <b data-draw="edesk-day" data-source="edesk" data-field="week_day" data-where="id=edesk">—</b> of 7 since <b data-draw="edesk-since" data-source="edesk" data-field="start_ms" data-where="id=edesk">—</b>: Kalshi's payments plus what its fills are worth now, on paper. It never places a real order.</p>
+    <div class="pm-tiles" data-edesk="running" hidden>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Net</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-net" data-source="edesk" data-field="net_usd" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub">equity <b data-draw="ed-equity" data-source="edesk" data-field="equity_usd" data-where="id=edesk">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Kalshi's payments</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-pay" data-source="edesk" data-field="payable_usd" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub">over <b data-draw="ed-hours" data-source="edesk" data-field="hours" data-where="id=edesk">—</b> hours</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Fills, worth now</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-marked" data-source="edesk" data-field="fills_marked_usd" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub"><b data-draw="ed-contracts" data-source="edesk" data-field="contracts_filled" data-where="id=edesk">—</b> contracts filled</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Money tied up</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-cap" data-source="edesk" data-field="capital_avg_usd" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub">on average; <b data-draw="ed-cap-peak" data-source="edesk" data-field="capital_peak_usd" data-where="id=edesk">—</b> at most</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Markets</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-markets" data-source="edesk" data-field="markets_quoted" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub">quoted; <b data-draw="ed-held" data-source="edesk" data-field="held_markets" data-where="id=edesk">—</b> still held</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Loss stops</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-stops" data-source="edesk" data-field="loss_stops" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub">caps cut quotes in <b data-draw="ed-capped" data-source="edesk" data-field="capped_markets" data-where="id=edesk">—</b> markets</div>
+      </div>
+    </div>
+    <div class="pm-table-wrap" data-edesk="running" hidden>
+      <table class="pm-table" data-source="edesk_markets" data-row-key="id">
+        <thead><tr><th data-field="ticker">Market</th><th data-field="reward_usd" class="pm-r">Payments</th><th data-field="contracts" class="pm-r">Filled</th><th data-field="net_yes" class="pm-r">Holding</th><th data-field="pnl_usd" class="pm-r">Fills now</th><th data-field="status">Status</th></tr></thead>
+        <tbody data-draw="edesk-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="pm-card pm-hero" id="result" aria-labelledby="result-label">
     <div class="pm-hero-label" id="result-label">Net result after fees</div>
     <div data-draw="net" data-source="paper" data-field="net_pnl_usd" data-where="table=summary" class="pm-hero-value dash-skeleton">—</div>
@@ -221,6 +266,18 @@
     description: "Desk v2 as traded beside the owner's paper rules and the next round's pick, each over v2's bets placed from its own start.",
     fn: (paper) => paper.filter((r) => r.table === 'rule'),
   });
+  dash.calc('edesk', {
+    inputs: ['paper'],
+    title: 'E desk',
+    description: "The E desk's totals: Kalshi's liquidity payments plus what its fills are worth now, from its start.",
+    fn: (paper) => paper.filter((r) => r.table === 'edesk'),
+  });
+  dash.calc('edesk_markets', {
+    inputs: ['paper'],
+    title: 'E desk markets',
+    description: 'One row per market the E desk quoted or holds, most paid first.',
+    fn: (paper) => paper.filter((r) => r.table === 'edesk_market').sort((a, b) => Number(b.reward_usd) - Number(a.reward_usd)),
+  });
   dash.calc('previous', {
     inputs: ['paper'],
     title: 'The first desk',
@@ -315,6 +372,50 @@
   rowFigure('v1-end', 'previous', 'v1', 'to_ms', when);
   rowFigure('v1-fees', 'previous', 'v1', 'fees_usd', usd);
   rowFigure('v1-jev', 'previous', 'v1', 'jev_calls', count);
+  const tenth = d3.format('.1f');
+  rowFigure('edesk-start', 'edesk', 'edesk', 'start_ms', when);
+  rowFigure('edesk-since', 'edesk', 'edesk', 'start_ms', when);
+  rowFigure('edesk-day', 'edesk', 'edesk', 'week_day', count);
+  rowFigure('ed-net', 'edesk', 'edesk', 'net_usd', signed, true);
+  rowFigure('ed-equity', 'edesk', 'edesk', 'equity_usd', usd);
+  rowFigure('ed-pay', 'edesk', 'edesk', 'payable_usd', usd);
+  rowFigure('ed-hours', 'edesk', 'edesk', 'hours', tenth);
+  rowFigure('ed-marked', 'edesk', 'edesk', 'fills_marked_usd', signed, true);
+  rowFigure('ed-contracts', 'edesk', 'edesk', 'contracts_filled', count);
+  rowFigure('ed-cap', 'edesk', 'edesk', 'capital_avg_usd', whole);
+  rowFigure('ed-cap-peak', 'edesk', 'edesk', 'capital_peak_usd', whole);
+  rowFigure('ed-markets', 'edesk', 'edesk', 'markets_quoted', count);
+  rowFigure('ed-held', 'edesk', 'edesk', 'held_markets', count);
+  rowFigure('ed-stops', 'edesk', 'edesk', 'loss_stops', count);
+  rowFigure('ed-capped', 'edesk', 'edesk', 'capped_markets', count);
+  dash.draw('edesk-state', () => {
+    const d = dash.data('edesk');
+    const row = d.status === 'ok' && Array.isArray(d.data) ? d.data[0] : null;
+    const running = Boolean(row && row.started);
+    for (const sec of document.querySelectorAll('#edesk')) sec.hidden = !row;
+    for (const el of document.querySelectorAll('#edesk [data-edesk]')) el.hidden = (el.dataset.edesk === 'running') !== running;
+  });
+  dash.draw('edesk-rows', (tbody) => {
+    tbody.replaceChildren();
+    const d = dash.data('edesk_markets');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return;
+    for (const m of d.data.slice(0, 40)) {
+      const tr = document.createElement('tr');
+      tr.dataset.key = String(m.id);
+      const net = Number(m.net_yes);
+      const pnl = Number(m.pnl_usd);
+      const holding = Math.abs(net) < 0.5 ? '—' : (net > 0 ? 'YES ' : 'NO ') + count(Math.round(Math.abs(net)));
+      const cells = [[String(m.ticker), ''], [usd(Number(m.reward_usd)), 'pm-r'], [count(Math.round(Number(m.contracts))), 'pm-r'],
+        [holding, 'pm-r'], [signed(pnl), 'pm-r' + (pnl > 0 ? ' pm-up' : pnl < 0 ? ' pm-down' : '')], [String(m.status), '']];
+      for (const [text, cls] of cells) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        if (cls) td.className = cls;
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+  });
   const hours = d3.format('.1f');
   rowFigure('e-net', 'lab', 'E', 'net_usd_realistic', signed, true);
   rowFigure('e-hours', 'lab', 'E', 'hours', hours);
