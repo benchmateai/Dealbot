@@ -9,6 +9,8 @@ The live-feed recorder writes, in lab/data:
   index       {symbol, value, avg60, qavg, qn}     the CF Benchmarks index, about once a second
   incentives  {programs: [...]}                    Kalshi's active liquidity-incentive programs
   settled     {series, event, rows: [[ticker, result, settlement value], ...]}   (both recorders)
+  series_meta {series, category, title, sources}  Kalshi's category, title and settlement sources for each
+                                                 series E quotes (from 2026-11-07; looked up when first seen)
 """
 
 from __future__ import annotations

@@ -100,6 +100,12 @@
         <tbody data-draw="edesk-rows"></tbody>
       </table>
     </div>
+    <div class="pm-table-wrap" data-edesk="running" hidden>
+      <table class="pm-table" data-source="edesk_categories" data-row-key="id">
+        <thead><tr><th data-field="group">Kind of market</th><th data-field="markets" class="pm-r">Markets</th><th data-field="payable_usd" class="pm-r">Payments</th><th data-field="fills_marked_usd" class="pm-r">Fills now</th><th data-field="net_usd" class="pm-r">Net</th></tr></thead>
+        <tbody data-draw="edesk-category-rows"></tbody>
+      </table>
+    </div>
   </section>
 
   <section class="pm-card pm-hero" id="result" aria-labelledby="result-label">
@@ -278,6 +284,12 @@
     description: 'One row per market the E desk quoted or holds, most paid first.',
     fn: (paper) => paper.filter((r) => r.table === 'edesk_market').sort((a, b) => Number(b.reward_usd) - Number(a.reward_usd)),
   });
+  dash.calc('edesk_categories', {
+    inputs: ['paper'],
+    title: 'E desk by kind of market',
+    description: "The E desk's payments, fills marked and net for each kind of market (Kalshi's category for the series), largest net first.",
+    fn: (paper) => paper.filter((r) => r.table === 'edesk_category').sort((a, b) => Number(b.net_usd) - Number(a.net_usd)),
+  });
   dash.calc('previous', {
     inputs: ['paper'],
     title: 'The first desk',
@@ -407,6 +419,25 @@
       const holding = Math.abs(net) < 0.5 ? '—' : (net > 0 ? 'YES ' : 'NO ') + count(Math.round(Math.abs(net)));
       const cells = [[String(m.ticker), ''], [usd(Number(m.reward_usd)), 'pm-r'], [count(Math.round(Number(m.contracts))), 'pm-r'],
         [holding, 'pm-r'], [signed(pnl), 'pm-r' + (pnl > 0 ? ' pm-up' : pnl < 0 ? ' pm-down' : '')], [String(m.status), '']];
+      for (const [text, cls] of cells) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        if (cls) td.className = cls;
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+  });
+  dash.draw('edesk-category-rows', (tbody) => {
+    tbody.replaceChildren();
+    const d = dash.data('edesk_categories');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return;
+    for (const c of d.data) {
+      const tr = document.createElement('tr');
+      tr.dataset.key = String(c.id);
+      const tone = (x) => 'pm-r' + (x > 0 ? ' pm-up' : x < 0 ? ' pm-down' : '');
+      const cells = [[String(c.group), ''], [count(Number(c.markets)), 'pm-r'], [usd(Number(c.payable_usd)), 'pm-r'],
+        [signed(Number(c.fills_marked_usd)), tone(Number(c.fills_marked_usd))], [signed(Number(c.net_usd)), tone(Number(c.net_usd))]];
       for (const [text, cls] of cells) {
         const td = document.createElement('td');
         td.textContent = text;

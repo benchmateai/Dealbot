@@ -21,11 +21,17 @@ A book is written only while the feed is provably alive (a message or an answere
 only once it has a snapshot, and never while crossed. A book still waiting for its snapshot is asked for
 again, then dropped; every book is re-snapshotted every SNAPSHOT_REFRESH_S, counting any drift. A
 subscription Kalshi ends (or any error that leaves its state in doubt) drops the connection, which is
-set up again from scratch. Settlements of F markets are fetched after the close with growing waits.
+set up again from scratch. Settlements of E and F markets are fetched after the close with growing waits
+(an E market's too once it leaves the set: the E desk may still hold contracts there).
+
+The program list names E's markets but not their close times or series, so each market E picks is looked
+up once (GET /markets, up to E_MAX in one call) and its book records carry series, event and close_ms like
+the others'; each new series is looked up once too (GET /series), and a series_meta record keeps Kalshi's
+category, the series title and its settlement sources.
 
 It writes the normalized records lab/strategies/maker_common.py describes (book, trade, index, settled,
-incentives, lab_status) to its own hour files (<HH>.ws.jsonl) and sends Kalshi nothing but subscribe and
-update_subscription. The watched markets and the settlements still due are kept in <data>/ws_state.json,
+incentives, series_meta, lab_status) to its own hour files (<HH>.ws.jsonl) and sends Kalshi nothing but subscribe and
+update_subscription. The watched markets, the settlements still due and the series looked up are kept in <data>/ws_state.json,
 so a restart subscribes at once. Exit codes: 0 done, 2 no key, 3 never connected, 4 no book or trade
 message for the last NO_DATA_EXIT_MS while markets were watched.
 
@@ -74,8 +80,9 @@ SNAPSHOT_REFRESH_S, REFRESH_BATCH = 1200, 20
 QUARTER_TRIES_S = (2, 10, 30, 90)  # 15-minute discovery after each quarter-hour, until both new contracts are found
 CRYPTO_FALLBACK_S = 300
 INCENTIVES_S, FADE_S, SETTLE_CHECK_S = 1800, 6 * 3600, 60
-QUIET_S = {"settle": 60, "incentives": 90, "fade": 150}  # slow lookups wait when the next quarter-hour is closer than this
+QUIET_S = {"settle": 60, "incentives": 90, "e_meta": 60, "fade": 150}  # slow lookups wait when the next quarter-hour is closer than this
 E_MAX, F_MAX = 12, 30
+E_META_S, E_META_RETRY_S, E_SERIES_PER_PASS = 120, 1800, 2  # E markets' close times and series: looked up when picked, retried after a miss
 F_MIN_DAYS, F_MAX_DAYS, F_YES_ASK = 1, 30, (0.01, 0.10)  # close within the month so some settle during the test
 F_EXCLUDE = ("KXMVE", "KXBTC", "KXETH", "KXSOL", "KXXRP", "KXDOGE", "KXINX", "KXNASDAQ")  # combos; finance, where the bias is near zero
 F_PAGES, INCENTIVE_PAGES = 5, 3
@@ -157,7 +164,10 @@ class Feed:
         self.commands: dict[int, dict] = {}        # command id -> command, while Kalshi may still answer it
         self.snap_asked: dict[str, tuple[int, int]] = {}  # ticker -> (last asked, times asked) while its book is not ready
         self.last_written: dict[str, int] = {}
-        self.pending_settle: dict[str, list[int]] = {}    # F ticker -> [close, next try, tries]
+        self.pending_settle: dict[str, list[int]] = {}    # E or F ticker -> [close, next try, tries]
+        self.series_info: dict[str, dict] = {}     # series -> {category, title, sources}, for E's markets
+        self.asked_markets: dict[str, int] = {}    # E ticker -> when its details were last asked for
+        self.asked_series: dict[str, int] = {}
         self.counters = defaultdict(int)
         self.errors: deque[str] = deque(maxlen=5)
         self.outbox: list[dict] = []               # commands for the socket loop to send
@@ -189,6 +199,7 @@ class Feed:
                 sets = [s for s in m.get("sets") or [] if s in SETS]
                 if sets:
                     self.meta[t] = {**{k: m.get(k) for k in META_FIELDS}, "sets": sets}
+            self.series_info = {s: v for s, v in (state.get("series") or {}).items() if isinstance(v, dict)}
         except (OSError, ValueError, AttributeError, TypeError):
             self.note("ws_state.json unreadable; starting without it")
 
@@ -196,7 +207,7 @@ class Feed:
         if self.state_path is None:
             return
         tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"pending_settle": self.pending_settle, "watched": self.meta}, sort_keys=True))
+        tmp.write_text(json.dumps({"pending_settle": self.pending_settle, "watched": self.meta, "series": self.series_info}, sort_keys=True))
         tmp.replace(self.state_path)
 
     def note(self, text: str) -> None:
@@ -370,15 +381,58 @@ class Feed:
             start, end = _ts(p.get("start_date")), _ts(p.get("end_date"))
             live = start and end and start <= now_ms < end
             return (p.get("period_reward") or 0) / 10_000 / max(1.0, (end - start) / 86_400_000) if live else 0.0
-        chosen = [p for p in sorted(programs, key=per_day, reverse=True) if per_day(p) > 0][:E_MAX]
+        closed = {t for t, (close, _, _) in self.pending_settle.items() if close <= now_ms}  # a program can outlive its market
+        chosen = [p for p in sorted(programs, key=per_day, reverse=True) if per_day(p) > 0 and p["market_ticker"] not in closed][:E_MAX]
         keep = {p["market_ticker"] for p in chosen}
         # the full list runs to megabytes; E needs only the programs of the markets it watches
         self.store.write("incentives", {"programs": [p for p in programs if p["market_ticker"] in keep], "active_programs": len(programs)}, ts_ms=now_ms)
         for t, m in list(self.meta.items()):
             if "E" in m["sets"] and t not in keep:
+                if m.get("close_ms"):
+                    self._settle_later(t, m["close_ms"])  # the E desk may still hold contracts in it: keep its result coming
                 self.unwatch(t, "E")
         for p in chosen:
             self.watch(p["market_ticker"], {"set": "E"})
+        self._save_state()
+
+    def e_meta_needed(self, now_ms: int) -> tuple[list[str], list[str]]:
+        """(E markets whose close time is unknown, E series not looked up yet), leaving out any asked for
+        within E_META_RETRY_S: at most E_MAX markets (one call) and E_SERIES_PER_PASS series a pass."""
+        def due(asked: dict[str, int], key: str) -> bool:
+            return key not in asked or now_ms - asked[key] >= E_META_RETRY_S * 1000
+        e = sorted(t for t, m in self.meta.items() if "E" in m["sets"])
+        markets = [t for t in e if self.meta[t].get("close_ms") is None and due(self.asked_markets, t)][:E_MAX]
+        series = [s for s in sorted({t.split("-")[0] for t in e} - set(self.series_info)) if due(self.asked_series, s)][:E_SERIES_PER_PASS]
+        return markets, series
+
+    def e_meta_wanted(self, now_ms: int) -> bool:
+        markets, series = self.e_meta_needed(now_ms)
+        return bool(markets or series)
+
+    def fetch_e_meta(self, markets: list[str], series: list[str]) -> dict:
+        """Kalshi's details of `markets` (None if the lookup failed) and of each of `series` (None where it failed)."""
+        found = None
+        if markets:
+            payload = self.rest.get("/markets", {"tickers": ",".join(markets), "limit": len(markets)})
+            found = None if payload is None else {m.get("ticker"): m for m in payload.get("markets") or []}
+        return {"markets_asked": list(markets), "markets": found, "series": {s: (self.rest.get(f"/series/{s}") or {}).get("series") for s in series}}
+
+    def apply_e_meta(self, fetched: dict, now_ms: int) -> None:
+        for t in fetched["markets_asked"]:
+            self.asked_markets[t] = now_ms
+        if fetched["markets_asked"] and fetched["markets"] is None:
+            self.counters["e_meta_failed"] += 1
+        for t, m in (fetched["markets"] or {}).items():
+            if "E" in (self.meta.get(t) or {}).get("sets", []):  # still in E: it may have left while the lookup ran
+                self.watch(t, {"set": "E", "series": t.split("-")[0], "event": m.get("event_ticker"), "close_ms": _ts(m.get("close_time"))})
+        for s, info in fetched["series"].items():
+            self.asked_series[s] = now_ms
+            if not isinstance(info, dict):
+                self.counters["e_meta_failed"] += 1
+                continue
+            self.series_info[s] = {"category": info.get("category"), "title": info.get("title"),
+                                   "sources": [x.get("name") for x in info.get("settlement_sources") or [] if isinstance(x, dict) and x.get("name")]}
+            self.store.write("series_meta", {"series": s, **self.series_info[s]}, ts_ms=now_ms)
         self._save_state()
 
     def fetch_fade(self, now_ms: int) -> list[dict] | None:
@@ -447,6 +501,9 @@ class Feed:
 
     def refresh_incentives(self, now_ms: int) -> None:
         self.apply_incentives(self.fetch_incentives(), now_ms)
+        markets, series = self.e_meta_needed(now_ms)
+        if markets or series:
+            self.apply_e_meta(self.fetch_e_meta(markets, series), now_ms)
 
     def refresh_fade(self, now_ms: int) -> None:
         self.apply_fade(self.fetch_fade(now_ms), now_ms)
@@ -461,11 +518,11 @@ class Feed:
         changed = False
         for t, m in list(self.meta.items()):
             close = m.get("close_ms")
-            if close and close <= now_ms and ("15m" in m["sets"] or "F" in m["sets"]):
-                if "F" in m["sets"]:
+            if close and close <= now_ms and {"15m", "E", "F"} & set(m["sets"]):
+                if {"E", "F"} & set(m["sets"]):
                     self._settle_later(t, close)
-                self.unwatch(t, "15m")
-                self.unwatch(t, "F")
+                for set_name in ("15m", "E", "F"):
+                    self.unwatch(t, set_name)
                 changed = True
         if changed:
             self._save_state()
@@ -727,10 +784,10 @@ class Schedule:
     quarter-hour is near, so they never delay that."""
 
     def __init__(self) -> None:
-        self.next = {"crypto": 0, "settle": 0, "incentives": 0, "fade": 0, "status": 0}
+        self.next = {"crypto": 0, "settle": 0, "incentives": 0, "e_meta": 0, "fade": 0, "status": 0}
         self.tried: set[tuple[int, int]] = set()
 
-    def due(self, now_ms: int, found) -> str | None:
+    def due(self, now_ms: int, found, e_meta_wanted=lambda now_ms: False) -> str | None:
         q = now_ms - now_ms % 900_000
         self.tried = {x for x in self.tried if x[0] == q}
         tries = [s for s in QUARTER_TRIES_S if (q, s) not in self.tried and now_ms >= q + s * 1000]
@@ -740,7 +797,9 @@ class Schedule:
             return "crypto"
         to_next_quarter = (q + 900_000 - now_ms) / 1000
         settled_in = found(q + 900_000) or now_ms >= q + QUARTER_TRIES_S[-1] * 1000
-        for job, every in (("settle", SETTLE_CHECK_S), ("incentives", INCENTIVES_S), ("fade", FADE_S)):
+        for job, every in (("settle", SETTLE_CHECK_S), ("incentives", INCENTIVES_S), ("e_meta", E_META_S), ("fade", FADE_S)):
+            if job == "e_meta" and not e_meta_wanted(now_ms):
+                continue
             if now_ms >= self.next[job] and settled_in and to_next_quarter > QUIET_S[job]:
                 self.next[job] = now_ms + every * 1000
                 return job
@@ -764,15 +823,19 @@ async def maintain(feed: Feed, until_ms: int, *, stop: asyncio.Event) -> None:
             stop.set()
             break
         try:
-            job = schedule.due(now, feed.crypto_found)
+            job = schedule.due(now, feed.crypto_found, feed.e_meta_wanted)
             if job == "crypto":
                 feed.apply_crypto(await asyncio.to_thread(feed.fetch_crypto), feed.now_ms())
             elif job == "settle":
                 due = feed.due_settlements(now)
                 if due:
                     feed.apply_settlements(await asyncio.to_thread(feed.fetch_settlements, due), feed.now_ms())
-            elif job == "incentives":
-                feed.apply_incentives(await asyncio.to_thread(feed.fetch_incentives), feed.now_ms())
+            elif job in ("incentives", "e_meta"):
+                if job == "incentives":
+                    feed.apply_incentives(await asyncio.to_thread(feed.fetch_incentives), feed.now_ms())
+                markets, series = feed.e_meta_needed(feed.now_ms())
+                if markets or series:  # the markets just picked get their close times at once
+                    feed.apply_e_meta(await asyncio.to_thread(feed.fetch_e_meta, markets, series), feed.now_ms())
             elif job == "fade":
                 feed.apply_fade(await asyncio.to_thread(feed.fetch_fade, now), feed.now_ms())
             elif job == "status":

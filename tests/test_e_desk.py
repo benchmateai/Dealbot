@@ -1,6 +1,7 @@
 """The E desk (lab/strategies/e_desk.py): strategy E with the next round's risk rules, and its dashboard rows."""
 
 import json
+import time
 
 import pytest
 
@@ -20,6 +21,10 @@ def _through_yes(ts, count=150.0):
 def _through_no(ts, count=150.0):
     """A YES taker buying through a NO bid at 0.45 (a YES offer at 0.55)."""
     return ("trade", {"ticker": "M", "yes_price": 0.56, "count": count, "taker_side": "yes"}, ts)
+
+
+def _trade(ticker, ts, yes_price, taker_side, count=150.0):
+    return ("trade", {"ticker": ticker, "yes_price": yes_price, "count": count, "taker_side": taker_side}, ts)
 
 
 def test_with_its_new_rules_off_the_desk_is_lab_e(tmp_path):
@@ -166,3 +171,79 @@ def test_the_health_line_judges_how_fresh_the_live_feed_is(tmp_path):
 @pytest.mark.parametrize("name", sorted(e_desk.VARIANTS))
 def test_each_variant_only_changes_registered_rules(name):
     assert set(e_desk.VARIANTS[name]) <= set(e_desk.RULES)
+
+
+def test_the_report_splits_its_money_by_kind_of_market(tmp_path):
+    tickers = ("KXPOL-1", "KXBTCX-1", "KXODD-1")
+    items = [("series_meta", {"series": "KXPOL", "category": "Politics", "title": "Something political", "sources": []}, T0 - 3_600_000),  # before the start
+             ("incentives", {"programs": [_program(t, 0.5) for t in tickers]}, T0)]
+    for t in tickers:
+        items += [_book(T0 + 1000, t, None, None, yes=YES, no=NO, set="E"), _book(T0 + 61_000, t, None, None, yes=YES, no=NO, set="E")]
+    items.append(_trade("KXPOL-1", T0 + 1500, 0.49, "no"))
+    _write(tmp_path, items)
+    r = e_desk.evaluate(tmp_path, since_ms=T0, rules=OFF)
+    groups = {c["group"]: c for c in r["categories"]}
+    assert list(groups) == ["political", "crypto", "other"]  # Politics from the record, KXBTC by its prefix, the rest other
+    pol = groups["political"]
+    assert pol["markets"] == 1 and pol["contracts"] == 100 and pol["fills_marked_usd"] == round(100 * (0.525 - 0.50), 2)
+    assert pol["net_usd"] == round(pol["payable_usd"] + pol["fills_marked_usd"], 2) and pol["payable_usd"] > 0
+    assert round(sum(c["payable_usd"] for c in r["categories"]), 2) == r["summary"]["payable_usd"]
+    assert {m["ticker"]: (m["group"], m["category"]) for m in r["markets"]} == {
+        "KXPOL-1": ("political", "Politics"), "KXBTCX-1": ("crypto", None), "KXODD-1": ("other", None)}
+    assert sorted(x["id"] for x in rows(r, now_ms=T0 + 70_000) if x["table"] == "edesk_category") == ["crypto", "other", "political"]
+
+
+def test_the_headline_filter_adds_nothing_in_election_and_approval_markets_and_pairs_off_what_it_holds(tmp_path):
+    tickers = ("KXRACE-1", "KXAPRPOTUS-1", "KXOK-1")
+    items = [("incentives", {"programs": [_program(t, 0.5) for t in tickers]}, T0)]
+    for t in tickers:
+        items += [_book(T0 + 1000, t, None, None, yes=YES, no=NO, set="E"), _trade(t, T0 + 1500, 0.49, "no"),
+                  _book(T0 + 2000, t, None, None, yes=YES, no=NO, set="E"), _trade(t, T0 + 2500, 0.49, "no"), _trade(t, T0 + 2600, 0.56, "yes")]
+    # the recorder looks KXRACE up only after the desk has bought there: from then on it just pairs off
+    items.append(("series_meta", {"series": "KXRACE", "category": "Elections", "title": "House race winner?"}, T0 + 1800))
+    _write(tmp_path, items)
+    main = {m["ticker"]: m for m in e_desk.evaluate(tmp_path, since_ms=T0, rules=OFF)["markets"]}
+    r = e_desk.evaluate(tmp_path, since_ms=T0, rules={**OFF, **e_desk.VARIANTS["headline_filter"]})
+    filt = {m["ticker"]: m for m in r["markets"]}
+    assert {t: (m["contracts"], m["net_yes"]) for t, m in main.items()} == {t: (300, 100) for t in tickers}
+    assert (filt["KXOK-1"]["contracts"], filt["KXOK-1"]["net_yes"]) == (300, 100)
+    assert (filt["KXRACE-1"]["contracts"], filt["KXRACE-1"]["net_yes"]) == (200, 0)  # 100 YES before the lookup, then 100 NO pair them off
+    assert "KXAPRPOTUS-1" not in filt  # an approval series (KNOWN_SERIES): never quoted
+    assert r["summary"]["headline_markets"] == 2 and sorted(e["ticker"] for e in r["events"]) == ["KXAPRPOTUS-1", "KXRACE-1"]
+
+
+def test_the_calendar_blackout_adds_nothing_around_a_catalyst_in_the_markets_it_moves(tmp_path, monkeypatch):
+    at = T0 + 2 * 3_600_000
+    monkeypatch.setattr(e_desk, "CATALYSTS", ((time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(at / 1000)), "a release", ("economic",)),))
+    items = [("series_meta", {"series": "KXCPI", "category": "Economics", "title": "CPI"}, T0),
+             ("incentives", {"programs": [_program("KXCPI-1", 0.5), _program("KXOK-1", 0.5)]}, T0)]
+    for t in ("KXCPI-1", "KXOK-1"):
+        for ts in (at - 3_599_000, at + 3_601_000):  # inside the hour before it, then just past the hour after it
+            items += [_book(ts, t, None, None, yes=YES, no=NO, set="E"), _trade(t, ts + 500, 0.49, "no")]
+    _write(tmp_path, items)
+    main = {m["ticker"]: m["contracts"] for m in e_desk.evaluate(tmp_path, since_ms=T0, rules=OFF)["markets"]}
+    r = e_desk.evaluate(tmp_path, since_ms=T0, rules={**OFF, **e_desk.VARIANTS["calendar_blackout"]})
+    assert main == {"KXCPI-1": 200, "KXOK-1": 200}
+    assert {m["ticker"]: m["contracts"] for m in r["markets"]} == {"KXCPI-1": 100, "KXOK-1": 200}  # the economic market waits it out
+    assert r["summary"]["blackout_markets"] == 1 and [(e["kind"], e["catalyst"]) for e in r["events"]] == [("blackout", "a release")]
+
+
+def test_the_registered_catalysts_fall_where_the_research_put_them():
+    when = {name: at for at, name, _ in e_desk.CATALYSTS}
+    assert when["Fed minutes (2 PM ET)"] == "2026-11-18T19:00:00Z"  # the one inside the E desk's week
+    assert all(set(groups) <= set(e_desk.GROUPS) for _, _, groups in e_desk.CATALYSTS)
+
+
+def test_compare_gives_the_same_report_side_by_side_or_in_turn(tmp_path):
+    _write(tmp_path, [("incentives", {"programs": [_program("M", 0.5)]}, T0), _book(T0 + 1000, "M", None, None, yes=YES, no=NO, set="E"),
+                      _through_yes(T0 + 1500), _book(T0 + 2000, "M", None, None, yes=YES, no=NO, set="E")])
+    one, many = e_desk.compare(tmp_path, since_ms=T0, workers=1), e_desk.compare(tmp_path, since_ms=T0, workers=3)
+    assert set(one["variants"]) == set(e_desk.VARIANTS) and one["variants"] == many["variants"] and one["summary"] == many["summary"]
+
+
+def test_a_result_recorded_after_the_end_is_not_used(tmp_path):
+    _write(tmp_path, [("incentives", {"programs": [_program("M", 0.5)]}, T0), _book(T0 + 1000, "M", None, None, yes=YES, no=NO, set="E"),
+                      _through_yes(T0 + 1500, 100.0), _book(T0 + 2000, "M", None, None, yes=YES, no=NO, set="E"),
+                      ("settled", {"series": "KXM", "event": "EV", "rows": [["M", "yes", None]]}, T0 + 10_000)])
+    assert e_desk.evaluate(tmp_path, since_ms=0, rules=OFF)["markets"][0]["value_usd"] == 100.0
+    assert e_desk.evaluate(tmp_path, since_ms=0, until_ms=T0 + 5000, rules=OFF)["markets"][0]["value_usd"] == 52.5  # at the mid instead
