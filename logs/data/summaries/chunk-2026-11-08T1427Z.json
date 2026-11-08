@@ -1,51 +1,51 @@
 {
  "decisions": {
-  "hold": 150
+  "hold": 214
  },
  "equity_end": 9953.9437,
  "equity_start": 9953.9437,
  "executed": 0,
  "feed": {
-  "errors": 33,
-  "polls": 864,
-  "rate_limits": 32
+  "errors": 45,
+  "polls": 1224,
+  "rate_limits": 43
  },
  "fills": {},
  "first_ts": 1794148056000,
- "forecasts": 150,
+ "forecasts": 214,
  "judge_calls": 0,
  "judge_failures": {},
- "last_ts": 1794152556000,
+ "last_ts": 1794154356000,
  "models": {},
  "positions_closed": 0,
  "positions_opened": 0,
  "realized_pnl_usd": 0.0,
  "records": {
-  "decision": 150,
-  "forecast": 150,
+  "decision": 214,
+  "forecast": 214,
   "forecaster": 1,
-  "heartbeat": 37,
-  "rejection": 752,
-  "settlement": 10,
-  "snapshot": 150,
-  "tape": 369,
+  "heartbeat": 52,
+  "rejection": 1052,
+  "settlement": 14,
+  "snapshot": 214,
+  "tape": 515,
   "trial": 1
  },
  "rejections": {
-  "below_threshold": 150,
-  "benched": 321,
+  "below_threshold": 214,
+  "benched": 449,
   "feed_lagging": 11,
-  "insufficient_data": 4,
-  "no_contract": 22,
-  "outside_trade_window": 244
+  "insufficient_data": 5,
+  "no_contract": 32,
+  "outside_trade_window": 341
  },
  "settlements": {
-  "official": 10,
+  "official": 14,
   "provisional": 0
  },
  "since_ms": 1794148055000,
- "span_minutes": 75.0,
+ "span_minutes": 105.0,
  "stalled": false,
- "until_ms": 1794152559034,
+ "until_ms": 1794154359655,
  "vetoes": {}
 }
