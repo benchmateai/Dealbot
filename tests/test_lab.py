@@ -985,3 +985,18 @@ def test_reading_by_kind_passes_over_other_kinds_and_still_reads_any_layout(tmp_
         fh.write(json.dumps({"ts": T0 + 2, "kind": "book", "ticker": "SPACED"}) + "\n")  # json.dumps' default layout, with spaces
     assert [r.get("ticker") for r in read_lab(tmp_path, kinds=["book"])] == ["M", "SPACED"]
     assert [r["kind"] for r in read_lab(tmp_path)] == ["index", "book", "book"]
+
+
+def test_e_stops_counting_a_holding_as_tied_up_once_its_market_is_paid(tmp_path):
+    from lab.strategies import e_incentive
+
+    yes, no = [[0.50, 100.0]], [[0.45, 100.0]]
+    base = [("incentives", {"programs": [_program("A", 0.5, target="100.00"), _program("B", 0.5, target="100.00")]}, T0),
+            _book(T0 + 1000, "A", None, None, yes=yes, no=no, set="E"),
+            ("trade", {"ticker": "A", "yes_price": 0.49, "count": 10.0, "taker_side": "no"}, T0 + 2000)]
+    later = [_book(T0 + 5000 + k * 1000, "B", None, None, yes=yes, no=no, set="E") for k in range(20)]
+    _write(tmp_path / "open", base + later)
+    _write(tmp_path / "paid", base + later + [("settled", {"series": "KXA", "event": "EV", "rows": [["A", "yes", None]]}, T0 + 3000)])
+    still_open = e_incentive.evaluate(tmp_path / "open", registered_ms=0)["summary"]
+    paid = e_incentive.evaluate(tmp_path / "paid", registered_ms=0)["summary"]
+    assert paid["capital_avg_usd"] < still_open["capital_avg_usd"] and paid["fills_marked_usd"] == round(10 * (1.0 - 0.50), 2)
