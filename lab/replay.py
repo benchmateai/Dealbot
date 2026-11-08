@@ -16,7 +16,7 @@ from lab.fills import MARKOUT_S, max_age_ms, side_mid
 from lab.store import read_lab
 from lab.strategies.maker_common import outcomes
 
-LIVE_KINDS = ("book", "trade", "index", "incentives", "series_meta")
+LIVE_KINDS = ("book", "trade", "index", "incentives", "series_meta", "settled")
 
 
 def live_records(lab_dir: str | Path, *, since_ms: int = 0, kinds: tuple[str, ...] = LIVE_KINDS) -> Iterator[dict]:

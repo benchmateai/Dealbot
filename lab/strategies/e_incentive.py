@@ -24,7 +24,8 @@ to its settlement, instead of only 5 minutes on (the last book with both sides q
 market whose book emptied as it closed dropped out of the marking, which left out a presidential-approval
 market E held on the losing side and overstated E by about $100): what E still holds can keep moving against it, as it did
 while election results came in. It also reports the money E ties up (its resting orders' collateral plus
-what its holdings are worth) and the fee: every series E has quoted so far is 'quadratic', which charges
+what its holdings are worth, a market's holding no longer once its result is recorded: Kalshi has paid it
+out) and the fee: every series E has quoted so far is 'quadratic', which charges
 makers nothing (Kalshi's /series endpoint, fee_type), so no fee is taken.
 
     python -m lab.strategies.e_incentive --lab lab/data
@@ -42,6 +43,7 @@ from pathlib import Path
 from lab.fills import EPS, apply_trade, place, side_mid
 from lab.recorder import _ts
 from lab.replay import Markouts, live_records, settled_outcomes
+from lab.strategies.maker_common import outcomes
 
 REGISTERED_MS = 1_793_743_200_000  # 2026-11-03T22:00:00Z
 QUOTE_FRACTION = 0.1
@@ -60,9 +62,14 @@ def reference_price(levels: list[list[float]], depth: float) -> float | None:
     return None
 
 
-def side_share(levels: list[list[float]], target: float, discount: float, mine: tuple[float, float] | None) -> float | None:
+def side_share(levels: list[list[float]], target: float, discount: float, mine: tuple[float, float] | None,
+               *, whole_level: bool = False) -> float | None:
     """Our share of one side's qualifying liquidity with our order (price, size) added behind the orders at its
-    price, or None when the side, ours included, falls short of the Target Size (the snapshot then pays no one)."""
+    price, or None when the side, ours included, falls short of the Target Size (the snapshot then pays no one).
+    Kalshi scores the orders that "help reach the Target Size"; whether that gives the orders already resting
+    at a price priority over a newer one there is unconfirmed. By default it does (ours counts only if the
+    side has not reached the Target Size before it); whole_level=True counts every order at a level the walk
+    reaches, ours included, the generous reading."""
     book = [(p, s, False) for p, s in levels]
     if mine and mine[1] > 0:
         book.append((mine[0], mine[1], True))
@@ -71,9 +78,12 @@ def side_share(levels: list[list[float]], target: float, discount: float, mine: 
         return None
     ref = reference_price([[p, s] for p, s, _ in book], target / 5)
     raw = ours = cum = 0.0
+    last_price = None
     for p, s, is_ours in book:
-        if cum >= target:
+        same_level = whole_level and last_price is not None and abs(p - last_price) <= EPS
+        if cum >= target and not same_level:
             break
+        last_price = p
         credit = s * (1.0 if p >= ref - EPS else discount ** round((ref - p) / TICK))
         raw += credit
         ours += credit if is_ours else 0.0
@@ -101,7 +111,12 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = 0, registered_ms: int = REG
     capital_sum = capital_peak = 0.0
     capital_n = 0
     first_ts = last_ts = None
-    for r in live_records(lab_dir, since_ms=max(since_ms, registered_ms), kinds=("book", "trade", "incentives")):
+    for r in live_records(lab_dir, since_ms=max(since_ms, registered_ms), kinds=("book", "trade", "incentives", "settled")):
+        if r["kind"] == "settled":  # paid out: what E held there is no longer tied up
+            for t in outcomes([r]):
+                if t in tied:
+                    tied[t] = 0.0
+            continue
         first_ts = r["ts"] if first_ts is None else first_ts
         last_ts = r["ts"]
         if r["kind"] == "incentives":
