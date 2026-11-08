@@ -29,6 +29,7 @@ re-timed to it.
 | Watchdog | Haiku 5.5, session `session_01JrtRuCP3RKtfhHmsiC3UYw` | hourly at :17 | `ops/watchdog.sh` (`ops/watchdog_prompt.md`): health line, then refreshes the money dashboard | edits code, deletes anything |
 | Lab runner (REST) | Haiku 5.5, session `session_01JrtRuC2MxTqb4BE8GVXSXP` | 110-minute chunks back to back | `LAB_FEEDS=rest ops/lab_chunk.sh` (`ops/lab_runner_prompt.md`): records Kalshi's public market data (settlement values for A; D was dropped 2026-11-05) and pushes each finished hour to `shadow-run` | orders of any kind; edits, commits or pushes by hand |
 | Lab runner (live feed) | Haiku 5.5, session `session_01JrtRuF1RVSJHGR8478xKpm` (since 2026-11-04 03:20Z) | 110-minute chunks back to back | `LAB_FEEDS=ws ops/lab_chunk.sh` (`ops/lab_feed_runner_prompt.md`): records the authenticated WebSocket feed for E and F (B and C were dropped 2026-11-05; the recorder is unchanged) into the same branch | orders of any kind; reading or printing the key; edits, commits or pushes by hand |
+| Lab runner (gaps) | Haiku 5.5, session `session_01JrtRuEaTaCAT56DVc9hkc3` (since 2026-11-08 22:01Z, in the Dealbot environment) | 110-minute chunks back to back | `LAB_FEEDS=gap ops/lab_chunk.sh` (`ops/gap_runner_prompt.md`): records Kalshi and Polymarket US public quotes on the pairs in `lab/gap_pairs.json` into the same branch | orders of any kind; keys; edits, commits or pushes by hand |
 | Analyst | Sonnet 5.5, session `session_01JrtRuFFYYmFkU2WSWi25VR` | daily 12:41Z | `ops/analyst_prompt.md`: reconciles settlements, studies P&L, the forecast's calibration and the filter funnel; one note a day on `paper-notes` | edits the desk's code or the run |
 | Fresh eyes | a review subagent the coordinator starts | before any change to `risk/`, `policy/`, `broker/` or fills | reads the diff cold, without the coordinator's reasoning | |
 
@@ -159,7 +160,10 @@ settlement. On a first live look (two passes) the median mid gap was 0.35 cents,
 of the time, 4.5% paid after fees and none after the cost of the money. Pairs end as their markets settle
 (the CPI ones on Nov 10); new ones go into `lab/gap_pairs.json` with a rules note and are picked up at
 the next chunk. Polymarket US is reachable only from the Dealbot cloud environment (it allows
-gateway.polymarket.us; the Default one does not), so the gap recorder has its own runner there.
+gateway.polymarket.us; the Default one does not), so the gap recorder has its own runner there; a
+replacement is created the same way (`create_session` in that environment, source
+https://github.com/benchmateai/Dealbot at `claude/desk-skeleton`, model Haiku 5.5, tags
+`dealbot-paper-run`, `dealbot-lab`, prompt `ops/gap_runner_prompt.md`).
 
 ## Desk v2 (from 2026-11-05)
 
@@ -252,7 +256,8 @@ Switching to the E desk (the coordinator, after the final report):
    enabled true), with the morning report's prompt rewritten for the E desk (`python3 -m
    lab.strategies.e_desk --lab <lab copy> --variants` for its line, its split by kind of market and the
    five variants' lines, replayed side by side in about two minutes by the week's end, each with its net
-   if Kalshi credits whole price levels; lab E beside it).
+   if Kalshi credits whole price levels; lab E beside it; and keep the `lab.gap_report` line on the
+   Kalshi to Polymarket US gaps).
 4. Schedule the E desk's final report for 2026-11-19T05:30Z: its result at the week's end (the replay
    stops there by itself) against lab E and the five variants, by market, program and kind of market,
    with the money it tied up.
