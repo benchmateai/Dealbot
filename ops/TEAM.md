@@ -184,13 +184,14 @@ orders where Kalshi pays liquidity rewards.
 
 The E desk (`lab/strategies/e_desk.py`) quotes as lab E does and adds risk rules that stop it adding
 risk but never stop it pairing off what it holds: $250 per market, $5,000 of orders and holdings in all,
-nothing added in a market's last 3 hours, and no new risk in a market after a $40 loss there. Four
+nothing added in a market's last 3 hours, and no new risk in a market after a $40 loss there. Five
 variants, registered before its start, run beside it on the same recording and are never retuned
 mid-week: `news_pause` (pause 15 minutes after a 5-cent move), `calendar_blackout` (no new risk in
 economic and crypto markets an hour either side of the dated releases in CATALYSTS: inside the week only
 the Fed minutes, Nov 18 at 19:00Z), `headline_filter` (no new risk in Kalshi's Elections markets or in
-approval, impeachment and departure series) and `no_close_rule` (the main desk without the 3-hour close
-rule). Its report splits its money by kind of market (Kalshi's category for the series: sports,
+approval, impeachment and departure series), `no_close_rule` (the main desk without the 3-hour close
+rule) and `cheap_side` (on a side priced 10 cents or less, quote up to $250 by dollars instead of a
+tenth of the Target Size: Kalshi splits each side's pool by contracts, not dollars). Its report splits its money by kind of market (Kalshi's category for the series: sports,
 political, economic, crypto, other), and the page shows that split. Its week runs from
 2026-11-12T05:00Z (START_MS) to 2026-11-19T05:00Z. It sends nothing to Kalshi: each run replays its rules
 over the lab's live-feed recording on `shadow-run`, so the live-feed lab runner must keep recording. The
@@ -211,6 +212,18 @@ results filled in afterwards, E's first 90 hours come to about -$4 for the main 
 close rule, and +$16 for the headline filter (which kept out 29 election and approval markets and earned
 $4.80 in payments); the calendar blackout had nothing to act on.
 
+Two corrections of 2026-11-08. The $5,000 cap counted a YES and a NO held in one market as money tied
+up (Kalshi nets the pair into $1 at once) and kept counting a market's holding after its result was
+recorded (paid out). On the same 113.6 hours, the old accounting held the desk at its cap in 28
+markets and made -$3.05; the fixed one caps 4 markets and makes +$25.47 (payments $86.26, fills marked
+-$60.79). And Kalshi's rule that it scores the orders that "help reach the Target Size" leaves open
+whether orders already resting at a price come first: the desk scores as lab E does (they do, so an
+order behind a queue that already fills the Target Size earns nothing), and every report also gives the
+payments if every order at a level counts. The main desk's payments are $86.26 one way and $172.60 the
+other; only Kalshi's own payouts can settle it. On the same hours cheap_side made +$71.40, but on less
+in payments ($39.59, near its cap all along): its lead is one Senate-seat long shot bought cheap and
+marked up $77, unsettled, and the approval bracket that cost the main desk $79, which it never held.
+
 Switching to the E desk (the coordinator, after the final report):
 1. On `claude/desk-skeleton`, set `ops/round.txt` to `edesk` and push (ops/ never restarts the desk).
 2. The desk runner stays stopped after v2's week. Never stop the lab runners: the E desk runs on the live
@@ -218,9 +231,10 @@ Switching to the E desk (the coordinator, after the final report):
 3. Re-enable the supervisor, watchdog, analyst and morning report scheduled tasks (update_trigger
    enabled true), with the morning report's prompt rewritten for the E desk (`python3 -m
    lab.strategies.e_desk --lab <lab copy> --variants` for its line, its split by kind of market and the
-   four variants' lines, replayed side by side in about two minutes by the week's end; lab E beside it).
+   five variants' lines, replayed side by side in about two minutes by the week's end, each with its net
+   if Kalshi credits whole price levels; lab E beside it).
 4. Schedule the E desk's final report for 2026-11-19T05:30Z: its result at the week's end (the replay
-   stops there by itself) against lab E and the four variants, by market, program and kind of market,
+   stops there by itself) against lab E and the five variants, by market, program and kind of market,
    with the money it tied up.
 5. Refresh the money dashboard (the watchdog does it hourly) and tell the owner the E desk has started
    and when its week ends.

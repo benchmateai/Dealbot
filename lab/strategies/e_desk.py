@@ -15,8 +15,11 @@ desk that cannot work out of a position is stuck with it (a first draft that pul
 on the recording than E itself):
 - MARKET_CAP_USD: no quote adds to a holding already worth this much at its side's mid (E caps contracts
   only, at 30% of the program's Target Size, and keeps that cap too);
-- CAPITAL_CAP_USD: resting orders' collateral plus what the holdings are worth never passes this; a quote
-  that would is cut to fit;
+- CAPITAL_CAP_USD: resting orders' collateral plus what the open holdings are worth never passes this; a
+  quote that would is cut to fit. A YES and a NO held in one market count as the $1 Kalshi pays back for
+  the pair at once (it nets them), not as money tied up, and a market's holding stops counting once its
+  result is recorded (Kalshi has paid it out). Until 2026-11-08 the desk counted both, which held it at
+  its cap with about $2,300 really at risk on E's first 97 hours;
 - the news rule (the news_pause variant, not the main desk): when a market's YES mid moves 5 cents or more
   within NEWS_WINDOW_S (2 minutes), nothing is added there for NEWS_PAUSE_S (15 minutes), and the pause
   runs on while it moves. On E's first 81 hours it paused 64 times and cost $18 against the same rules
@@ -37,9 +40,21 @@ market trading ideas.md), stop adding risk the same way:
 - headline_filter: nothing is added in markets whose value moves with every poll, call or headline:
   every market in Kalshi's Elections category (uncalled races, primaries, nominations) and Politics
   series about approval ratings, impeachment or officials leaving (HEADLINE_WORDS in the series title).
+A fifth, cheap_side (registered 2026-11-08), sizes the quote on any side whose Reference Price is
+CHEAP_PRICE (10 cents) or less by dollars instead: up to CHEAP_USD ($250) at that price, the same stops
+and caps otherwise. Kalshi splits each side's pool by contracts, not dollars, so a contract resting at a
+cent earns what one at 98 cents does; the busiest programs on 2026-11-08 had 100,000 to 600,000
+contracts parked on their cheap side, where E's tenth of the Target Size earned nothing. The risk is the
+cheap side filling as a long shot dies, which loses what those contracts cost.
 A fourth, no_close_rule, is the main desk without the close rule: the rule could not act on the recording
 before 2026-11-07, and with Kalshi's close times filled in afterwards it cost about $12 on E's first 90
 hours, in the two markets it quoted into their last hours (the approval brackets and Trump's endorsements).
+
+Payments are scored as lab E scores them: orders already resting at a price come before a newer one there,
+so an order behind a queue that already fills the Target Size earns nothing. Whether Kalshi gives that
+priority is unconfirmed (docs/lab/kalshi_interfaces.md 2.2), so each report also gives the payments if
+every order at a level the walk reaches counts (payable_whole_levels_usd, net_whole_levels_usd): the
+quotes and fills are the same either way, only the payments differ.
 
 Each market's kind comes from Kalshi's category for its series: the recorder's series_meta records (from
 2026-11-07), else KNOWN_SERIES (looked up that day for the series E had quoted), else PREFIX_GROUPS. The
@@ -58,6 +73,7 @@ desk's numbers hold still once its week is over.
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 import math
 import os
@@ -72,6 +88,7 @@ from lab.fills import EPS, apply_trade, place, side_mid
 from lab.recorder import _ts
 from lab.replay import live_records, settled_outcomes
 from lab.store import read_lab
+from lab.strategies.maker_common import outcomes
 from lab.strategies.e_incentive import INVENTORY_CAP_FRACTION, MAX_GAP_S, MIN_PAYOUT_USD, QUOTE_FRACTION, _per_side_per_s, reference_price, side_share
 
 START_MS = 1_794_459_600_000  # 2026-11-12T05:00:00Z, after desk v2's week (it ends 04:20Z) and its final report
@@ -90,11 +107,13 @@ RULES = {
     "blackout_before_s": 3_600,
     "blackout_after_s": 3_600,
     "skip_headlines": False,  # off in the main desk; the headline_filter variant turns it on
+    "cheap_usd": None,  # off in the main desk; the cheap_side variant quotes up to this many dollars on a cheap side
+    "cheap_price": 0.10,
 }
 SNAPSHOT_MS = 600_000
 # rule sets reported beside the main desk on the same recording, registered with it before the start
 VARIANTS = {"news_pause": {"news_move": 0.05}, "calendar_blackout": {"blackout": True}, "headline_filter": {"skip_headlines": True},
-            "no_close_rule": {"close_buffer_s": 0}}
+            "no_close_rule": {"close_buffer_s": 0}, "cheap_side": {"cheap_usd": 250.0}}
 
 # the report's kinds of market, from Kalshi's category for the series
 GROUPS = ("sports", "political", "economic", "crypto", "other")
@@ -203,10 +222,13 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = START_MS, until_ms: int | N
     held: dict[str, Holding] = defaultdict(Holding)
     standing: dict[str, tuple[int, dict[str, float]]] = {}
     earned: dict[str, float] = defaultdict(float)      # program id -> USD
+    earned_whole: dict[str, float] = defaultdict(float)  # the same, if Kalshi credits whole price levels
     last_mid: dict[str, float] = {}
     recent: dict[str, deque] = defaultdict(deque)       # ticker -> (ts, YES mid) within the news window
     paused_until: dict[str, int] = {}
     stopped: dict[str, int] = {}
+    settled_now: dict[str, float] = {}                  # ticker -> YES payout, once its result is recorded
+    due: list[tuple[int, str, float]] = []              # results read but not yet reached by the replay's clock
     quoted: set[str] = set()
     capped: set[str] = set()                            # markets where the new caps cut a quote
     events: list[dict] = []
@@ -229,20 +251,34 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = START_MS, until_ms: int | N
     capital_n = 0
     first_ts = last_ts = None
 
-    def payable() -> float:
-        return sum(math.floor(v * 100) / 100 for v in earned.values() if v >= MIN_PAYOUT_USD)
+    def payable(pools: dict[str, float] = earned) -> float:
+        return sum(math.floor(v * 100) / 100 for v in pools.values() if v >= MIN_PAYOUT_USD)
 
     def marked() -> float:
-        return sum(h.value(last_mid.get(t)) - h.cost for t, h in held.items())
+        return sum(h.value(last_mid.get(t), settled_now.get(t)) - h.cost for t, h in held.items())
 
     def capital() -> float:
+        """Resting orders' collateral plus what the open holdings are worth: a YES and a NO in one market are
+        netted by Kalshi (the pair's $1 comes back at once), and a settled market has paid out."""
         resting = sum(o.price * o.remaining for side in live.values() for o in side.values() if o.remaining > 0)
-        return resting + sum(h.value(last_mid.get(t)) for t, h in held.items())
+        return resting + sum(h.value(last_mid.get(t)) - min(h.yes, h.no) for t, h in held.items() if t not in settled_now)
 
-    for r in live_records(lab_dir, since_ms=since_ms, kinds=("book", "trade", "incentives", "series_meta")):
+    def settle(until: int | None) -> None:
+        while due and (until is None or due[0][0] <= until):
+            _, t, payout = heapq.heappop(due)
+            if t in held and t not in settled_now:
+                settled_now[t] = payout
+                live.pop(t, None)  # closed: nothing rests there any more
+
+    for r in live_records(lab_dir, since_ms=since_ms, kinds=("book", "trade", "incentives", "series_meta", "settled")):
         ts = r["ts"]
         if until_ms is not None and ts >= until_ms:
             break
+        settle(ts)
+        if r["kind"] == "settled":  # applied once the replay reaches it (the two recorders' files are read in turn)
+            for t, (payout, _) in outcomes([r]).items():
+                heapq.heappush(due, (ts, t, payout))
+            continue
         first_ts = ts if first_ts is None else first_ts
         last_ts = ts
         if next_snap is None:
@@ -295,10 +331,12 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = START_MS, until_ms: int | N
                     events.append({"ts": ts, "ticker": t, "kind": "news_pause", "yes_mid": round(mid, 4)})
                 paused_until[t] = max(paused_until.get(t, 0), ts + rule["news_pause_s"] * 1000)  # news still moving: the pause runs on
         if t in standing:  # the previous book, and the desk's orders against it, stood until now
-            since, rates = standing.pop(t)
+            since, rates, rates_whole = standing.pop(t)
             dt = min(MAX_GAP_S, (ts - since) / 1000.0)
             for pid, rate in rates.items():
                 earned[pid] += rate * dt
+            for pid, rate in rates_whole.items():
+                earned_whole[pid] += rate * dt
         h = held.get(t)
         if h is not None and t not in stopped and h.value(last_mid.get(t)) - h.cost <= -rule["loss_stop_usd"]:
             stopped[t] = ts
@@ -333,8 +371,12 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = START_MS, until_ms: int | N
                     continue
                 toward = net if side == "yes" else -net  # held in this side's direction (negative: on the other side)
                 pair_off = max(0.0, -toward)
-                room = INVENTORY_CAP_FRACTION * target - max(0.0, toward)  # E's own cap, in contracts
-                want = QUOTE_FRACTION * target
+                if rule["cheap_usd"] is not None and ref <= rule["cheap_price"] + EPS:
+                    want = rule["cheap_usd"] / max(ref, 0.01)  # the cheap side, by dollars: the pool is split by contracts
+                    room = want - max(0.0, toward)
+                else:
+                    room = INVENTORY_CAP_FRACTION * target - max(0.0, toward)  # E's own cap, in contracts
+                    want = QUOTE_FRACTION * target
                 add = 0.0
                 if can_add:
                     side_value = mid if side == "yes" else (None if mid is None else 1.0 - mid)
@@ -357,16 +399,19 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = START_MS, until_ms: int | N
                     live[t][side] = old
                     quoted.add(t)
                 mine[side] = (old.price, old.remaining)
-            rates = {}
+            rates, rates_whole = {}, {}
             for p in active:
                 discount = (p.get("discount_factor_bps") or 10_000) / 10_000
-                shares = [side_share(r.get(side) or [], float(p["target_size_fp"]), discount, mine.get(side)) for side in ("yes", "no")]
-                if None not in shares and mine:
-                    rates[p["id"]] = _per_side_per_s(p) * sum(shares)
-            standing[t] = (ts, rates)
+                for out, whole in ((rates, False), (rates_whole, True)):
+                    shares = [side_share(r.get(side) or [], float(p["target_size_fp"]), discount, mine.get(side), whole_level=whole)
+                              for side in ("yes", "no")]
+                    if None not in shares and mine:
+                        out[p["id"]] = _per_side_per_s(p) * sum(shares)
+            standing[t] = (ts, rates, rates_whole)
         cap_now = capital()
         capital_sum, capital_n, capital_peak = capital_sum + cap_now, capital_n + 1, max(capital_peak, cap_now)
 
+    settle(None)
     settled = settled_outcomes(lab_dir, until_ms=until_ms) if held else {}
     markets = []
     value = cost = 0.0
@@ -391,12 +436,13 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = START_MS, until_ms: int | N
         "hours": round((last_ts - first_ts) / 3.6e6, 1) if first_ts is not None else 0.0,
         "markets_quoted": len(quoted), "programs_paying": sum(1 for v in earned.values() if v > 0),
         "reward_usd": round(sum(earned.values()), 2), "payable_usd": round(pay, 2),
+        "payable_whole_levels_usd": round(payable(earned_whole), 2), "net_whole_levels_usd": round(payable(earned_whole) + value - cost, 2),
         "fills": sum(h.fills for h in held.values()), "contracts_filled": round(sum(h.contracts for h in held.values()), 1),
         "cost_usd": round(cost, 2), "value_usd": round(value, 2), "fills_marked_usd": round(value - cost, 2),
         "net_usd": round(pay + value - cost, 2), "equity_usd": round(rule["bankroll_usd"] + pay + value - cost, 2),
         "bankroll_usd": rule["bankroll_usd"], "capital_now_usd": round(capital(), 2),
         "capital_avg_usd": round(capital_sum / capital_n, 2) if capital_n else 0.0, "capital_peak_usd": round(capital_peak, 2),
-        "held_markets": sum(1 for h in held.values() if abs(h.yes - h.no) > 0.5), **counts, "capped_markets": len(capped),
+        "held_markets": sum(1 for t, h in held.items() if abs(h.yes - h.no) > 0.5 and t not in settled), **counts, "capped_markets": len(capped),
         "stopped_markets": sorted(stopped), "maker_fees_usd": 0.0,
         "blackout_markets": len({t for t, _ in blacked}), "headline_markets": len(headlined),
     }
@@ -449,7 +495,8 @@ def one_line(s: dict) -> str:
         return f"E desk: starts {time.strftime('%Y-%m-%d %H:%MZ', time.gmtime(s['start_ms'] / 1000))}; nothing recorded since"
     extra = "".join(f", {s[k]} {label}" for k, label in (("blackout_markets", "markets held off by the calendar"),
                                                           ("headline_markets", "markets kept out by the headline filter")) if s.get(k))
-    return (f"E desk: net {s['net_usd']:+.2f} USD over {s['hours']:.1f} h (payments {s['payable_usd']:.2f}, fills marked {s['fills_marked_usd']:+.2f}); "
+    return (f"E desk: net {s['net_usd']:+.2f} USD over {s['hours']:.1f} h (payments {s['payable_usd']:.2f}, fills marked {s['fills_marked_usd']:+.2f}; "
+            f"net {s['net_whole_levels_usd']:+.2f} if Kalshi credits whole price levels); "
             f"{s['markets_quoted']} markets quoted, {s['contracts_filled']:.0f} contracts filled, {s['held_markets']} held; "
             f"{s['capital_avg_usd']:,.0f} USD tied up on average ({s['capital_peak_usd']:,.0f} at most); "
             f"{s['news_pauses']} news pauses, {s['loss_stops']} loss stops, caps cut quotes in {s['capped_markets']} markets{extra}")

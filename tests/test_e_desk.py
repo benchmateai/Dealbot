@@ -247,3 +247,59 @@ def test_a_result_recorded_after_the_end_is_not_used(tmp_path):
                       ("settled", {"series": "KXM", "event": "EV", "rows": [["M", "yes", None]]}, T0 + 10_000)])
     assert e_desk.evaluate(tmp_path, since_ms=0, rules=OFF)["markets"][0]["value_usd"] == 100.0
     assert e_desk.evaluate(tmp_path, since_ms=0, until_ms=T0 + 5000, rules=OFF)["markets"][0]["value_usd"] == 52.5  # at the mid instead
+
+
+def test_a_yes_and_a_no_held_together_count_as_cash_not_money_tied_up(tmp_path):
+    items = [("incentives", {"programs": [_program("M", 0.5)]}, T0),
+             _book(T0 + 1000, "M", None, None, yes=YES, no=NO, set="E"),
+             _through_yes(T0 + 1500), _through_no(T0 + 1600),   # 100 YES at 0.50 and 100 NO at 0.45: 100 pairs
+             _book(T0 + 2000, "M", None, None, yes=YES, no=NO, set="E"),
+             _through_yes(T0 + 2500)]
+    _write(tmp_path, items)
+    r = e_desk.evaluate(tmp_path, since_ms=0, rules={**OFF, "capital_cap_usd": 100.0})
+    m = r["markets"][0]
+    # the pairs are $100 back at Kalshi, so the cap does not stop the second YES quote (counted as tied up, it would)
+    assert (m["contracts"], m["net_yes"]) == (300, 100) and r["summary"]["capital_now_usd"] < 100.0
+
+
+def test_a_settled_market_frees_its_money_for_the_next_one(tmp_path):
+    only_yes = dict(yes=YES, no=[], set="E")  # a NO side too thin to quote: only YES rests
+    base = [("incentives", {"programs": [_program("A", 0.5), _program("B", 0.5)]}, T0),
+            _book(T0 + 1000, "A", None, None, **only_yes), _trade("A", T0 + 1500, 0.49, "no"),   # 100 YES in A: $50 of the $60
+            _book(T0 + 4000, "B", None, None, **only_yes), _trade("B", T0 + 4500, 0.49, "no")]
+    _write(tmp_path / "open", base)
+    _write(tmp_path / "paid", base + [("settled", {"series": "KXA", "event": "EV", "rows": [["A", "yes", None]]}, T0 + 3000)])
+    rules = {**OFF, "capital_cap_usd": 60.0}
+    still_open = {m["ticker"]: m["contracts"] for m in e_desk.evaluate(tmp_path / "open", since_ms=0, rules=rules)["markets"]}
+    r = e_desk.evaluate(tmp_path / "paid", since_ms=0, rules=rules)
+    paid = {m["ticker"]: m["contracts"] for m in r["markets"]}
+    assert still_open == {"A": 100, "B": 20}  # $10 left for B while A's $50 is still out
+    assert paid == {"A": 100, "B": 100}       # A paid $100 back before B's first quote
+    assert r["summary"]["held_markets"] == 1 and r["markets"][0]["status"] == "settled"
+
+
+def test_the_cheap_side_variant_sizes_a_cent_side_by_dollars_and_leaves_the_dear_side_alone(tmp_path):
+    cheap_yes, dear_no = [[0.01, 5000.0]], [[0.98, 5000.0]]
+    items = [("incentives", {"programs": [_program("M", 0.5)]}, T0),
+             _book(T0 + 1000, "M", None, None, yes=cheap_yes, no=dear_no, set="E"),
+             _trade("M", T0 + 1500, 0.01, "no", 40_000.0),   # sells 40,000 YES at a cent: the 5,000 ahead first, then ours
+             _book(T0 + 61_000, "M", None, None, yes=cheap_yes, no=dear_no, set="E")]
+    _write(tmp_path, items)
+    main = e_desk.evaluate(tmp_path, since_ms=0, rules=OFF)
+    cheap = e_desk.evaluate(tmp_path, since_ms=0, rules={**OFF, **e_desk.VARIANTS["cheap_side"]})
+    assert main["markets"][0]["contracts"] == 100            # a tenth of the Target Size
+    assert cheap["markets"][0]["contracts"] == 25_000         # $250 at a cent
+    assert cheap["markets"][0]["net_yes"] == 25_000           # the 98-cent NO side kept its usual 100, unfilled
+    # behind 5,000 contracts that already fill the 1,000-contract Target Size, neither earns by default; if
+    # Kalshi credits the whole level, the $250 side takes most of that side's pool
+    assert main["summary"]["reward_usd"] == cheap["summary"]["reward_usd"] == 0.0
+    assert cheap["summary"]["payable_whole_levels_usd"] > 20.0 > 2.0 > main["summary"]["payable_whole_levels_usd"]
+
+
+def test_a_new_order_behind_a_full_queue_earns_only_under_the_whole_level_reading():
+    from lab.strategies.e_incentive import side_share
+
+    full, thin = [[0.01, 5000.0]], [[0.01, 600.0]]
+    assert side_share(full, 1000.0, 0.5, (0.01, 100.0)) == 0.0
+    assert side_share(full, 1000.0, 0.5, (0.01, 100.0), whole_level=True) == pytest.approx(100 / 5100)
+    assert side_share(thin, 1000.0, 0.5, (0.01, 500.0)) == side_share(thin, 1000.0, 0.5, (0.01, 500.0), whole_level=True) == pytest.approx(500 / 1100)
