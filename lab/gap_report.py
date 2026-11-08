@@ -7,7 +7,8 @@ venues open and their quotes no more than MAX_SKEW_S apart:
   lock B    buy YES on Polymarket US at its ask and NO on Kalshi at its YES bid:  k.bid - p.ask
   net       the better lock less both taker fees, each coeff x price x (1 - price) per contract (Kalshi
             rounds its fee up to the cent per order, so a small order pays a little more than this)
-  size      the contracts resting at both best prices (the smaller side)
+  size      the contracts resting at both best prices (the smaller side); a lock counts as crossed or
+            paying only with MIN_SIZE contracts or more
   carry     a lock ties up about $1 a contract (one leg's price plus the other's collateral, 1 - gross)
             until the market settles (the earlier of Kalshi's expected settlement and Polymarket US's
             end date): net after carry takes CARRY_RATE a year (T-bills) off it, which is what decides a
@@ -35,6 +36,7 @@ from lab.store import read_lab
 MAX_SKEW_S = 20
 HOLD_MAX_S = 1_200
 MIN_EPISODE_S = 100
+MIN_SIZE = 10  # contracts at both prices for a lock to count: a lock nobody could fill is not one
 CARRY_RATE = 0.04
 YEAR_MS = 365.25 * 86_400_000
 
@@ -94,7 +96,7 @@ def report(lab_dir: str | Path, *, since_ms: int = 0, until_ms: int | None = Non
                 mids.append(lk["mid_gap"])
             years = max(0.0, (settles - ts) / YEAR_MS) if settles else 0.0
             # each leg: (gross, net of fees, size, net after carry)
-            legs = [(x[0], x[1], x[2], x[1] - (1.0 - x[0]) * carry_rate * years) for x in (lk["a"], lk["b"]) if x is not None]
+            legs = [(x[0], x[1], x[2], x[1] - (1.0 - x[0]) * carry_rate * years) for x in (lk["a"], lk["b"]) if x is not None and x[2] >= MIN_SIZE]
             top = max(legs, key=lambda x: x[3], default=None)
             if top is not None and top[0] > 0:
                 crossed_s += hold
