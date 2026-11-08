@@ -74,7 +74,7 @@ those pushed a needless notification to the owner's phone), so the old poke-only
 
 - Runner: after two failed cycles in a row (pre-flight exit 4 twice, or any other failure twice).
 - Lab runners: after two failed cycles in a row (exit 5: the REST recorder crashed; exit 2: no key or
-  virtualenv for the live feed; exit 6: the live feed kept failing).
+  virtualenv for the live feed; exit 6: the live feed kept failing; exit 7: the gap recorder kept failing).
 - Watchdog: when the health line is ALERT (stale pushes, a desk fault, no forecasts (v2) or Jev calls for two hours,
   Jev failing, a stuck position, the daily loss limit), once per problem, again only after 3 hours.
 - Analyst: a position settled the wrong way (reconcile exit 3), a BUG finding, or an ALERT.
@@ -140,6 +140,26 @@ model Haiku 5.5, tags `dealbot-paper-run`, `dealbot-lab`, prompt `ops/lab_feed_r
 replacement is created the same way. The REST runner carries on unchanged. Each recorder writes its own files and each runner
 merges the other's commits before it pushes. The paper desk and the REST recorder run with the key
 removed from their environment.
+
+### Cross-venue gaps (from 2026-11-08)
+
+The owner asked to measure the Kalshi to Polymarket US price gaps the cross-venue report ranked low
+(`reports/Viable trading strategies across venues.md`: a median real gap of 0.78 cents against about 3.5
+cents of fees). The gap recorder (`lab/gap_recorder.py`) reads both venues' public prices, with no key and
+no orders, for the pairs in `lab/gap_pairs.json`: markets that settle the same way on both venues, each
+with a note saying why (175 on 2026-11-08: the 2027 NFL, NBA, NHL and MLB champions, the 2028 Democratic
+and Republican nominees, October's CPI and core CPI month-on-month, the December Fed decision and a 2026
+cut). Every 60 seconds it reads Kalshi's best prices in batches and each Polymarket US book right after
+(seconds apart), and writes a `gap_quote` record when either changes. `python3 -m lab.gap_report --lab
+<shadow-run lab/data>` gives the gaps: the mid gap, the share of the time either venue's bid crossed the
+other's ask, and whether that paid after both taker fees (Kalshi 0.07 times the series' multiplier;
+Polymarket US the market's own coefficient, 0.095 for an account below $10,000 a month; makers pay
+nothing there and earn no rebate below $10 million) and after 4% a year on the money a lock ties up until
+settlement. On a first live look (two passes) the median mid gap was 0.35 cents, the books crossed 13.5%
+of the time, 4.5% paid after fees and none after the cost of the money. Pairs end as their markets settle
+(the CPI ones on Nov 10); new ones go into `lab/gap_pairs.json` with a rules note and are picked up at
+the next chunk. Polymarket US is reachable only from the Dealbot cloud environment (it allows
+gateway.polymarket.us; the Default one does not), so the gap recorder has its own runner there.
 
 ## Desk v2 (from 2026-11-05)
 
