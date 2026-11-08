@@ -7,14 +7,18 @@
 # LAB_FEEDS picks the recorders. "rest" (the default) is the public REST recorder, for strategies A and D.
 # "ws" is the live feed, for B, C, E and F: it needs the market-data key in KALSHI_PROD_API_KEY_ID /
 # KALSHI_PROD_PRIVATE_KEY and runs from a virtualenv (WS_VENV) with the websockets package, made on first
-# use. "rest,ws" runs both. Each recorder writes its own hour files, so one lab runner per feed can publish
-# to the same branch: each merges the other's commits before it pushes.
+# use. "gap" is the gap recorder (lab/gap_recorder.py): Kalshi beside Polymarket US on the pairs in
+# lab/gap_pairs.json, public prices only, so it needs no key but does need gateway.polymarket.us on the
+# network (the Dealbot environment allows it; the Default one does not). "rest,ws" runs both of the first
+# two. Each recorder writes its own hour files, so one lab runner per feed can publish to the same branch:
+# each merges the others' commits before it pushes.
 #
 # A recorder that exits early is restarted (after 30 s, up to its *_RESTARTS times a chunk); both run to the
 # chunk's end time, and every stop is bounded (TERM, then KILL after STOP_GRACE seconds).
 #
 #   LAB_FEEDS=rest bash ops/lab_chunk.sh   exit 0 done; 2 setup (for the live feed: no key, or no virtualenv);
-#                                          5 the REST recorder kept failing; 6 the live feed kept failing
+#                                          5 the REST recorder kept failing; 6 the live feed kept failing;
+#                                          7 the gap recorder kept failing
 set -euo pipefail
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 LAB_BRANCH=${LAB_BRANCH:-shadow-run}
@@ -29,6 +33,8 @@ WS_VENV=${WS_VENV:-$HOME/dealbot-lab-venv}
 WS_RATE=${WS_RATE:-0.1}
 WS_RESTARTS=${WS_RESTARTS:-3}
 REST_RESTARTS=${REST_RESTARTS:-3}
+GAP_RESTARTS=${GAP_RESTARTS:-3}
+GAP_EVERY=${GAP_EVERY:-60}
 STOP_GRACE=${STOP_GRACE:-60}
 # no recorder sees a credential it does not use: the REST one uses none, the live feed only the market-data key
 LAB_ENV=(env -u TYPESAFE_API_KEY -u KALSHI_API_KEY_ID -u KALSHI_PRIVATE_KEY -u KALSHI_PROD_API_KEY_ID -u KALSHI_PROD_PRIVATE_KEY)
@@ -36,10 +42,11 @@ WS_ENV=(env -u TYPESAFE_API_KEY -u KALSHI_API_KEY_ID -u KALSHI_PRIVATE_KEY)
 
 say() { echo "lab_chunk: $*"; }
 
-WANT_REST=""; WANT_WS=""
+WANT_REST=""; WANT_WS=""; WANT_GAP=""
 case ",$LAB_FEEDS," in *,rest,*) WANT_REST=1 ;; esac
 case ",$LAB_FEEDS," in *,ws,*) WANT_WS=1 ;; esac
-if [ -z "$WANT_REST$WANT_WS" ]; then say "LAB_FEEDS=$LAB_FEEDS names no feed (rest, ws)" >&2; exit 2; fi
+case ",$LAB_FEEDS," in *,gap,*) WANT_GAP=1 ;; esac
+if [ -z "$WANT_REST$WANT_WS$WANT_GAP" ]; then say "LAB_FEEDS=$LAB_FEEDS names no feed (rest, ws, gap)" >&2; exit 2; fi
 if [ -n "$WANT_WS" ] && { [ -z "${KALSHI_PROD_API_KEY_ID:-}" ] || [ -z "${KALSHI_PROD_PRIVATE_KEY:-}" ]; }; then
   say "the live feed needs KALSHI_PROD_API_KEY_ID and KALSHI_PROD_PRIVATE_KEY in this session's environment" >&2
   exit 2
@@ -101,9 +108,10 @@ stop_pid() {
 }
 LAB_PID=""
 WS_PID=""
+GAP_PID=""
 FINAL=""
 # however the chunk ends (a signal included), stop the recorders and publish what they wrote
-finish() { stop_pid "$WS_PID"; stop_pid "$LAB_PID"; WS_PID=""; LAB_PID=""; [ -n "$FINAL" ] || publish || true; }
+finish() { stop_pid "$WS_PID"; stop_pid "$LAB_PID"; stop_pid "$GAP_PID"; WS_PID=""; LAB_PID=""; GAP_PID=""; [ -n "$FINAL" ] || publish || true; }
 trap finish EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
@@ -127,14 +135,22 @@ start_ws() {
   WS_PID=$!
   say "live feed on base $BASE_SHA until $(date -u -d "@$END" +%H:%M:%SZ) (pid $WS_PID)"
 }
+start_gap() {
+  [ "$(left)" -ge 120 ] || return 1
+  "${LAB_ENV[@]}" "$PY" -m lab.gap_recorder --until "$END" --data lab/data --every "$GAP_EVERY" --rate "$LAB_RATE" &
+  GAP_PID=$!
+  say "gap recorder on base $BASE_SHA until $(date -u -d "@$END" +%H:%M:%SZ), a pass every $GAP_EVERY s (pid $GAP_PID)"
+}
 if [ -n "$WANT_REST" ]; then start_rest || true; fi
 if [ -n "$WANT_WS" ]; then start_ws || true; fi
+if [ -n "$WANT_GAP" ]; then start_gap || true; fi
 
 REST_FAILS=0
 WS_FAILS=0
+GAP_FAILS=0
 WS_LAST_RC=0
 NEXT=$(( $(date +%s) + PUBLISH_SECONDS ))
-while [ -n "$LAB_PID$WS_PID" ]; do
+while [ -n "$LAB_PID$WS_PID$GAP_PID" ]; do
   sleep 5
   if [ -n "$LAB_PID" ] && ! kill -0 "$LAB_PID" 2>/dev/null; then
     RRC=0; wait "$LAB_PID" || RRC=$?; LAB_PID=""
@@ -150,9 +166,16 @@ while [ -n "$LAB_PID$WS_PID" ]; do
       if [ "$WS_FAILS" -lt "$WS_RESTARTS" ]; then sleep 30; start_ws || true; fi
     fi
   fi
+  if [ -n "$GAP_PID" ] && ! kill -0 "$GAP_PID" 2>/dev/null; then
+    GRC=0; wait "$GAP_PID" || GRC=$?; GAP_PID=""
+    if [ "$GRC" -ne 0 ]; then
+      GAP_FAILS=$(( GAP_FAILS + 1 )); say "the gap recorder exited with code $GRC (failure $GAP_FAILS of $GAP_RESTARTS)" >&2
+      if [ "$GAP_FAILS" -lt "$GAP_RESTARTS" ]; then sleep 30; start_gap || true; fi
+    fi
+  fi
   if [ "$(left)" -lt -120 ]; then  # a recorder still running two minutes past the end
     say "stopping recorders still running after the chunk's end" >&2
-    stop_pid "$WS_PID"; stop_pid "$LAB_PID"; WS_PID=""; LAB_PID=""
+    stop_pid "$WS_PID"; stop_pid "$LAB_PID"; stop_pid "$GAP_PID"; WS_PID=""; LAB_PID=""; GAP_PID=""
   fi
   if [ "$(date +%s)" -ge "$NEXT" ]; then NEXT=$(( $(date +%s) + PUBLISH_SECONDS )); publish; fi
 done
@@ -160,6 +183,7 @@ FINAL=1
 publish
 if [ "$REST_FAILS" -ge "$REST_RESTARTS" ]; then say "the REST recorder failed $REST_FAILS times this chunk" >&2; exit 5; fi
 if [ -n "$WANT_WS" ] && [ "$WS_FAILS" -ge "$WS_RESTARTS" ]; then say "the live feed failed $WS_FAILS times this chunk" >&2; exit 6; fi
+if [ -n "$WANT_GAP" ] && [ "$GAP_FAILS" -ge "$GAP_RESTARTS" ]; then say "the gap recorder failed $GAP_FAILS times this chunk" >&2; exit 7; fi
 # a feed that ended the chunk never having connected (3) or gone quiet (4) has failed, whatever the count
 if [ -n "$WANT_WS" ] && { [ "$WS_LAST_RC" -eq 3 ] || [ "$WS_LAST_RC" -eq 4 ]; }; then say "the live feed ended the chunk with exit $WS_LAST_RC" >&2; exit 6; fi
 say "done ($LAB_FEEDS) $(git log -1 --format='%h %s')"
