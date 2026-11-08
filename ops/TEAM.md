@@ -256,7 +256,8 @@ Switching to the E desk (the coordinator, after the final report):
    enabled true), with the morning report's prompt rewritten for the E desk (`python3 -m
    lab.strategies.e_desk --lab <lab copy> --variants` for its line, its split by kind of market and the
    five variants' lines, replayed side by side in about two minutes by the week's end, each with its net
-   if Kalshi credits whole price levels; lab E beside it).
+   if Kalshi credits whole price levels; lab E beside it; and keep the `lab.gap_report` line on the
+   Kalshi to Polymarket US gaps).
 4. Schedule the E desk's final report for 2026-11-19T05:30Z: its result at the week's end (the replay
    stops there by itself) against lab E and the five variants, by market, program and kind of market,
    with the money it tied up.
