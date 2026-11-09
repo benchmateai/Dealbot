@@ -2,9 +2,10 @@
 
 Each pair in lab/gap_pairs.json names one Kalshi market and the Polymarket US market that settles the same way
 (its `rules` note says why the two match). Every EVERY_S seconds the recorder reads Kalshi's best bid and ask
-for the pairs in batches (GET /markets?tickers=..., public) and, right after each batch, the book of each
-Polymarket US market in it (GET https://gateway.polymarket.us/v1/markets/{slug}/book, public), so the two
-quotes of a pair are seconds apart. It writes to its own hour files (<HH>.gap.jsonl):
+for the pairs in batches of KALSHI_BATCH (GET /markets?tickers=..., public: two requests a pass for 175 pairs,
+since Kalshi's public limit is shared by the team's sessions) and, right after each batch, the book of each
+Polymarket US market in it (GET https://gateway.polymarket.us/v1/markets/{slug}/book, public), POLY_WORKERS
+at a time, so the two quotes of a pair are seconds apart. It writes to its own hour files (<HH>.gap.jsonl):
   gap_pair   {pair, kalshi, polymarket_us, category, rules, k_fee, p_fee, k_close, p_end}   once a chunk
   gap_quote  {pair, k: {bid, ask, bid_size, ask_size, status, ts}, p: {bid, ask, bid_size, ask_size, state, ts}}
              when either side's quote changes, and every HEARTBEAT_S regardless
@@ -26,10 +27,12 @@ import json
 import logging
 import signal
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from lab.recorder import _num, _ts
@@ -42,7 +45,8 @@ STREAM = "gap"
 PM_US = "https://gateway.polymarket.us"
 EVERY_S = 60
 HEARTBEAT_S = 600
-KALSHI_BATCH = 40
+KALSHI_BATCH = 100
+POLY_WORKERS = 8
 KALSHI_TAKER = 0.07          # Kalshi's taker coefficient, times the series' fee_multiplier
 PM_TAKER_DEFAULT = 0.095     # Polymarket US's tier-1 taker coefficient, when a market does not publish its own
 STATUS_S = 600
@@ -60,28 +64,36 @@ def load_pairs(path: str | Path = PAIRS) -> list[dict]:
 
 
 class PolyUS:
-    """Polymarket US's public market data, paced by its own budget (the venue allows 25 requests a second)."""
+    """Polymarket US's public market data, paced by its own budget (the venue allows 25 requests a second);
+    safe to call from several threads at once."""
 
     def __init__(self, budget: Budget | None = None, *, opener=urllib.request.urlopen, base: str = PM_US) -> None:
-        self.budget = budget or Budget(5.0, 5.0)
+        self.budget = budget or Budget(15.0, 15.0)
         self.opener, self.base = opener, base
         self.requests = self.errors = self.rate_limited = 0
+        self._lock = threading.Lock()
+
+    def _count(self, **inc: int) -> None:
+        with self._lock:
+            for k, v in inc.items():
+                setattr(self, k, getattr(self, k) + v)
 
     def get(self, path: str, params: list[tuple[str, str]] | None = None) -> dict | None:
-        self.budget.take()
-        self.requests += 1
+        with self._lock:
+            self.budget.take()
+            self.requests += 1
         url = self.base + path + ("?" + urllib.parse.urlencode(params) if params else "")
         try:
             with self.opener(urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "dealbot-lab"}), timeout=20) as resp:
                 return json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
-            self.errors += 1
+            self._count(errors=1, rate_limited=int(exc.code == 429))
             if exc.code == 429:
-                self.rate_limited += 1
-                self.budget.pause(5.0)
+                with self._lock:
+                    self.budget.pause(5.0)
             return None
         except (OSError, ValueError):
-            self.errors += 1
+            self._count(errors=1)
             return None
 
     def counters(self) -> dict:
@@ -153,11 +165,16 @@ class GapRecorder:
             kq = {m.get("ticker"): kalshi_quote(m, k_ts) for m in (payload or {}).get("markets") or []}
             if not kq:  # Kalshi's batch failed (a rate limit, say): its Polymarket books would have nothing to pair with
                 continue
-            for p in batch:
+            wanted = [p for p in batch if p["kalshi"] in kq]
+
+            def book_of(p: dict) -> tuple[dict | None, int]:
                 book = self.poly.get(f"/v1/markets/{urllib.parse.quote(p['polymarket_us'])}/book")
-                if book is None or p["kalshi"] not in kq:
-                    continue
-                self.record(p["id"], kq[p["kalshi"]], poly_quote(book, self.now_ms()))
+                return book, self.now_ms()
+            with ThreadPoolExecutor(POLY_WORKERS) as pool:
+                books = list(pool.map(book_of, wanted))
+            for p, (book, p_ts) in zip(wanted, books):
+                if book is not None:
+                    self.record(p["id"], kq[p["kalshi"]], poly_quote(book, p_ts))
 
     def record(self, pair: str, k: dict, p: dict) -> None:
         now = self.now_ms()
