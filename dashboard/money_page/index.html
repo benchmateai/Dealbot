@@ -18,7 +18,33 @@
 .pm .pm-up { color: var(--color-ok); }
 .pm .pm-down { color: var(--color-bad); }
 .pm-chart { position: relative; min-height: 150px; margin-top: var(--cds-gap-sm); }
-.pm-days { position: relative; min-height: 140px; }
+.pm-cal { display: grid; gap: var(--cds-gap-sm); min-height: 18rem; }
+.pm-cal-head { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem; align-items: center; gap: var(--cds-gap-xs); }
+.pm-cal-title { display: grid; justify-items: center; gap: 2px; text-align: center; min-width: 0; }
+.pm-cal-month { font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
+.pm-cal-sum { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+.pm .pm-cal-sum b { font-weight: var(--cds-font-weight-medium); }
+.pm-cal-nav { width: 2.5rem; height: 2.5rem; border-radius: 50%; border: 1px solid var(--color-border-line); background: transparent; color: var(--color-fg); font: inherit; font-size: 1.125rem; line-height: 1; cursor: pointer; }
+.pm-cal-nav:disabled { opacity: 0.3; cursor: default; }
+.pm-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.pm-cal-dow { text-align: center; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); padding-bottom: 2px; }
+.pm-cal-day { min-width: 0; min-height: 2.9rem; display: grid; align-content: start; justify-items: center; gap: 2px; padding: 5px 1px; border: 1px solid var(--color-border-line); border-radius: calc(var(--cds-radius) * 0.75); background: transparent; color: var(--color-fg-muted); font: inherit; font-variant-numeric: tabular-nums; }
+.pm-cal-n { font-size: var(--cds-font-size-caption); line-height: 1.1; }
+.pm-cal-v { max-width: 100%; overflow: hidden; white-space: nowrap; font-size: clamp(0.6875rem, 2.9vw, 0.875rem); font-weight: var(--cds-font-weight-medium); line-height: 1.2; }
+.pm-cal-blank { border-color: transparent; }
+.pm-cal-out { opacity: 0.4; }
+.pm-cal-up { background: color-mix(in srgb, var(--color-ok) 14%, transparent); border-color: color-mix(in srgb, var(--color-ok) 38%, transparent); }
+.pm-cal-up .pm-cal-v { color: var(--color-ok); }
+.pm-cal-down { background: color-mix(in srgb, var(--color-bad) 12%, transparent); border-color: color-mix(in srgb, var(--color-bad) 38%, transparent); }
+.pm-cal-down .pm-cal-v { color: var(--color-bad); }
+.pm-cal-flat .pm-cal-v { color: var(--color-fg); }
+button.pm-cal-day { cursor: pointer; }
+.pm-cal-today .pm-cal-n { color: var(--color-fg); font-weight: var(--cds-font-weight-medium); text-decoration: underline; text-underline-offset: 2px; }
+.pm-cal-sel { box-shadow: 0 0 0 2px var(--color-fg); }
+.pm-cal-day:focus-visible, .pm-cal-nav:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+.pm-cal-detail { margin: 0; min-height: 1.5em; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+.pm .pm-cal-detail b { font-weight: var(--cds-font-weight-medium); color: var(--color-fg); }
+.pm-cal-amt { font-weight: var(--cds-font-weight-medium); }
 .pm-chart-note { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
 .pm-fail { display: flex; align-items: center; justify-content: center; gap: var(--cds-gap-xs); min-height: inherit; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
 .pm-fail i { width: 0.375rem; height: 0.375rem; border-radius: 50%; background: var(--color-bad); display: inline-block; }
@@ -117,9 +143,9 @@
 
   <section class="pm-tiles" id="figures" aria-label="Key figures">
     <div class="pm-tile">
-      <div class="pm-tile-label">Today, UTC</div>
-      <div data-draw="today" data-source="paper" data-field="today_pnl_usd" data-where="table=summary" class="pm-tile-value dash-skeleton">—</div>
-      <div class="pm-tile-sub">change in equity since midnight UTC</div>
+      <div class="pm-tile-label">Today, Arizona</div>
+      <div data-draw="today" data-source="calendar" class="pm-tile-value dash-skeleton">—</div>
+      <div class="pm-tile-sub">change in equity since midnight Arizona time</div>
     </div>
     <div class="pm-tile">
       <div class="pm-tile-label">Win rate</div>
@@ -136,6 +162,12 @@
       <div data-draw="fees" data-source="paper" data-field="fees_usd" data-where="table=summary" class="pm-tile-value dash-skeleton">—</div>
       <div class="pm-tile-sub">already taken out of the result</div>
     </div>
+  </section>
+
+  <section class="pm-card" id="days" aria-labelledby="days-title">
+    <h2 id="days-title">Daily P&amp;L</h2>
+    <p class="pm-note">The change in paper equity each day, midnight to midnight Arizona time, after fees, so the days add up to the net result above. Tap a day for its bets.</p>
+    <div class="pm-cal dash-skeleton" data-draw="day-calendar" data-source="calendar"></div>
   </section>
 
   <section class="pm-shadow" id="rules" aria-labelledby="rules-title">
@@ -225,12 +257,6 @@
     </div>
   </section>
 
-  <section class="pm-card" id="days" aria-labelledby="days-title">
-    <h2 id="days-title">By day</h2>
-    <p class="pm-note">Change in equity per UTC day, after fees.</p>
-    <div class="pm-days dash-skeleton" data-draw="day-chart" data-source="days"></div>
-  </section>
-
   <p class="pm-foot">Day <b data-draw="weekday" data-source="paper" data-field="week_day" data-where="table=summary">—</b> of the 7-day paper test · updated <b data-draw="updated" data-source="paper" data-field="updated_ms" data-where="table=summary">—</b></p>
 </div>
 
@@ -245,7 +271,11 @@
   const cents = (v) => d3.format('.1~f')(v) + '¢';
   const small = (v) => (Math.abs(v) < 0.1 ? d3.format('$,.3f')(v) : usd(v));
   const when = (ms) => new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  const dayLabel = d3.utcFormat('%b %-d');
+  // Arizona keeps UTC-7 all year (no daylight saving), so an Arizona calendar day is the UTC day of ms - 7 h.
+  const AZ_OFFSET_MS = 7 * 3600 * 1000;
+  const azDay = (ms) => new Date(ms - AZ_OFFSET_MS).toISOString().slice(0, 10);
+  const asDate = (day) => new Date(day + 'T00:00:00Z');
+  const toCents = (v) => Math.round(v * 100) / 100 || 0; // || 0 also turns -0 into 0
 
   dash.calc('trades', {
     inputs: ['paper'],
@@ -259,11 +289,40 @@
     description: 'Paper equity, the last reading in each 10-minute slot.',
     fn: (paper) => paper.filter((r) => r.table === 'equity'),
   });
-  dash.calc('days', {
+  dash.calc('calendar', {
     inputs: ['paper'],
-    title: 'Days',
-    description: 'Change in paper equity per UTC day, with bets settled and won.',
-    fn: (paper) => paper.filter((r) => r.table === 'day'),
+    title: 'Daily P&L',
+    description: 'The change in paper equity for each Arizona day (midnight to midnight, UTC-7): its last reading less the day before\'s (the bankroll before the first), so the days add up to the net result; with the bets that closed that day, how many made money, and their fees.',
+    fn: (paper) => {
+      const s = paper.find((r) => r.table === 'summary');
+      const days = new Map();
+      const get = (day) => {
+        if (!days.has(day)) days.set(day, { id: day, day, open_usd: null, close_usd: null, pnl_usd: 0, trades: 0, wins: 0, fees_usd: 0 });
+        return days.get(day);
+      };
+      const eq = paper.filter((r) => r.table === 'equity')
+        .map((r) => ({ t: Number(r.t_ms), v: Number(r.equity_usd) }))
+        .filter((q) => Number.isFinite(q.t) && Number.isFinite(q.v))
+        .sort((a, b) => a.t - b.t);
+      for (const q of eq) get(azDay(q.t)).close_usd = q.v;
+      for (const t of paper) {
+        if (t.table !== 'trade' || t.closed_ms === null || t.closed_ms === undefined || t.pnl_usd === null || t.pnl_usd === undefined) continue;
+        const r = get(azDay(Number(t.closed_ms)));
+        r.trades += 1;
+        if (Number(t.pnl_usd) > 0) r.wins += 1;
+        r.fees_usd += Number(t.fees_usd) || 0;
+      }
+      let prev = s && Number.isFinite(Number(s.start_usd)) ? Number(s.start_usd) : (eq.length ? eq[0].v : null);
+      return [...days.keys()].sort().map((day) => {
+        const r = days.get(day);
+        r.open_usd = prev;
+        if (r.close_usd === null) r.close_usd = prev;
+        r.pnl_usd = prev === null || r.close_usd === null ? 0 : toCents(r.close_usd - prev);
+        r.fees_usd = toCents(r.fees_usd);
+        prev = r.close_usd;
+        return r;
+      });
+    },
   });
 
   dash.calc('rules', {
@@ -329,7 +388,17 @@
   figure('open-lede', 'trades_open', count);
   figure('equity', 'equity_usd', usd);
   figure('start', 'start_usd', whole);
-  figure('today', 'today_pnl_usd', signed, true);
+  dash.draw('today', (el) => {
+    const d = dash.data('calendar');
+    el.classList.remove('pm-up', 'pm-down');
+    if (d.status === 'ok' || d.status === 'error') el.classList.remove('dash-skeleton');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) { el.textContent = '—'; return; }
+    const row = d.data.find((r) => r.day === azDay(Date.now()));
+    const n = row ? Number(row.pnl_usd) : 0;
+    el.textContent = signed(n);
+    el.classList.toggle('pm-up', n > 0);
+    el.classList.toggle('pm-down', n < 0);
+  });
   figure('winrate', 'win_rate', pct);
   figure('wins', 'wins', count);
   figure('losses', 'losses', count);
@@ -588,37 +657,149 @@
       .on('pointerleave', () => { hoverDot.attr('visibility', 'hidden'); tip.hidden = true; });
   });
 
-  dash.draw('day-chart', (el) => {
-    el.replaceChildren();
-    const d = dash.data('days');
-    if (d.status === 'error') { el.classList.remove('dash-skeleton'); failLine(el); return; }
-    if (d.status !== 'ok') return;
+  // The month calendar: one cell per Arizona day, green up and red down, a month total, and the picked
+  // day's bets underneath. Which month and day are shown survives the page's hourly data refresh.
+  const monthName = d3.utcFormat('%B %Y');
+  const shortDay = d3.utcFormat('%a, %b %-d');
+  const longDay = d3.utcFormat('%A, %B %-d');
+  const fullCell = d3.format('+,.2f');
+  const smallCell = (v) => (Math.abs(v) < 10 ? d3.format('+.2f')(v) : Math.abs(v) < 100 ? d3.format('+.1f')(v) : d3.format('+,.0f')(v));
+  let calMonth = null; // [year, month 0-11] on show
+  let calPick = null; // the picked day, 'YYYY-MM-DD'
+  dash.draw('day-calendar', (el) => {
+    const d = dash.data('calendar');
+    if (d.status === 'error') { el.replaceChildren(); el.classList.remove('dash-skeleton'); failLine(el); return; }
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return;
     el.classList.remove('dash-skeleton');
-    const rows = d.data.map((r) => ({ day: new Date(String(r.day) + 'T00:00:00Z'), pnl: Number(r.pnl_usd), trades: Number(r.trades) }))
-      .filter((r) => Number.isFinite(r.pnl) && !Number.isNaN(r.day.getTime()));
+    const rows = d.data;
     if (!rows.length) {
+      el.replaceChildren();
       const p = document.createElement('p');
       p.className = 'pm-chart-note';
-      p.textContent = 'Days appear as the test runs.';
+      p.textContent = 'Days appear as the desk trades.';
       el.append(p);
       return;
     }
-    const W = Math.max(260, el.clientWidth || 320), H = 140, top = 22, bottom = 22;
-    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', 'Change in paper equity per day');
-    const x = d3.scaleBand(rows.map((r) => r.day.getTime()), [8, W - 8]).padding(0.35);
-    const ext = Math.max(1, d3.max(rows, (r) => Math.abs(r.pnl)));
-    const y = d3.scaleLinear([-ext, ext], [H - bottom, top]);
-    svg.append('line').attr('x1', 8).attr('x2', W - 8).attr('y1', y(0)).attr('y2', y(0)).attr('stroke', 'var(--cds-chart-axis)').attr('stroke-width', 1);
-    const bw = Math.min(32, x.bandwidth());
-    const axis = svg.append('g').attr('class', 'pm-axis');
-    for (const r of rows) {
-      const cx = x(r.day.getTime()) + x.bandwidth() / 2;
-      const y0 = y(Math.max(0, r.pnl)), y1 = y(Math.min(0, r.pnl));
-      svg.append('rect').attr('x', cx - bw / 2).attr('width', bw).attr('y', y0).attr('height', Math.max(1, y1 - y0)).attr('rx', 3)
-        .attr('fill', r.pnl < 0 ? 'var(--cds-chart-status-critical)' : dash.colors[0]);
-      axis.append('text').attr('x', cx).attr('y', r.pnl < 0 ? y1 + 14 : y0 - 6).attr('text-anchor', 'middle').text(signed(r.pnl));
-      axis.append('text').attr('x', cx).attr('y', H - 6).attr('text-anchor', 'middle').text(dayLabel(r.day));
-    }
+    const byDay = new Map(rows.map((r) => [r.day, r]));
+    const today = azDay(Date.now());
+    const ym = (day) => [Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1];
+    const key = ([y, m]) => y * 12 + m;
+    const lo = key(ym(rows[0].day));
+    const hi = Math.max(key(ym(rows[rows.length - 1].day)), key(ym(today)));
+    if (!calPick || !byDay.has(calPick)) calPick = byDay.has(today) ? today : rows[rows.length - 1].day;
+    if (!calMonth || key(calMonth) < lo || key(calMonth) > hi) calMonth = ym(calPick);
+    const tone = (v) => (v > 0 ? 'pm-up' : v < 0 ? 'pm-down' : '');
+
+    const render = (focus) => {
+      el.replaceChildren();
+      const [y, m] = calMonth;
+      const prefix = `${y}-${String(m + 1).padStart(2, '0')}-`;
+      const inMonth = rows.filter((r) => r.day.startsWith(prefix));
+      const total = inMonth.length ? toCents(inMonth[inMonth.length - 1].close_usd - inMonth[0].open_usd) : 0;
+      const up = inMonth.filter((r) => r.pnl_usd > 0).length;
+      const down = inMonth.filter((r) => r.pnl_usd < 0).length;
+      const narrow = (el.clientWidth || 320) < 440;
+
+      const head = document.createElement('div');
+      head.className = 'pm-cal-head';
+      const nav = (dir) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pm-cal-nav';
+        b.dataset.nav = dir < 0 ? 'prev' : 'next';
+        b.textContent = dir < 0 ? '‹' : '›';
+        b.setAttribute('aria-label', dir < 0 ? 'Previous month' : 'Next month');
+        b.disabled = dir < 0 ? key(calMonth) <= lo : key(calMonth) >= hi;
+        b.addEventListener('click', () => {
+          const k = key(calMonth) + dir;
+          calMonth = [Math.floor(k / 12), k % 12];
+          render('nav:' + b.dataset.nav);
+        });
+        return b;
+      };
+      const title = document.createElement('div');
+      title.className = 'pm-cal-title';
+      title.setAttribute('aria-live', 'polite');
+      const month = document.createElement('span');
+      month.className = 'pm-cal-month';
+      month.textContent = monthName(new Date(Date.UTC(y, m, 1)));
+      const sum = document.createElement('span');
+      sum.className = 'pm-cal-sum';
+      const amount = document.createElement('b');
+      amount.textContent = signed(total);
+      if (tone(total)) amount.className = tone(total);
+      sum.append(amount, document.createTextNode(` · ${up} ${up === 1 ? 'day' : 'days'} up, ${down} down`));
+      title.append(month, sum);
+      head.append(nav(-1), title, nav(1));
+
+      const grid = document.createElement('div');
+      grid.className = 'pm-cal-grid';
+      grid.setAttribute('role', 'group');
+      grid.setAttribute('aria-label', 'Days of ' + monthName(new Date(Date.UTC(y, m, 1))));
+      for (const w of ['S', 'M', 'T', 'W', 'T', 'F', 'S']) {
+        const h = document.createElement('div');
+        h.className = 'pm-cal-dow';
+        h.setAttribute('aria-hidden', 'true');
+        h.textContent = w;
+        grid.append(h);
+      }
+      const lead = new Date(Date.UTC(y, m, 1)).getUTCDay();
+      const length = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+      for (let i = 0; i < lead; i++) {
+        const b = document.createElement('div');
+        b.className = 'pm-cal-day pm-cal-blank';
+        b.setAttribute('aria-hidden', 'true');
+        grid.append(b);
+      }
+      for (let n = 1; n <= length; n++) {
+        const day = prefix + String(n).padStart(2, '0');
+        const r = byDay.get(day);
+        const cell = document.createElement(r ? 'button' : 'div');
+        cell.className = 'pm-cal-day';
+        cell.dataset.day = day;
+        const num = document.createElement('span');
+        num.className = 'pm-cal-n';
+        num.textContent = String(n);
+        cell.append(num);
+        if (r) {
+          cell.type = 'button';
+          const v = document.createElement('span');
+          v.className = 'pm-cal-v';
+          v.textContent = narrow ? smallCell(r.pnl_usd) : fullCell(r.pnl_usd);
+          cell.append(v);
+          cell.classList.add(r.pnl_usd > 0 ? 'pm-cal-up' : r.pnl_usd < 0 ? 'pm-cal-down' : 'pm-cal-flat');
+          cell.setAttribute('aria-pressed', String(day === calPick));
+          cell.setAttribute('aria-label', `${longDay(asDate(day))}${day === today ? ' (today)' : ''}: ${signed(r.pnl_usd)}, ${r.trades} ${r.trades === 1 ? 'bet' : 'bets'} closed`);
+          cell.addEventListener('click', () => { calPick = day; render('day:' + day); });
+        } else if (day > today || day < rows[0].day) {
+          cell.classList.add('pm-cal-out'); // before the desk's first day or still to come
+        }
+        if (day === today) cell.classList.add('pm-cal-today');
+        if (r && day === calPick) cell.classList.add('pm-cal-sel');
+        grid.append(cell);
+      }
+
+      const detail = document.createElement('p');
+      detail.className = 'pm-cal-detail';
+      const r = byDay.get(calPick);
+      if (r && calPick.startsWith(prefix)) {
+        const label = document.createElement('b');
+        label.textContent = calPick === today ? 'Today so far' : shortDay(asDate(calPick));
+        const amt = document.createElement('span');
+        amt.className = ('pm-cal-amt ' + tone(r.pnl_usd)).trim();
+        amt.textContent = signed(r.pnl_usd);
+        const bets = r.trades ? `${count(r.trades)} ${r.trades === 1 ? 'bet' : 'bets'} closed, ${count(r.wins)} made money, ${usd(r.fees_usd)} in fees` : 'no bets closed';
+        detail.append(label, document.createTextNode(': '), amt, document.createTextNode(' · ' + bets));
+      } else {
+        detail.textContent = inMonth.length ? 'Tap a day to see its bets.' : 'No trading this month.';
+      }
+      el.append(head, grid, detail);
+      if (focus) {
+        const target = focus.startsWith('day:') ? el.querySelector(`[data-day="${focus.slice(4)}"]`) : el.querySelector(`[data-nav="${focus.slice(4)}"]`);
+        if (target && !target.disabled) target.focus();
+      }
+    };
+    render();
   });
 })();
 </script>
