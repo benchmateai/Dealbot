@@ -138,7 +138,14 @@ def _paper_case(tmp_path):
 
 
 def test_the_test_buys_the_cheap_side_on_either_venue_marks_it_and_settles_it(tmp_path):
-    _paper_case(tmp_path)
+    f = _paper_case(tmp_path)
+    early = test.evaluate(tmp_path, since_ms=T0, until_ms=T0 + 3_650_000)["variants"]["hurdle_1c"]  # before Kalshi settles
+    k_early = next(e for e in early["entries"] if e["venue"] == "kalshi")
+    assert k_early["payout"] is None and k_early["worth_bid"] == pytest.approx(round(f - 0.01, 3)) and 0 < k_early["worth_fair"] < 1
+    assert early["by_venue"]["kalshi"]["pnl_at_bids_usd"] == pytest.approx(
+        k_early["n"] * (k_early["worth_bid"] - k_early["price"]) - k_early["fee"] - k_early["carry"], abs=0.01)
+    assert early["by_venue"]["kalshi"]["pnl_at_options_usd"] == pytest.approx(
+        k_early["n"] * (k_early["worth_fair"] - k_early["price"]) - k_early["fee"] - k_early["carry"], abs=0.01)
     r = test.evaluate(tmp_path, since_ms=T0)
     one, three = r["variants"]["hurdle_1c"], r["variants"]["hurdle_3c"]
     assert {(e["venue"], e["side"]) for e in one["entries"]} == {("kalshi", "yes"), ("poly", "no")}
@@ -195,3 +202,86 @@ def test_a_reader_can_open_one_stream_s_files_only(tmp_path):
     assert {r["kind"] for r in read_lab(tmp_path)} == {"gap_quote", "book"}
     assert [r["kind"] for r in read_lab(tmp_path, streams=("gap",))] == ["gap_quote"]
     assert [r["kind"] for r in read_lab(tmp_path, streams=("",))] == ["book"]
+
+
+def test_a_yes_and_a_no_on_one_venue_pair_off_free_their_money_and_count_as_a_dollar():
+    book = test.Book(0.01)
+    book.offer(T0, "m", "kalshi", {"bid": 0.105, "ask": 0.115, "bid_size": 500.0, "ask_size": 500.0}, 0.155, 0.0, 0.1, "terminal")
+    book.offer(T0 + 1_800_000, "m", "kalshi", {"bid": 0.195, "ask": 0.205, "bid_size": 500.0, "ask_size": 500.0}, 0.155, 0.0, 0.1, "terminal")
+    yes, no = book.pos[("m", "kalshi", "yes")], book.pos[("m", "kalshi", "no")]
+    assert (yes["n"], no["n"], yes["paired"], no["paired"]) == (500, 124, 124, 124)  # 124 NO at 80.5c pair off 124 of the 500 YES
+    assert book.open_cost() == pytest.approx(376 * 0.115)  # $43.24 tied up, not $157.32
+    end = T0 + 30 * DAY
+    assert test.Book.carry(no, end) == 0.0  # paired the moment it was bought
+    assert test.Book.carry(yes, end) == pytest.approx(0.115 * (376 * 30 * DAY + 124 * 1_800_000) * test.CARRY_RATE / YEAR_MS)
+    bids = test.Book.worth(yes)[1] + test.Book.worth(no)[1]
+    assert bids == pytest.approx(376 * 0.105 + 124 * 1.0)  # each pair counts at $1, not at the bids' 90c
+
+
+def test_the_hurdle_counts_kalshi_s_fee_as_charged_rounded_up_per_order():
+    q = {"bid": None, "ask": 0.071, "bid_size": None, "ask_size": 1.5}
+    small = test.Book(0.01)
+    small.offer(T0, "m", "kalshi", q, 0.0874, 0.07, 0.0, "touch")
+    assert small.pos == {}  # one contract pays a whole cent of fee, so its edge is 0.6c, under the 1c hurdle
+    big = test.Book(0.01)
+    big.offer(T0, "m", "kalshi", dict(q, ask_size=500.0), 0.0874, 0.07, 0.0, "touch")
+    assert big.pos[("m", "kalshi", "yes")]["fee"] == 2.31  # 500 contracts: the rounding is a rounding
+
+
+def _touch_case(path, index_path):
+    model = {"kind": "touch_up", "k": 100_000, "by": iso(T)}
+    store = LabStore(path, stream="gap")
+    store.write("gap_pair", {"pair": "btc-high-100k", "kalshi": "K", "polymarket_us": "P", "category": "crypto", "k_fee": 0.07, "p_fee": 0.095,
+                             "k_close": T, "p_end": T, "model": model}, ts_ms=T0)
+    store.write("opt_surface", flat(index=99_000.0), ts_ms=T0)
+    for dt, level in index_path:
+        store.write("opt_index", {"index": level}, ts_ms=T0 + dt)
+    k = {"bid": 0.98, "ask": 0.99, "bid_size": 500.0, "ask_size": 500.0, "status": "active", "result": None, "ts": T0 + 130_000}
+    p = {"bid": 0.98, "ask": 0.99, "bid_size": 500.0, "ask_size": 500.0, "state": "MARKET_STATE_OPEN", "ts": T0 + 130_000}
+    store.write("gap_quote", {"pair": "btc-high-100k", "k": k, "p": p}, ts_ms=T0 + 130_000)
+    store.wait_sealed()
+    store.close()
+    return test.evaluate(path, since_ms=T0)
+
+
+def test_a_barrier_the_index_reached_stays_reached_and_is_not_traded_again(tmp_path):
+    quiet = _touch_case(tmp_path / "quiet", [(1_000, 99_000.0), (60_000, 98_700.0), (120_000, 98_500.0)])
+    assert quiet["variants"]["hurdle_3c"]["entries"]  # never reached: the options' price is about 0.9, so NO at 2c looks cheap
+    touched = _touch_case(tmp_path / "touched", [(1_000, 99_000.0), (60_000, 100_050.0), (120_000, 98_500.0)])
+    assert touched["summary"]["touched"] == ["btc-high-100k"] and not any(v["entries"] for v in touched["variants"].values())
+
+
+def test_with_the_cap_full_a_buy_that_pairs_off_counts_the_money_its_pairing_frees():
+    book = test.Book(0.01)
+    book.pos[("other", "kalshi", "yes")] = {"n": 26_000, "paired": 0, "price": 0.11155, "payout": None}  # $2,900.30 of the cap elsewhere
+    book.offer(T0, "m", "kalshi", {"bid": 0.115, "ask": 0.125, "bid_size": 112.0, "ask_size": 500.0}, 0.095, 0.0, 0.0, "terminal")  # NO at 88.5c
+    assert book.pos[("m", "kalshi", "no")]["n"] == 112 and book.open_cost() == pytest.approx(2_900.3 + 112 * 0.885)  # 58 cents of room left
+    book.offer(T0 + 1_800_000, "m", "kalshi", {"bid": 0.105, "ask": 0.115, "bid_size": 500.0, "ask_size": 2_000.0}, 0.195, 0.0, 0.0, "terminal")
+    yes = book.pos[("m", "kalshi", "yes")]
+    assert yes["n"] == 869 and yes["paired"] == 112  # the full $100 at 11.5c: 112 pair off and free $99.12 (without that, 117)
+    assert book.open_cost() == pytest.approx(2_900.3 + 757 * 0.115) and book.open_cost() <= test.CAP_USD
+
+
+def test_a_touch_after_the_market_s_deadline_does_not_count(tmp_path):
+    model = {"kind": "touch_up", "k": 100_000, "by": iso(T0 + 60_000)}  # its window ends a minute in
+    store = LabStore(tmp_path, stream="gap")
+    store.write("gap_pair", {"pair": "btc-high-100k", "kalshi": "K", "polymarket_us": "P", "category": "crypto", "model": model}, ts_ms=T0)
+    store.write("opt_surface", flat(index=99_000.0), ts_ms=T0)
+    store.write("opt_index", {"index": 100_050.0}, ts_ms=T0 + 120_000)
+    store.wait_sealed()
+    store.close()
+    assert test.evaluate(tmp_path, since_ms=T0)["summary"]["touched"] == []
+
+
+def test_the_dashboard_marks_a_reached_or_closed_market_and_does_not_colour_it(tmp_path):
+    from dashboard.options import label, rows
+    r = _touch_case(tmp_path / "touch", [(1_000, 99_000.0), (60_000, 100_050.0), (120_000, 98_500.0)])
+    models = {"btc-high-100k": {"kind": "touch_up", "k": 100_000, "by": iso(T)}}
+    market = next(x for x in rows(r, now_ms=T0 + 200_000, models=models) if x["table"] == "opt_market")
+    assert market["state"] == "reached" and market["fair"] == 1.0 and market["kalshi_mid"] == pytest.approx(0.985)
+    assert market["label"] == "How high: $100k"
+    _paper_case(tmp_path / "range")  # its last quote is Kalshi's settled market
+    r = test.evaluate(tmp_path / "range", since_ms=T0)
+    market = next(x for x in rows(r, now_ms=T0 + 3_800_000) if x["table"] == "opt_market")
+    assert market["state"] == "closed" and market["ts"] == T0 + 3_601_000 == r["summary"]["priced_until_ms"]  # its last priced quote
+    assert market["label"] == "btc-eoy-70k-75k" == label("btc-eoy-70k-75k", None)  # no model recorded: the pair's name, not an error

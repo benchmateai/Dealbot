@@ -93,6 +93,35 @@ The coordinator then:
 3. Tell the owner in two or three lines only what was wrong and what changed, or what is theirs to
    decide.
 
+## Running cost and budgets (from 2026-11-10)
+
+The owner asked to see what the team costs to run beside what it makes. get_session reports each session's
+cumulative usage cost (`usage.cost_usd`), and only the coordinator reads it. Each morning report writes the
+seven costs to a snapshot, `<coordinator scratchpad>/costs/today.json`:
+`{"at": ISO, "sessions": {role: {"id", "cost_usd", "created_at"}}}`, with the roles of `ops/budgets.json`
+(coordinator, runner, watchdog, analyst, lab_rest, lab_ws, lab_gap); a teammate replaced since the last
+snapshot has its old session read too (each of them, if it was replaced more than once) and added under `"retired": {old id: {"role", "cost_usd"}}`, so what
+it spent before the switch is counted. It then runs `python3 -m reports.costs
+--snapshot <that file> --ledger <coordinator scratchpad>/costs/ledger.jsonl --record --paper-24h <the
+round's paper change over the last 24 hours>`: each teammate's spend since the last morning against its
+daily budget, the team's total, and the desk's paper result beside it. The supervisor checks run it the same
+way on their own snapshot (`costs/now.json`) without `--record`. A teammate that has spent a whole day's
+budget since the morning is a runaway: the coordinator reads its last replies, stops or fixes the loop as
+the escalation section says, and tells the owner in two lines. The budgets in `ops/budgets.json` change only
+with the owner, and nothing is stopped automatically for being over one.
+
+## Review before push (from 2026-11-10)
+
+A commit that touches money code (`ops/money_paths.txt`: what places, sizes, fills, prices, fees, settles or
+reports money) goes to `claude/desk-skeleton` only after a fresh reviewer has read it. The coordinator
+starts a subagent (the Agent tool, general-purpose) with the brief in `ops/review_prompt.md` and the commit
+range, and gives it the code, not the coordinator's own view of the change. Every finding is fixed or
+answered before the push, and the commit's message then carries a `Reviewed-by:` trailer naming the
+reviewer and what came of its findings; the diff sent to the owner says the same. `ops/review_gate.py`
+refuses a push of such a commit without the trailer: the coordinator's clone runs it as git's pre-push hook
+(`git config core.hooksPath ops/hooks`). The runners push only data through their chunk scripts and are not
+affected.
+
 ## Shadow strategies
 
 On 2026-11-03 the owner chose to keep the live test unchanged and judge the analyst's proposal beside

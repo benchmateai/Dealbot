@@ -283,7 +283,7 @@ button.pm-cal-day { cursor: pointer; }
         <tbody data-draw="opt-market-rows"></tbody>
       </table>
     </div>
-    <p class="pm-note" data-opt="running" hidden>YES prices in cents; each venue's is the middle of its bid and ask (Poly US is Polymarket US). Largest gaps first. <span class="pm-up">Green</span>: at least 1¢ cheaper than the options say, so YES would be the buy. <span class="pm-down">Red</span>: at least 1¢ dearer, so NO would be. As of <b data-draw="opt-when" data-source="opt_summary" data-field="end_ms" data-where="id=options">—</b>.</p>
+    <p class="pm-note" data-opt="running" hidden>YES prices in cents; each venue's is the middle of its bid and ask (Poly US is Polymarket US). Largest gaps first. <span class="pm-up">Green</span>: at least 1¢ cheaper than the options say, so YES would be the buy. <span class="pm-down">Red</span>: at least 1¢ dearer, so NO would be. Prices as of <b data-draw="opt-when" data-source="opt_summary" data-field="priced_until_ms" data-where="id=options">—</b>.</p>
     <div class="pm-table-wrap" data-opt="buys" hidden>
       <table class="pm-table pm-table-fit" data-source="opt_positions" data-row-key="id">
         <thead><tr><th data-field="label">Paper buy, 2¢ hurdle</th><th data-field="price" class="pm-r">Paid</th><th data-field="contracts" class="pm-r">Count</th><th data-field="pnl_at_options_usd" class="pm-r">At options</th></tr></thead>
@@ -633,7 +633,7 @@ button.pm-cal-day { cursor: pointer; }
   rowFigure('opt-p-gap', 'opt_summary', 'options', 'poly_all_median_gap_cents', gapCents);
   rowFigure('opt-p-ranges', 'opt_summary', 'options', 'poly_terminal_median_gap_cents', gapCents);
   rowFigure('opt-p-touch', 'opt_summary', 'options', 'poly_touch_median_gap_cents', gapCents);
-  rowFigure('opt-when', 'opt_summary', 'options', 'end_ms', when);
+  rowFigure('opt-when', 'opt_summary', 'options', 'priced_until_ms', when);
   rowFigure('opt-2c', 'opt_variants', 'hurdle_2c', 'pnl_at_options_usd', signed, true);
   rowFigure('opt-2c-n', 'opt_variants', 'hurdle_2c', 'positions', count);
   rowFigure('opt-2c-cost', 'opt_variants', 'hurdle_2c', 'cost_usd', usd);
@@ -674,7 +674,10 @@ button.pm-cal-day { cursor: pointer; }
       return 'pm-r' + (g <= -0.01 ? ' pm-up' : g >= 0.01 ? ' pm-down' : '');
     };
     for (const m of d.data) {
-      cellRow(tbody, m.id, [[String(m.label), ''], [priceCents(m.fair), 'pm-r'], [priceCents(m.kalshi_mid), vs(m.kalshi_mid, m.fair)], [priceCents(m.poly_mid), vs(m.poly_mid, m.fair)]]);
+      const done = m.state === 'reached' || m.state === 'closed'; // no longer traded: shown, not coloured
+      const name = String(m.label) + (m.state === 'reached' ? ' · price reached' : m.state === 'closed' ? ' · closed' : '');
+      cellRow(tbody, m.id, [[name, ''], [priceCents(m.fair), 'pm-r'], [priceCents(m.kalshi_mid), done ? 'pm-r' : vs(m.kalshi_mid, m.fair)],
+        [priceCents(m.poly_mid), done ? 'pm-r' : vs(m.poly_mid, m.fair)]]);
     }
   });
   dash.draw('opt-position-rows', (tbody) => {
