@@ -2,7 +2,7 @@
 
 Each pair in lab/gap_pairs.json names one Kalshi market and the Polymarket US market that settles the same way
 (its `rules` note says why the two match). Every EVERY_S seconds the recorder reads Kalshi's best bid and ask
-for the pairs in batches of KALSHI_BATCH (GET /markets?tickers=..., public: three requests a pass for 219 pairs,
+for the pairs in batches of KALSHI_BATCH (GET /markets?tickers=..., public: two requests a pass for 219 pairs,
 since Kalshi's public limit is shared by the team's sessions) and, right after each batch, the book of each
 Polymarket US market in it (GET https://gateway.polymarket.us/v1/markets/{slug}/book, public), POLY_WORKERS
 at a time, so the two quotes of a pair are seconds apart. It writes to its own hour files (<HH>.gap.jsonl):
@@ -46,7 +46,7 @@ STREAM = "gap"
 PM_US = "https://gateway.polymarket.us"
 EVERY_S = 60
 HEARTBEAT_S = 600
-KALSHI_BATCH = 100
+KALSHI_BATCH = 110           # Kalshi answers 150 tickers in one GET /markets; 110 keeps 219 pairs to two requests a pass
 POLY_WORKERS = 8
 KALSHI_TAKER = 0.07          # Kalshi's taker coefficient, times the series' fee_multiplier
 PM_TAKER_DEFAULT = 0.095     # Polymarket US's tier-1 taker coefficient, when a market does not publish its own
