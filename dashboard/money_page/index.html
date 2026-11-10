@@ -19,6 +19,10 @@
 .pm .pm-down { color: var(--color-bad); }
 .pm-chart { position: relative; min-height: 150px; margin-top: var(--cds-gap-sm); }
 .pm-cal { display: grid; gap: var(--cds-gap-sm); min-height: 18rem; }
+.pm-cal-tabs { display: inline-flex; justify-self: start; gap: 2px; padding: 3px; border: 1px solid var(--color-border-line); border-radius: 999px; }
+.pm-cal-tab { border: 0; border-radius: 999px; background: transparent; color: var(--color-fg-muted); font: inherit; font-size: var(--cds-font-size-caption); padding: 6px 14px; cursor: pointer; }
+.pm-cal-tab[aria-pressed="true"] { background: var(--color-fg); color: var(--color-panel); font-weight: var(--cds-font-weight-medium); }
+.pm-cal-tab:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
 .pm-cal-head { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem; align-items: center; gap: var(--cds-gap-xs); }
 .pm-cal-title { display: grid; justify-items: center; gap: 2px; text-align: center; min-width: 0; }
 .pm-cal-month { font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
@@ -166,7 +170,7 @@ button.pm-cal-day { cursor: pointer; }
 
   <section class="pm-card" id="days" aria-labelledby="days-title">
     <h2 id="days-title">Daily P&amp;L</h2>
-    <p class="pm-note">The change in paper equity each day, midnight to midnight Arizona time, after fees, so the days add up to the net result above. Tap a day for its bets.</p>
+    <p class="pm-note">The change in paper equity each day, midnight to midnight Arizona time, after fees, so a desk's days add up to its net result. Tap a day for the details.</p>
     <div class="pm-cal dash-skeleton" data-draw="day-calendar" data-source="calendar"></div>
   </section>
 
@@ -289,39 +293,54 @@ button.pm-cal-day { cursor: pointer; }
     description: 'Paper equity, the last reading in each 10-minute slot.',
     fn: (paper) => paper.filter((r) => r.table === 'equity'),
   });
+  // Arizona days from an equity series [{t, v, ...}]: each day's last reading less the day before's (the
+  // bankroll before the first), so the days add up to the net result; a reading exactly at midnight closes the
+  // day before. Each field named in `parts` (the E desk's payments and fills) also gets the day's change.
+  const arizonaDays = (points, start, parts = []) => {
+    const last = new Map();
+    const pts = points.filter((q) => Number.isFinite(q.t) && Number.isFinite(q.v)).sort((a, b) => a.t - b.t);
+    for (const q of pts) last.set(azDay(q.t - 1), q);
+    let prev = { v: Number.isFinite(start) ? start : (pts.length ? pts[0].v : null) };
+    for (const k of parts) prev[k] = 0;
+    return [...last.keys()].sort().map((day) => {
+      const q = last.get(day);
+      const row = { id: day, day, open_usd: prev.v, close_usd: q.v, pnl_usd: prev.v === null ? 0 : toCents(q.v - prev.v) };
+      for (const k of parts) row[k] = Number.isFinite(q[k]) && Number.isFinite(prev[k]) ? toCents(q[k] - prev[k]) : null;
+      prev = q;
+      return row;
+    });
+  };
   dash.calc('calendar', {
     inputs: ['paper'],
-    title: 'Daily P&L',
-    description: 'The change in paper equity for each Arizona day (midnight to midnight, UTC-7): its last reading less the day before\'s (the bankroll before the first), so the days add up to the net result; with the bets that closed that day, how many made money, and their fees.',
+    title: 'Daily P&L, desk v2',
+    description: 'Desk v2\'s change in paper equity for each Arizona day (midnight to midnight, UTC-7): its last reading less the day before\'s (the bankroll before the first), so the days add up to the net result; with the bets that closed that day, how many made money, and their fees.',
     fn: (paper) => {
       const s = paper.find((r) => r.table === 'summary');
-      const days = new Map();
-      const get = (day) => {
-        if (!days.has(day)) days.set(day, { id: day, day, open_usd: null, close_usd: null, pnl_usd: 0, trades: 0, wins: 0, fees_usd: 0 });
-        return days.get(day);
-      };
-      const eq = paper.filter((r) => r.table === 'equity')
-        .map((r) => ({ t: Number(r.t_ms), v: Number(r.equity_usd) }))
-        .filter((q) => Number.isFinite(q.t) && Number.isFinite(q.v))
-        .sort((a, b) => a.t - b.t);
-      for (const q of eq) get(azDay(q.t)).close_usd = q.v;
+      const points = paper.filter((r) => r.table === 'equity').map((r) => ({ t: Number(r.t_ms), v: Number(r.equity_usd) }));
+      const rows = arizonaDays(points, s ? Number(s.start_usd) : NaN);
+      const byDay = new Map(rows.map((r) => [r.day, Object.assign(r, { trades: 0, wins: 0, fees_usd: 0 })]));
       for (const t of paper) {
         if (t.table !== 'trade' || t.closed_ms === null || t.closed_ms === undefined || t.pnl_usd === null || t.pnl_usd === undefined) continue;
-        const r = get(azDay(Number(t.closed_ms)));
+        const r = byDay.get(azDay(Number(t.closed_ms)));
+        if (!r) continue;
         r.trades += 1;
         if (Number(t.pnl_usd) > 0) r.wins += 1;
         r.fees_usd += Number(t.fees_usd) || 0;
       }
-      let prev = s && Number.isFinite(Number(s.start_usd)) ? Number(s.start_usd) : (eq.length ? eq[0].v : null);
-      return [...days.keys()].sort().map((day) => {
-        const r = days.get(day);
-        r.open_usd = prev;
-        if (r.close_usd === null) r.close_usd = prev;
-        r.pnl_usd = prev === null || r.close_usd === null ? 0 : toCents(r.close_usd - prev);
-        r.fees_usd = toCents(r.fees_usd);
-        prev = r.close_usd;
-        return r;
-      });
+      for (const r of rows) r.fees_usd = toCents(r.fees_usd);
+      return rows;
+    },
+  });
+  dash.calc('calendar_edesk', {
+    inputs: ['paper'],
+    title: 'Daily P&L, E desk',
+    description: "The E desk's change in paper equity for each Arizona day, from its equity at every 10-minute mark (its bankroll before the first), so the days add up to its net result; with the day's change in Kalshi's payments and in what its fills are worth.",
+    fn: (paper) => {
+      const e = paper.find((r) => r.table === 'edesk');
+      if (!e || !e.started) return [];
+      const points = paper.filter((r) => r.table === 'edesk_equity')
+        .map((r) => ({ t: Number(r.t_ms), v: Number(r.equity_usd), payable_usd: Number(r.payable_usd), fills_marked_usd: Number(r.fills_marked_usd) }));
+      return arizonaDays(points, Number(e.bankroll_usd), ['payable_usd', 'fills_marked_usd']);
     },
   });
 
@@ -664,41 +683,69 @@ button.pm-cal-day { cursor: pointer; }
   const longDay = d3.utcFormat('%A, %B %-d');
   const fullCell = d3.format('+,.2f');
   const smallCell = (v) => (Math.abs(v) < 10 ? d3.format('+.2f')(v) : Math.abs(v) < 100 ? d3.format('+.1f')(v) : d3.format('+,.0f')(v));
-  let calMonth = null; // [year, month 0-11] on show
-  let calPick = null; // the picked day, 'YYYY-MM-DD'
+  const calState = { v2: { month: null, pick: null }, edesk: { month: null, pick: null } }; // [year, month 0-11], 'YYYY-MM-DD'
+  let calDesk = null; // 'v2' or 'edesk': the E desk once it has days, else desk v2
   dash.draw('day-calendar', (el) => {
-    const d = dash.data('calendar');
-    if (d.status === 'error') { el.replaceChildren(); el.classList.remove('dash-skeleton'); failLine(el); return; }
-    if (d.status !== 'ok' || !Array.isArray(d.data)) return;
+    const dv = dash.data('calendar');
+    if (dv.status === 'error') { el.replaceChildren(); el.classList.remove('dash-skeleton'); failLine(el); return; }
+    if (dv.status !== 'ok' || !Array.isArray(dv.data)) return;
     el.classList.remove('dash-skeleton');
-    const rows = d.data;
-    if (!rows.length) {
-      el.replaceChildren();
-      const p = document.createElement('p');
-      p.className = 'pm-chart-note';
-      p.textContent = 'Days appear as the desk trades.';
-      el.append(p);
-      return;
-    }
-    const byDay = new Map(rows.map((r) => [r.day, r]));
+    const de = dash.data('calendar_edesk');
+    const dr = dash.data('edesk');
+    const edeskRow = dr.status === 'ok' && Array.isArray(dr.data) ? dr.data[0] || null : null;
+    const sets = { v2: dv.data, edesk: de.status === 'ok' && Array.isArray(de.data) ? de.data : [] };
+    if (!calDesk) calDesk = sets.edesk.length ? 'edesk' : 'v2';
     const today = azDay(Date.now());
     const ym = (day) => [Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1];
     const key = ([y, m]) => y * 12 + m;
-    const lo = key(ym(rows[0].day));
-    const hi = Math.max(key(ym(rows[rows.length - 1].day)), key(ym(today)));
-    if (!calPick || !byDay.has(calPick)) calPick = byDay.has(today) ? today : rows[rows.length - 1].day;
-    if (!calMonth || key(calMonth) < lo || key(calMonth) > hi) calMonth = ym(calPick);
     const tone = (v) => (v > 0 ? 'pm-up' : v < 0 ? 'pm-down' : '');
 
     const render = (focus) => {
       el.replaceChildren();
-      const [y, m] = calMonth;
+      const desk = calDesk;
+      const rows = sets[desk];
+      const st = calState[desk];
+      const tabs = document.createElement('div');
+      tabs.className = 'pm-cal-tabs';
+      tabs.setAttribute('role', 'group');
+      tabs.setAttribute('aria-label', 'Desk');
+      for (const [id, label] of [['v2', 'Desk v2'], ['edesk', 'E desk']]) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pm-cal-tab';
+        b.dataset.desk = id;
+        b.textContent = label;
+        b.setAttribute('aria-pressed', String(id === desk));
+        b.addEventListener('click', () => { calDesk = id; render('desk:' + id); });
+        tabs.append(b);
+      }
+      el.append(tabs);
+      const waiting = desk === 'edesk' && !rows.length; // the E desk before its first day
+      if (!rows.length && !waiting) {
+        const p = document.createElement('p');
+        p.className = 'pm-chart-note';
+        p.textContent = 'Days appear as the desk trades.';
+        el.append(p);
+        if (focus) el.querySelector(`[data-desk="${desk}"]`)?.focus();
+        return;
+      }
+      const byDay = new Map(rows.map((r) => [r.day, r]));
+      const startMs = edeskRow ? Number(edeskRow.start_ms) : NaN;
+      const firstDay = rows.length ? rows[0].day : Number.isFinite(startMs) ? azDay(startMs) : today;
+      const lastDay = rows.length ? rows[rows.length - 1].day : firstDay;
+      const lo = key(ym(firstDay));
+      const hi = Math.max(key(ym(lastDay)), key(ym(today)));
+      if (!st.pick || !byDay.has(st.pick)) st.pick = byDay.has(today) ? today : rows.length ? lastDay : null;
+      if (!st.month || key(st.month) < lo || key(st.month) > hi) st.month = ym(st.pick || firstDay);
+      const [y, m] = st.month;
       const prefix = `${y}-${String(m + 1).padStart(2, '0')}-`;
       const inMonth = rows.filter((r) => r.day.startsWith(prefix));
       const total = inMonth.length ? toCents(inMonth[inMonth.length - 1].close_usd - inMonth[0].open_usd) : 0;
       const up = inMonth.filter((r) => r.pnl_usd > 0).length;
       const down = inMonth.filter((r) => r.pnl_usd < 0).length;
       const narrow = (el.clientWidth || 320) < 440;
+      const parts = (r) => (desk === 'edesk' && r.payable_usd !== null && r.fills_marked_usd !== null
+        ? `Kalshi's payments ${signed(r.payable_usd)}, fills ${signed(r.fills_marked_usd)}` : null);
 
       const head = document.createElement('div');
       head.className = 'pm-cal-head';
@@ -709,10 +756,10 @@ button.pm-cal-day { cursor: pointer; }
         b.dataset.nav = dir < 0 ? 'prev' : 'next';
         b.textContent = dir < 0 ? '‹' : '›';
         b.setAttribute('aria-label', dir < 0 ? 'Previous month' : 'Next month');
-        b.disabled = dir < 0 ? key(calMonth) <= lo : key(calMonth) >= hi;
+        b.disabled = dir < 0 ? key(st.month) <= lo : key(st.month) >= hi;
         b.addEventListener('click', () => {
-          const k = key(calMonth) + dir;
-          calMonth = [Math.floor(k / 12), k % 12];
+          const k = key(st.month) + dir;
+          st.month = [Math.floor(k / 12), k % 12];
           render('nav:' + b.dataset.nav);
         });
         return b;
@@ -725,10 +772,14 @@ button.pm-cal-day { cursor: pointer; }
       month.textContent = monthName(new Date(Date.UTC(y, m, 1)));
       const sum = document.createElement('span');
       sum.className = 'pm-cal-sum';
-      const amount = document.createElement('b');
-      amount.textContent = signed(total);
-      if (tone(total)) amount.className = tone(total);
-      sum.append(amount, document.createTextNode(` · ${up} ${up === 1 ? 'day' : 'days'} up, ${down} down`));
+      if (waiting) {
+        sum.textContent = 'not started yet';
+      } else {
+        const amount = document.createElement('b');
+        amount.textContent = signed(total);
+        if (tone(total)) amount.className = tone(total);
+        sum.append(amount, document.createTextNode(` · ${up} ${up === 1 ? 'day' : 'days'} up, ${down} down`));
+      }
       title.append(month, sum);
       head.append(nav(-1), title, nav(1));
 
@@ -768,34 +819,43 @@ button.pm-cal-day { cursor: pointer; }
           v.textContent = narrow ? smallCell(r.pnl_usd) : fullCell(r.pnl_usd);
           cell.append(v);
           cell.classList.add(r.pnl_usd > 0 ? 'pm-cal-up' : r.pnl_usd < 0 ? 'pm-cal-down' : 'pm-cal-flat');
-          cell.setAttribute('aria-pressed', String(day === calPick));
-          cell.setAttribute('aria-label', `${longDay(asDate(day))}${day === today ? ' (today)' : ''}: ${signed(r.pnl_usd)}, ${r.trades} ${r.trades === 1 ? 'bet' : 'bets'} closed`);
-          cell.addEventListener('click', () => { calPick = day; render('day:' + day); });
-        } else if (day > today || day < rows[0].day) {
+          cell.setAttribute('aria-pressed', String(day === st.pick));
+          const extra = desk === 'v2' ? `${r.trades} ${r.trades === 1 ? 'bet' : 'bets'} closed` : parts(r);
+          cell.setAttribute('aria-label', `${longDay(asDate(day))}${day === today ? ' (today)' : ''}: ${signed(r.pnl_usd)}${extra ? ', ' + extra : ''}`);
+          cell.addEventListener('click', () => { st.pick = day; render('day:' + day); });
+        } else if (day > today || day < firstDay) {
           cell.classList.add('pm-cal-out'); // before the desk's first day or still to come
         }
         if (day === today) cell.classList.add('pm-cal-today');
-        if (r && day === calPick) cell.classList.add('pm-cal-sel');
+        if (r && day === st.pick) cell.classList.add('pm-cal-sel');
         grid.append(cell);
       }
 
       const detail = document.createElement('p');
       detail.className = 'pm-cal-detail';
-      const r = byDay.get(calPick);
-      if (r && calPick.startsWith(prefix)) {
+      const r = st.pick ? byDay.get(st.pick) : null;
+      if (r && st.pick.startsWith(prefix)) {
         const label = document.createElement('b');
-        label.textContent = calPick === today ? 'Today so far' : shortDay(asDate(calPick));
+        label.textContent = st.pick === today ? 'Today so far' : shortDay(asDate(st.pick));
         const amt = document.createElement('span');
         amt.className = ('pm-cal-amt ' + tone(r.pnl_usd)).trim();
         amt.textContent = signed(r.pnl_usd);
-        const bets = r.trades ? `${count(r.trades)} ${r.trades === 1 ? 'bet' : 'bets'} closed, ${count(r.wins)} made money, ${usd(r.fees_usd)} in fees` : 'no bets closed';
-        detail.append(label, document.createTextNode(': '), amt, document.createTextNode(' · ' + bets));
+        const extra = desk === 'v2'
+          ? (r.trades ? `${count(r.trades)} ${r.trades === 1 ? 'bet' : 'bets'} closed, ${count(r.wins)} made money, ${usd(r.fees_usd)} in fees` : 'no bets closed')
+          : parts(r);
+        detail.append(label, document.createTextNode(': '), amt);
+        if (extra) detail.append(document.createTextNode(' · ' + extra));
+      } else if (waiting) {
+        detail.textContent = Number.isFinite(startMs)
+          ? `The E desk starts ${shortDay(asDate(azDay(startMs)))} at ${d3.utcFormat('%-I:%M %p')(new Date(startMs - AZ_OFFSET_MS))} Arizona time. Its days fill in here as it runs.`
+          : 'The E desk has not started yet. Its days fill in here as it runs.';
       } else {
-        detail.textContent = inMonth.length ? 'Tap a day to see its bets.' : 'No trading this month.';
+        detail.textContent = inMonth.length ? 'Tap a day for the details.' : 'No trading this month.';
       }
       el.append(head, grid, detail);
       if (focus) {
-        const target = focus.startsWith('day:') ? el.querySelector(`[data-day="${focus.slice(4)}"]`) : el.querySelector(`[data-nav="${focus.slice(4)}"]`);
+        const [kind, arg] = [focus.slice(0, focus.indexOf(':')), focus.slice(focus.indexOf(':') + 1)];
+        const target = el.querySelector(kind === 'day' ? `[data-day="${arg}"]` : kind === 'nav' ? `[data-nav="${arg}"]` : `[data-desk="${arg}"]`);
         if (target && !target.disabled) target.focus();
       }
     };
