@@ -141,7 +141,7 @@ class Book:
             out["drift"][f"{h}h"] = {"positions": len(seen),
                                      "gap_at_entry_cents": round(100 * sum(r["gap0"] for r in seen) / len(seen), 2) if seen else None,
                                      "gap_after_cents": round(100 * sum(r["drift"][h] for r in seen) / len(seen), 2) if seen else None}
-        out["entries"] = sorted(({k: r[k] for k in ("ts", "pair", "venue", "side", "price", "n", "edge", "worth_fair", "worth_bid", "payout")} for r in rows),
+        out["entries"] = sorted(({k: r[k] for k in ("ts", "pair", "venue", "side", "price", "n", "fee", "edge", "worth_fair", "worth_bid", "payout")} for r in rows),
                                 key=lambda r: r["ts"])
         return out
 
@@ -161,14 +161,14 @@ def _wmedian(rows: list[tuple[float, float]]) -> float | None:
 
 def evaluate(lab_dir: str | Path, *, since_ms: int = REGISTERED_MS, until_ms: int | None = None, hurdles: dict[str, float] = HURDLES) -> dict:
     pairs: dict[str, dict] = {}
-    for r in read_lab(lab_dir, since_ms=max(0, since_ms - PAIR_LOOKBACK_MS), until_ms=until_ms, kinds=("gap_pair",)):
+    for r in read_lab(lab_dir, since_ms=max(0, since_ms - PAIR_LOOKBACK_MS), until_ms=until_ms, kinds=("gap_pair",), streams=("gap",)):
         if r.get("model"):
             pairs[r["pair"]] = r
     surfaces: list[tuple[int, dict]] = []
     index: list[tuple[int, float]] = []
     quotes: list[tuple[int, str, dict, dict]] = []
     end_ts = 0
-    for r in read_lab(lab_dir, since_ms=since_ms, until_ms=until_ms, kinds=("gap_pair", "gap_quote", "opt_surface", "opt_index")):
+    for r in read_lab(lab_dir, since_ms=since_ms, until_ms=until_ms, kinds=("gap_pair", "gap_quote", "opt_surface", "opt_index"), streams=("gap",)):
         end_ts = max(end_ts, r["ts"])
         if r["kind"] == "gap_pair":
             if r.get("model"):

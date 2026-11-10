@@ -7,7 +7,7 @@
 .pm-eyebrow { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); letter-spacing: 0.06em; text-transform: uppercase; }
 .pm-title { margin: 0; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); text-wrap: balance; }
 .pm-lede { margin: 0; font-size: var(--cds-font-size-body); color: var(--color-fg-muted); max-width: 38rem; }
-.pm .pm-lede b, .pm .pm-foot b, .pm .pm-hero-sub b, .pm .pm-tile-sub b { font-weight: var(--cds-font-weight-medium); color: var(--color-fg); font-variant-numeric: tabular-nums; }
+.pm .pm-lede b, .pm .pm-foot b, .pm .pm-hero-sub b, .pm .pm-tile-sub b { font-weight: var(--cds-font-weight-medium); color: var(--color-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pm-card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); min-width: 0; }
 .pm-card h2 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); }
 .pm-note { margin: var(--cds-gap-xs) 0 var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
@@ -62,6 +62,8 @@ button.pm-cal-day { cursor: pointer; }
 .pm-table th { position: sticky; top: 0; background: var(--color-panel); text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
 .pm-table td { padding: var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
 .pm-table .pm-r { text-align: right; }
+.pm-table-fit th, .pm-table-fit td { padding-inline: 6px; }
+.pm-table-fit td:first-child { white-space: normal; min-width: 7rem; }
 .pm-result { text-transform: capitalize; }
 .pm-result.pm-won { color: var(--color-ok); }
 .pm-result.pm-lost { color: var(--color-bad); }
@@ -248,6 +250,48 @@ button.pm-cal-day { cursor: pointer; }
     </div>
   </section>
 
+  <section class="pm-card" id="options" aria-labelledby="options-title" hidden>
+    <h2 id="options-title">Bitcoin options test (paper)</h2>
+    <span data-draw="opt-state" data-source="opt_summary"></span>
+    <p class="pm-note">Kalshi's and Polymarket US's 44 Bitcoin markets beside the price Bitcoin's options imply. Wherever a venue sells a side for less than that, by more than its fee and the cost of the money until the market settles, the test makes a paper buy at the displayed price, at most $100 a market. The year-end ranges are priced straight from the options; the "hits a price" markets from a model, so trust those prices less. They settle on Jan 1. No orders are placed.</p>
+    <p class="pm-note" data-opt="waiting" hidden>Recording started on Nov 10. The first prices appear here within a couple of hours.</p>
+    <div class="pm-tiles" data-opt="running" hidden>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Kalshi vs the options</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="opt-k-gap" data-source="opt_summary" data-field="kalshi_all_median_gap_cents" data-where="id=options">—</div>
+        <div class="pm-tile-sub">median gap; ranges <b data-draw="opt-k-ranges" data-source="opt_summary" data-field="kalshi_terminal_median_gap_cents" data-where="id=options">—</b>, hits-a-price <b data-draw="opt-k-touch" data-source="opt_summary" data-field="kalshi_touch_median_gap_cents" data-where="id=options">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Polymarket US vs the options</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="opt-p-gap" data-source="opt_summary" data-field="poly_all_median_gap_cents" data-where="id=options">—</div>
+        <div class="pm-tile-sub">median gap; ranges <b data-draw="opt-p-ranges" data-source="opt_summary" data-field="poly_terminal_median_gap_cents" data-where="id=options">—</b>, hits-a-price <b data-draw="opt-p-touch" data-source="opt_summary" data-field="poly_touch_median_gap_cents" data-where="id=options">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Paper buys, 2¢ hurdle</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="opt-2c" data-source="opt_variants" data-field="pnl_at_options_usd" data-where="id=hurdle_2c">—</div>
+        <div class="pm-tile-sub">at the options' price; buys: <b data-draw="opt-2c-n" data-source="opt_variants" data-field="positions" data-where="id=hurdle_2c">—</b>, cost <b data-draw="opt-2c-cost" data-source="opt_variants" data-field="cost_usd" data-where="id=hurdle_2c">—</b>; <b data-draw="opt-2c-bids" data-source="opt_variants" data-field="pnl_at_bids_usd" data-where="id=hurdle_2c">—</b> at the venues' bids</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">1¢ and 3¢ hurdles</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="opt-1c" data-source="opt_variants" data-field="pnl_at_options_usd" data-where="id=hurdle_1c">—</div>
+        <div class="pm-tile-sub">1¢ at the options' price (buys: <b data-draw="opt-1c-n" data-source="opt_variants" data-field="positions" data-where="id=hurdle_1c">—</b>); 3¢: <b data-draw="opt-3c" data-source="opt_variants" data-field="pnl_at_options_usd" data-where="id=hurdle_3c">—</b> (buys: <b data-draw="opt-3c-n" data-source="opt_variants" data-field="positions" data-where="id=hurdle_3c">—</b>)</div>
+      </div>
+    </div>
+    <div class="pm-table-wrap" data-opt="running" hidden>
+      <table class="pm-table pm-table-fit" data-source="opt_markets" data-row-key="id">
+        <thead><tr><th data-field="label">Market</th><th data-field="fair" class="pm-r">Options</th><th data-field="kalshi_mid" class="pm-r">Kalshi</th><th data-field="poly_mid" class="pm-r">Poly US</th></tr></thead>
+        <tbody data-draw="opt-market-rows"></tbody>
+      </table>
+    </div>
+    <p class="pm-note" data-opt="running" hidden>YES prices in cents; each venue's is the middle of its bid and ask (Poly US is Polymarket US). Largest gaps first. <span class="pm-up">Green</span>: at least 1¢ cheaper than the options say, so YES would be the buy. <span class="pm-down">Red</span>: at least 1¢ dearer, so NO would be. As of <b data-draw="opt-when" data-source="opt_summary" data-field="end_ms" data-where="id=options">—</b>.</p>
+    <div class="pm-table-wrap" data-opt="buys" hidden>
+      <table class="pm-table pm-table-fit" data-source="opt_positions" data-row-key="id">
+        <thead><tr><th data-field="label">Paper buy, 2¢ hurdle</th><th data-field="price" class="pm-r">Paid</th><th data-field="contracts" class="pm-r">Count</th><th data-field="pnl_at_options_usd" class="pm-r">At options</th></tr></thead>
+        <tbody data-draw="opt-position-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="pm-card" id="bets" aria-labelledby="bets-title">
     <h2 id="bets-title">Every bet</h2>
     <p class="pm-note">Newest first. Each contract pays $1 if its side is right at the 15-minute close; the stake is what the side cost. Profit or loss is after the Kalshi fee.</p>
@@ -367,6 +411,30 @@ button.pm-cal-day { cursor: pointer; }
     title: 'E desk by kind of market',
     description: "The E desk's payments, fills marked and net for each kind of market (Kalshi's category for the series), largest net first.",
     fn: (paper) => paper.filter((r) => r.table === 'edesk_category').sort((a, b) => Number(b.net_usd) - Number(a.net_usd)),
+  });
+  dash.calc('opt_summary', {
+    inputs: ['paper'],
+    title: 'Bitcoin options test',
+    description: "The Bitcoin options test's totals: each venue's median gap to the price Bitcoin's options imply (all, the year-end ranges, the hits-a-price markets) and how often an edge of 1 cent or more was there after fees and the cost of the money.",
+    fn: (paper) => paper.filter((r) => r.table === 'opt_summary'),
+  });
+  dash.calc('opt_variants', {
+    inputs: ['paper'],
+    title: 'Options test variants',
+    description: 'One row per hurdle (1, 2 and 3 cents beyond the fee and the money\'s cost): paper buys, cost, and their worth at the options\' price and at the venues\' bids.',
+    fn: (paper) => paper.filter((r) => r.table === 'opt_variant'),
+  });
+  dash.calc('opt_markets', {
+    inputs: ['paper'],
+    title: 'Bitcoin markets beside the options',
+    description: "Each Bitcoin pair's price from the options and both venues' mid prices, largest gap first.",
+    fn: (paper) => paper.filter((r) => r.table === 'opt_market'),
+  });
+  dash.calc('opt_positions', {
+    inputs: ['paper'],
+    title: 'Options test paper buys',
+    description: "The 2-cent variant's paper buys, newest first, with each one's worth at the options' price.",
+    fn: (paper) => paper.filter((r) => r.table === 'opt_position').sort((a, b) => Number(b.opened_ms) - Number(a.opened_ms)),
   });
   dash.calc('previous', {
     inputs: ['paper'],
@@ -555,6 +623,70 @@ button.pm-cal-day { cursor: pointer; }
     const d = dash.data('previous');
     const none = d.status === 'ok' && d.data.length === 0;
     for (const sec of document.querySelectorAll('#previous')) sec.hidden = none;
+  });
+
+  const gapCents = (v) => d3.format('.1f')(v) + '¢';
+  const priceCents = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? '—' : d3.format('.1f')(100 * Number(v)));
+  rowFigure('opt-k-gap', 'opt_summary', 'options', 'kalshi_all_median_gap_cents', gapCents);
+  rowFigure('opt-k-ranges', 'opt_summary', 'options', 'kalshi_terminal_median_gap_cents', gapCents);
+  rowFigure('opt-k-touch', 'opt_summary', 'options', 'kalshi_touch_median_gap_cents', gapCents);
+  rowFigure('opt-p-gap', 'opt_summary', 'options', 'poly_all_median_gap_cents', gapCents);
+  rowFigure('opt-p-ranges', 'opt_summary', 'options', 'poly_terminal_median_gap_cents', gapCents);
+  rowFigure('opt-p-touch', 'opt_summary', 'options', 'poly_touch_median_gap_cents', gapCents);
+  rowFigure('opt-when', 'opt_summary', 'options', 'end_ms', when);
+  rowFigure('opt-2c', 'opt_variants', 'hurdle_2c', 'pnl_at_options_usd', signed, true);
+  rowFigure('opt-2c-n', 'opt_variants', 'hurdle_2c', 'positions', count);
+  rowFigure('opt-2c-cost', 'opt_variants', 'hurdle_2c', 'cost_usd', usd);
+  rowFigure('opt-2c-bids', 'opt_variants', 'hurdle_2c', 'pnl_at_bids_usd', signed, true);
+  rowFigure('opt-1c', 'opt_variants', 'hurdle_1c', 'pnl_at_options_usd', signed, true);
+  rowFigure('opt-1c-n', 'opt_variants', 'hurdle_1c', 'positions', count);
+  rowFigure('opt-3c', 'opt_variants', 'hurdle_3c', 'pnl_at_options_usd', signed, true);
+  rowFigure('opt-3c-n', 'opt_variants', 'hurdle_3c', 'positions', count);
+  dash.draw('opt-state', () => {
+    const d = dash.data('opt_summary');
+    const row = d.status === 'ok' && Array.isArray(d.data) ? d.data[0] : null;
+    const started = Boolean(row && row.started);
+    const pos = dash.data('opt_positions');
+    const buys = started && pos.status === 'ok' && Array.isArray(pos.data) && pos.data.length > 0;
+    for (const sec of document.querySelectorAll('#options')) sec.hidden = !row;
+    for (const el of document.querySelectorAll('#options [data-opt]')) {
+      el.hidden = el.dataset.opt === 'waiting' ? started : el.dataset.opt === 'buys' ? !buys : !started;
+    }
+  });
+  const cellRow = (tbody, key, cells) => {
+    const tr = document.createElement('tr');
+    tr.dataset.key = String(key);
+    for (const [text, cls] of cells) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      if (cls) td.className = cls;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  };
+  dash.draw('opt-market-rows', (tbody) => {
+    tbody.replaceChildren();
+    const d = dash.data('opt_markets');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return;
+    const vs = (mid, fair) => {
+      if (mid === null || mid === undefined || !Number.isFinite(Number(mid))) return 'pm-r';
+      const g = Number(mid) - Number(fair);
+      return 'pm-r' + (g <= -0.01 ? ' pm-up' : g >= 0.01 ? ' pm-down' : '');
+    };
+    for (const m of d.data) {
+      cellRow(tbody, m.id, [[String(m.label), ''], [priceCents(m.fair), 'pm-r'], [priceCents(m.kalshi_mid), vs(m.kalshi_mid, m.fair)], [priceCents(m.poly_mid), vs(m.poly_mid, m.fair)]]);
+    }
+  });
+  dash.draw('opt-position-rows', (tbody) => {
+    tbody.replaceChildren();
+    const d = dash.data('opt_positions');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return;
+    for (const b of d.data.slice(0, 60)) {
+      const pnl = Number(b.pnl_at_options_usd);
+      const what = `${b.label} · ${String(b.side).toUpperCase()} on ${b.venue === 'poly' ? 'Polymarket US' : 'Kalshi'}`;
+      cellRow(tbody, b.id, [[what, ''], [priceCents(b.price) + '¢', 'pm-r'], [count(Number(b.contracts)), 'pm-r'],
+        [signed(pnl), 'pm-r' + (pnl > 0 ? ' pm-up' : pnl < 0 ? ' pm-down' : '')]]);
+    }
   });
 
   dash.draw('bets-state', () => {
