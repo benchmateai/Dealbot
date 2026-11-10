@@ -33,6 +33,8 @@ def _usd(k: int) -> str:
 def label(pair: str, model: dict | None) -> str:
     """A pair's market in a few plain words: 'Year end $70k-75k', 'How high: $100k', '$100k by Nov 30'."""
     m = model or {}
+    if not m:  # no model recorded for it: the pair's own name
+        return pair
     kind = m.get("kind")
     if kind == "range":
         return f"Year end {_usd(int(m['lo']))}–{_usd(int(m['hi']))[1:]}"
@@ -69,10 +71,11 @@ def rows(report: dict, *, now_ms: int, models: dict[str, dict] | None = None) ->
         out.append(row)
     for m in report["latest"]:
         out.append({"table": "opt_market", "id": m["pair"], "label": label(m["pair"], models.get(m["pair"])), "group": m["group"],
-                    "fair": m["fair"], "kalshi_mid": m["kalshi_mid"], "poly_mid": m["poly_mid"], "ts": m["ts"]})
+                    "fair": m["fair"], "kalshi_mid": m["kalshi_mid"], "poly_mid": m["poly_mid"], "ts": m["ts"],
+                    "state": "reached" if m.get("touched") else "closed" if m.get("closed") else "open"})
     shown = report["variants"].get(SHOWN_VARIANT) or {"entries": []}
     for e in shown["entries"]:
-        pnl_fair = e["n"] * (e["worth_fair"] - e["price"]) - e.get("fee", 0.0)
+        pnl_fair = e["n"] * (e["worth_fair"] - e["price"]) - e.get("fee", 0.0) - e.get("carry", 0.0)  # as the variant's total counts it
         out.append({"table": "opt_position", "id": f"{e['pair']}:{e['venue']}:{e['side']}", "label": label(e["pair"], models.get(e["pair"])),
                     "venue": e["venue"], "side": e["side"], "price": e["price"], "contracts": e["n"], "opened_ms": e["ts"],
                     "worth_fair": round(e["worth_fair"], 4), "worth_bid": round(e["worth_bid"], 4), "payout": e["payout"],
