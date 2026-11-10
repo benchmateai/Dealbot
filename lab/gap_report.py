@@ -64,6 +64,12 @@ def locks(k: dict, p: dict, k_fee: float, p_fee: float) -> dict | None:
     return out
 
 
+def _share(rows: list[dict], key: str) -> float:
+    """A share of the time over several pairs, each weighted by the hours it was seen."""
+    hours = sum(r["hours"] for r in rows)
+    return round(sum(r[key] * r["hours"] for r in rows) / hours, 4) if hours else 0.0
+
+
 def report(lab_dir: str | Path, *, since_ms: int = 0, until_ms: int | None = None, carry_rate: float = CARRY_RATE) -> dict:
     pairs: dict[str, dict] = {}
     series: dict[str, list[tuple[int, dict, dict]]] = defaultdict(list)
@@ -80,7 +86,8 @@ def report(lab_dir: str | Path, *, since_ms: int = 0, until_ms: int | None = Non
     rows = []
     for pair, quotes in sorted(series.items()):
         info = pairs.get(pair) or {}
-        k_fee, p_fee = float(info.get("k_fee") or 0.07), float(info.get("p_fee") or 0.095)
+        k_fee = 0.07 if info.get("k_fee") is None else float(info["k_fee"])  # 0.0 means the market charges no fee
+        p_fee = 0.095 if info.get("p_fee") is None else float(info["p_fee"])
         settles = min([x for x in (info.get("k_close"), info.get("p_end")) if x], default=None)
         quotes.sort(key=lambda q: q[0])
         seen_s = crossed_s = paying_s = carried_s = 0.0
@@ -127,9 +134,8 @@ def report(lab_dir: str | Path, *, since_ms: int = 0, until_ms: int | None = Non
     mids_all = [r["mid_gap_median_cents"] for r in seen if r["mid_gap_median_cents"] is not None]
     summary = {"pairs": len(pairs), "pairs_seen": len(seen), "hours": round(sum(r["hours"] for r in seen), 1),
                "median_mid_gap_cents": round(statistics.median(mids_all), 2) if mids_all else None,
-               "crossed_share": round(sum(r["crossed_share"] * r["hours"] for r in seen) / max(1e-9, sum(r["hours"] for r in seen)), 4) if seen else 0.0,
-               "paying_share": round(sum(r["paying_share"] * r["hours"] for r in seen) / max(1e-9, sum(r["hours"] for r in seen)), 4) if seen else 0.0,
-               "paying_after_carry_share": round(sum(r["paying_after_carry_share"] * r["hours"] for r in seen) / max(1e-9, sum(r["hours"] for r in seen)), 4) if seen else 0.0,
+               "crossed_share": _share(seen, "crossed_share"), "paying_share": _share(seen, "paying_share"),
+               "paying_after_carry_share": _share(seen, "paying_after_carry_share"),
                "carry_rate": carry_rate,
                "pairs_with_lasting_episode": sum(1 for r in seen if r["lasting_episodes"]),
                "lasting_episodes": sum(r["lasting_episodes"] for r in seen),
@@ -138,8 +144,12 @@ def report(lab_dir: str | Path, *, since_ms: int = 0, until_ms: int | None = Non
     by_cat: dict[str, list[dict]] = defaultdict(list)
     for r in seen:
         by_cat[r["category"] or "other"].append(r)
+    # by kind of market too: Kalshi quotes its year-end Bitcoin ranges in tenths of a cent and Polymarket US in
+    # whole cents, so the cheapest ranges' books cross by a fraction of a cent most of the time
     summary["categories"] = {c: {"pairs": len(v), "median_mid_gap_cents": round(statistics.median([r["mid_gap_median_cents"] for r in v if r["mid_gap_median_cents"] is not None]), 2)
                                  if any(r["mid_gap_median_cents"] is not None for r in v) else None,
+                                 "crossed_share": _share(v, "crossed_share"), "paying_share": _share(v, "paying_share"),
+                                 "paying_after_carry_share": _share(v, "paying_after_carry_share"),
                                  "lasting_episodes": sum(r["lasting_episodes"] for r in v)} for c, v in sorted(by_cat.items())}
     return {"summary": summary, "pairs": rows}
 
@@ -165,7 +175,9 @@ def main(argv: list[str] | None = None) -> int:
         Path(args.out).write_text(json.dumps(r, indent=1))
     print(one_line(r["summary"]))
     for cat, v in r["summary"].get("categories", {}).items():
-        print(f"  {cat}: {v['pairs']} pairs, median mid gap {v['median_mid_gap_cents']}c, {v['lasting_episodes']} lasting paying gaps")
+        print(f"  {cat}: {v['pairs']} pairs, median mid gap {v['median_mid_gap_cents']}c, crossed {100 * v['crossed_share']:.2f}%, "
+              f"paying after fees {100 * v['paying_share']:.2f}% and after the money's cost {100 * v['paying_after_carry_share']:.2f}%, "
+              f"{v['lasting_episodes']} lasting paying gaps")
     top = sorted((x for x in r["pairs"] if x["best"]), key=lambda x: -x["best"]["net_after_carry"])[:5]
     for x in top:
         b = x["best"]

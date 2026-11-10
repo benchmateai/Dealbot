@@ -95,7 +95,62 @@ def test_the_recorder_writes_each_pair_with_its_fees_then_quotes_only_when_they_
 
 def test_pairs_must_be_unique_and_the_shipped_list_is():
     shipped = load_pairs()
-    assert len(shipped) >= 100 and {p["category"] for p in shipped} <= {"economic", "political", "sports"}
+    assert len(shipped) >= 100 and {p["category"] for p in shipped} <= {"crypto", "economic", "political", "sports"}
+
+
+def test_a_series_kalshi_charges_no_fee_on_counts_as_free_not_as_unknown(tmp_path):
+    clock = {"ms": T0}
+    kalshi, poly = FakeKalshi(), FakePoly()
+    kalshi.quotes["KXBTCY-27JAN0100-B67500"] = ("0.1360", "0.1530")
+    poly.books["cpc-btc-eoy-67500"] = ([("0.1100", "40")], [("0.1200", "40")])
+    free = {"id": "btc-eoy-65k-70k", "kalshi": "KXBTCY-27JAN0100-B67500", "polymarket_us": "cpc-btc-eoy-67500", "category": "crypto", "rules": "same minute"}
+    listed = kalshi.get
+
+    def get(path, params=None):  # Kalshi publishes a fee multiplier of 0 on its year-end Bitcoin ranges
+        return {"series": {"fee_multiplier": 0}} if path == "/series/KXBTCY" else listed(path, params)
+    kalshi.get = get
+    rec = GapRecorder(LabStore(tmp_path, stream="gap"), LabRest(kalshi, Budget(1e9, 1e9)), PolyUS(Budget(1e9, 1e9), opener=poly), PAIRS + [free],
+                      now_ms=lambda: clock["ms"])
+    rec.describe()
+    rec.poll()
+    clock["ms"] += 300_000
+    rec.write_status(note="end")
+    rec.store.wait_sealed()
+    rec.store.close()
+    pairs = {r["pair"]: r for r in read_lab(tmp_path) if r["kind"] == "gap_pair"}
+    assert pairs["btc-eoy-65k-70k"]["k_fee"] == 0.0 and pairs["sb-sf"]["k_fee"] == 0.07
+    row = next(r for r in report(tmp_path)["pairs"] if r["pair"] == "btc-eoy-65k-70k")
+    # NO on Kalshi at its 13.6-cent YES bid and YES on Polymarket US at 12 cents: 1.6 cents less Polymarket US's fee alone
+    assert row["best"]["net"] == pytest.approx(0.016 - 0.095 * 0.12 * 0.88, abs=1e-4)
+
+
+class Refusing:
+    """Kalshi refusing the first request of each kind once, as its shared public limit does (LabRest then
+    returns None after waiting out the refusal)."""
+
+    def __init__(self, inner):
+        self.inner, self.refused = inner, set()
+
+    def get(self, path, params=None):
+        kind = path.split("/")[1]
+        if kind not in self.refused:
+            self.refused.add(kind)
+            return None
+        return self.inner.get(path, params)
+
+    def counters(self):
+        return self.inner.counters()
+
+
+def test_a_refused_lookup_is_tried_again_so_no_pair_loses_its_fee_or_settlement_date(tmp_path):
+    kalshi, poly = FakeKalshi(), FakePoly()
+    rec = GapRecorder(LabStore(tmp_path, stream="gap"), Refusing(LabRest(kalshi, Budget(1e9, 1e9))), PolyUS(Budget(1e9, 1e9), opener=poly), PAIRS,
+                      now_ms=lambda: T0)
+    rec.describe()
+    rec.store.wait_sealed()
+    rec.store.close()
+    pairs = [r for r in read_lab(tmp_path) if r["kind"] == "gap_pair"]
+    assert len(pairs) == 2 and all(r["k_close"] and r["k_fee"] == 0.07 for r in pairs)
 
 
 def test_a_pair_listed_twice_is_refused(tmp_path):
@@ -152,3 +207,5 @@ def test_the_report_times_the_gaps_and_charges_the_money_tied_up(tmp_path):
     late_row = late_r["pairs"][0]
     assert late_row["paying_share"] > 0 and late_row["paying_after_carry_share"] == 0 and late_row["lasting_episodes"] == 0
     assert late_r["summary"]["pairs_seen"] == 1 and soon_r["summary"]["lasting_episodes"] == 1
+    assert soon_r["summary"]["categories"]["economic"]["paying_share"] == soon_r["summary"]["paying_share"] == row["paying_share"]
+    assert late_r["summary"]["categories"]["economic"]["paying_after_carry_share"] == 0
