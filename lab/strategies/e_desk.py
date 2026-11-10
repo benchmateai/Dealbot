@@ -281,11 +281,13 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = START_MS, until_ms: int | N
             continue
         first_ts = ts if first_ts is None else first_ts
         last_ts = ts
-        if next_snap is None:
-            next_snap = ts
-        while ts >= next_snap:  # one equity point every SNAPSHOT_MS of recording
-            equity.append([next_snap, round(rule["bankroll_usd"] + payable() + marked(), 2)])
-            next_snap += SNAPSHOT_MS
+        if next_snap is None:  # the clock's next SNAPSHOT_MS mark, so a day's last point is its close
+            next_snap = ts - ts % SNAPSHOT_MS + SNAPSHOT_MS
+        if ts >= next_snap:  # [time, equity, payments so far, what the fills are worth] at each mark passed
+            pay_now, mark_now = payable(), marked()
+            while ts >= next_snap:
+                equity.append([next_snap, round(rule["bankroll_usd"] + pay_now + mark_now, 2), round(pay_now, 2), round(mark_now, 2)])
+                next_snap += SNAPSHOT_MS
         if r["kind"] == "series_meta":
             if r.get("series"):
                 recorded[r["series"]] = r
@@ -447,7 +449,7 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = START_MS, until_ms: int | N
         "blackout_markets": len({t for t, _ in blacked}), "headline_markets": len(headlined),
     }
     if last_ts is not None:
-        equity.append([last_ts, summary["equity_usd"]])
+        equity.append([last_ts, summary["equity_usd"], summary["payable_usd"], summary["fills_marked_usd"]])
     return {"rules": rule, "summary": summary, "markets": markets, "categories": categories, "equity": equity, "events": events}
 
 

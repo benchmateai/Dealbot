@@ -158,6 +158,22 @@ def test_rows_replace_only_the_old_e_desk_rows(tmp_path):
     assert merged[1]["net_usd"] == 2.0 and merged[1]["week_day"] == 3 and "stopped_markets" not in merged[1]
 
 
+def test_its_equity_is_read_on_the_clock_with_the_payments_and_fills_that_make_it(tmp_path):
+    items = [("incentives", {"programs": [_program("M", 0.5, target="100.00")]}, T0)]
+    for k in range(12):
+        items.append(_book(T0 + 1000 + k * 200_000, "M", None, None, yes=[[0.50, 100.0]], no=[[0.45, 100.0]], set="E"))
+    items.append(("trade", {"ticker": "M", "yes_price": 0.49, "count": 50.0, "taker_side": "no"}, T0 + 900_000))
+    _write(tmp_path, sorted(items, key=lambda x: x[2]))
+    report = e_desk.evaluate(tmp_path, since_ms=0, rules=OFF)
+    points, s = report["equity"], report["summary"]
+    assert len(points) >= 3 and all(t % e_desk.SNAPSHOT_MS == 0 for t, *_ in points[:-1])  # on the clock: a day's last point closes it
+    assert all(eq == pytest.approx(10_000 + pay + mark, abs=0.011) for _, eq, pay, mark in points)
+    assert points[-1][1:] == [s["equity_usd"], s["payable_usd"], s["fills_marked_usd"]]
+    out = [r for r in rows(report, now_ms=T0 + 86_400_000) if r["table"] == "edesk_equity"]
+    assert len(out) == len(points) and len({r["id"] for r in out}) == len(out)
+    assert (out[-1]["equity_usd"], out[-1]["payable_usd"], out[-1]["fills_marked_usd"]) == (s["equity_usd"], s["payable_usd"], s["fills_marked_usd"])
+
+
 def test_the_health_line_judges_how_fresh_the_live_feed_is(tmp_path):
     _write(tmp_path, [_book(T0, "M", None, None, yes=YES, no=NO, set="E")])
     assert health(tmp_path, now_ms=T0 + 10 * 60_000) == ("health: OK · newest E book 10 minutes old", 0)

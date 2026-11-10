@@ -6,7 +6,8 @@
 Rows, each with a `table` column like the rest of money.json:
   edesk         one row: the desk's totals (lab/strategies/e_desk.py), its start and the end of its week
   edesk_market  one row per market it quoted or holds: payments, contracts, holding, its value and P&L, status
-  edesk_equity  its equity every 10 minutes
+  edesk_equity  its equity at every 10-minute mark of the clock and at the replay's end, with the payments
+                so far and what its fills are worth then (equity = bankroll + payments + fills marked)
   edesk_category one row per kind of market it quoted (sports, political, economic, crypto, other): its
                 payments, fills marked and net
   edesk_variant one row per variant replayed beside it (with --variants; the morning report adds them)
@@ -42,8 +43,11 @@ def rows(report: dict, *, now_ms: int) -> list[dict]:
         out.append({"table": "edesk_market", "id": m["ticker"], **m})
     for c in report.get("categories") or []:
         out.append({"table": "edesk_category", "id": c["group"], **c})
-    for ts, eq in report.get("equity") or []:
-        out.append({"table": "edesk_equity", "id": f"q{ts}", "t_ms": ts, "equity_usd": eq})
+    for i, (ts, eq, *parts) in enumerate(report.get("equity") or []):
+        point = {"table": "edesk_equity", "id": f"q{i}", "t_ms": ts, "equity_usd": eq}
+        if len(parts) >= 2:
+            point["payable_usd"], point["fills_marked_usd"] = parts[0], parts[1]
+        out.append(point)
     for name, v in (report.get("variants") or {}).items():
         out.append({"table": "edesk_variant", "id": name, **{k: x for k, x in v.items() if x is None or isinstance(x, (int, float, str, bool))}})
     return out
