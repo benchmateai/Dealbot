@@ -12,8 +12,11 @@ imply, the "hits $X" markets at a model's price), and then:
            and the touch markets apart; and how often an edge of 1 cent or more was there to take
   trades   per variant, a paper taker buy at the displayed price and size, on either venue, of the side (YES at
            the ask, or NO at 1 - bid) worth more than it costs by the variant's hurdle after the venue's taker fee
-           (Kalshi's rounded up to the cent per order) and CARRY_RATE a year on the money until settlement; at
-           most STAKE_USD per market, side and venue, and CAP_USD open in all; one buy each, held to settlement
+           as charged (Kalshi's rounded up to the cent per order) and CARRY_RATE a year on the money until
+           settlement; at most STAKE_USD per market, side and venue, and CAP_USD open in all; one buy each, held
+           to settlement. A YES and a NO in one market on one venue pair off, as the venues net them: the pair is
+           worth $1 and ties up no money from then on. A touch market whose barrier Deribit's index has reached is
+           priced at 1 from then on and no longer traded
   marks    each position at the options' price now and at what the venue would pay for it now (its bid, or
            1 - ask for a NO), less fees and the cost of the money so far
   drift    how far, in the trade's favor, the venue's mid sat from the options' price at the entry and 1, 6
@@ -78,29 +81,46 @@ def _mid(q: dict) -> float | None:
 
 
 class Book:
-    """One variant's paper positions."""
+    """One variant's paper positions. A YES and a NO bought in one market on one venue pair off, as the venues
+    treat them (Kalshi nets the two into $1 at once; on Polymarket US the NO is a short of the same contract,
+    which closes the long): a paired contract ties up no money from then on and is worth $1 with its other half,
+    whatever the price."""
 
     def __init__(self, hurdle: float) -> None:
         self.hurdle = hurdle
         self.pos: dict[tuple[str, str, str], dict] = {}
-        self.open_cost = 0.0
+
+    def open_cost(self) -> float:
+        """The money the open contracts that have not paired off tie up."""
+        return sum((r["n"] - r["paired"]) * r["price"] for r in self.pos.values() if r["payout"] is None)
 
     def offer(self, ts: int, pair: str, venue: str, q: dict, fair_yes: float, coeff: float, years: float, group: str) -> None:
         for side, price, size, edge in edges(q, fair_yes, coeff, years):
             key = (pair, venue, side)
             if key in self.pos or edge < self.hurdle or price <= 0:
                 continue
-            n = math.floor(min(size, STAKE_USD / price, max(0.0, CAP_USD - self.open_cost) / price))
+            other = self.pos.get((pair, venue, "no" if side == "yes" else "yes"))
+            free = other["n"] - other["paired"] if other is not None and other["payout"] is None else 0
+            freed = free * other["price"] if free else 0.0  # what pairing them off gives back
+            room = max(0.0, CAP_USD - self.open_cost())
+            n = math.floor(min(size, STAKE_USD / price, free + (room + freed) / price))  # contracts that pair off tie up nothing
             if n < 1:
                 continue
+            fee = taker_fee(venue, coeff, price, n)
+            edge += coeff * price * (1 - price) - fee / n  # the fee as charged: Kalshi rounds it up to the cent per order
+            if edge < self.hurdle:
+                continue
+            m = min(n, free)
             mid = _mid(q)
             gap = (fair_yes - (mid if mid is not None else price)) if side == "yes" else ((mid if mid is not None else 1 - price) - fair_yes)
             self.pos[key] = {"ts": ts, "pair": pair, "venue": venue, "side": side, "group": group, "price": round(price, 4), "n": n,
-                             "cost": n * price, "fee": taker_fee(venue, coeff, price, n), "edge": round(edge, 4), "gap0": gap,
-                             "drift": {}, "worth_fair": fair_yes if side == "yes" else 1 - fair_yes,
+                             "paired": m, "pair_ts": ts if m else None, "fee": fee, "edge": round(edge, 4), "gap0": gap, "drift": {},
+                             "worth_fair": fair_yes if side == "yes" else 1 - fair_yes,
                              "worth_bid": (q.get("bid") or 0.0) if side == "yes" else (1 - q["ask"] if q.get("ask") is not None else 0.0),
                              "payout": None, "settled_ts": None}
-            self.open_cost += n * price
+            if m:
+                other["paired"] += m
+                other["pair_ts"] = other["pair_ts"] or ts
 
     def observe(self, ts: int, pair: str, venue: str, q: dict, fair_yes: float) -> None:
         mid = _mid(q)
@@ -121,18 +141,35 @@ class Book:
                 r["payout"] = 1.0 if (r["side"] == result) else 0.0
                 r["worth_fair"] = r["worth_bid"] = r["payout"]
                 r["settled_ts"] = ts
-                self.open_cost -= r["cost"]
+
+    @staticmethod
+    def carry(r: dict, end_ts: int) -> float:
+        """The cost of the money a position tied up: its unpaired contracts until settlement (or the end of the
+        recording), its paired ones only until they paired off."""
+        until = r["settled_ts"] or end_ts
+        paired_until = min(r["pair_ts"], until) if r["pair_ts"] else r["ts"]
+        held = (r["n"] - r["paired"]) * max(0, until - r["ts"]) + r["paired"] * max(0, paired_until - r["ts"])
+        return r["price"] * held * CARRY_RATE / YEAR_MS
+
+    @staticmethod
+    def worth(r: dict) -> tuple[float, float]:
+        """(at the options' price, at the venue's bid) for a position now; a paired contract counts at the options'
+        price on both, so a pair is worth exactly $1."""
+        at_fair = r["n"] * r["worth_fair"]
+        return at_fair, (r["n"] - r["paired"]) * r["worth_bid"] + r["paired"] * r["worth_fair"]
 
     def summary(self, end_ts: int) -> dict:
         def agg(rows: list[dict]) -> dict:
-            cost, fee = sum(r["cost"] for r in rows), sum(r["fee"] for r in rows)
-            carry = sum(r["cost"] * CARRY_RATE * max(0, (r["settled_ts"] or end_ts) - r["ts"]) / YEAR_MS for r in rows)
-            at_fair, at_bid = sum(r["n"] * r["worth_fair"] for r in rows), sum(r["n"] * r["worth_bid"] for r in rows)
+            cost, fee = sum(r["n"] * r["price"] for r in rows), sum(r["fee"] for r in rows)
+            carry = sum(self.carry(r, end_ts) for r in rows)
+            at_fair, at_bid = sum(self.worth(r)[0] for r in rows), sum(self.worth(r)[1] for r in rows)
             return {"positions": len(rows), "contracts": sum(r["n"] for r in rows), "cost_usd": round(cost, 2), "fees_usd": round(fee, 2),
                     "carry_usd": round(carry, 2), "pnl_at_options_usd": round(at_fair - cost - fee - carry, 2),
-                    "pnl_at_bids_usd": round(at_bid - cost - fee - carry, 2), "settled": sum(1 for r in rows if r["payout"] is not None)}
+                    "pnl_at_bids_usd": round(at_bid - cost - fee - carry, 2), "settled": sum(1 for r in rows if r["payout"] is not None),
+                    "paired_contracts": sum(r["paired"] for r in rows)}
         rows = list(self.pos.values())
         out = agg(rows)
+        out["open_cost_usd"] = round(self.open_cost(), 2)
         out["by_venue"] = {v: agg([r for r in rows if r["venue"] == v]) for v in VENUES}
         out["by_group"] = {g: agg([r for r in rows if r["group"] == g]) for g in ("terminal", "touch")}
         out["drift"] = {}
@@ -141,8 +178,8 @@ class Book:
             out["drift"][f"{h}h"] = {"positions": len(seen),
                                      "gap_at_entry_cents": round(100 * sum(r["gap0"] for r in seen) / len(seen), 2) if seen else None,
                                      "gap_after_cents": round(100 * sum(r["drift"][h] for r in seen) / len(seen), 2) if seen else None}
-        out["entries"] = sorted(({k: r[k] for k in ("ts", "pair", "venue", "side", "price", "n", "fee", "edge", "worth_fair", "worth_bid", "payout")} for r in rows),
-                                key=lambda r: r["ts"])
+        out["entries"] = sorted(({**{k: r[k] for k in ("ts", "pair", "venue", "side", "price", "n", "paired", "fee", "edge", "worth_fair", "worth_bid", "payout")},
+                                  "carry": round(self.carry(r, end_ts), 4)} for r in rows), key=lambda r: r["ts"])
         return out
 
 
@@ -186,6 +223,15 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = REGISTERED_MS, until_ms: in
         holds[i] = min(HOLD_MAX_S, max(0, following.get(pair, end_ts) - ts) / 1000)
         following[pair] = ts
 
+    touch = {pair: (r["model"]["kind"] == "touch_up", float(r["model"]["k"]), iso_ms(r["model"]["by"])) for pair, r in pairs.items()
+             if r["model"].get("kind") in ("touch_up", "touch_down")}
+    touched: dict[str, int] = {}
+
+    def see_index(ts: int, spot: float) -> None:  # a barrier the index reached in its window stays reached
+        for pair, (up, barrier, by) in touch.items():
+            if pair not in touched and ts < by and (spot >= barrier if up else spot <= barrier):
+                touched[pair] = ts
+
     books = {name: Book(h) for name, h in hurdles.items()}
     dev = {v: {"terminal": [], "touch": []} for v in VENUES}       # (|mid - fair|, mid - fair, seconds)
     takeable = {v: [0.0, 0.0] for v in VENUES}                      # seconds with an edge of 1c or more, seconds seen
@@ -200,15 +246,27 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = REGISTERED_MS, until_ms: in
                 book.settle(ts, pair, k["result"])
         while si + 1 < len(surfaces) and surfaces[si + 1][0] <= ts:
             si += 1
+            see_index(surfaces[si][0], float(surfaces[si][1]["index"]))
         while ii + 1 < len(index) and index[ii + 1][0] <= ts:
             ii += 1
-        if si < 0 or ts - surfaces[si][0] > SURFACE_MAX_AGE_MS or not _open(k, p):
+            see_index(index[ii][0], index[ii][1])
+        if not _open(k, p):  # a closed or settled market keeps its last priced row, marked as closed
+            if pair in latest:
+                latest[pair]["closed"] = True
+            continue
+        if si < 0 or ts - surfaces[si][0] > SURFACE_MAX_AGE_MS:
             continue
         if ii >= 0 and ts - index[ii][0] <= INDEX_MAX_AGE_MS:
             spot, spot_key = index[ii][1], ("index", ii)
         elif ts - surfaces[si][0] <= INDEX_MAX_AGE_MS:
             spot, spot_key = float(surfaces[si][1]["index"]), ("surface", si)
         else:
+            continue
+        if pair in touched:  # priced at 1 and no longer traded: the venues settle on their own reading of the touch
+            for book in books.values():
+                book.observe(ts, pair, "kalshi", k, 1.0)
+                book.observe(ts, pair, "poly", p, 1.0)
+            latest[pair] = {"pair": pair, "ts": ts, "fair": 1.0, "kalshi_mid": _mid(k), "poly_mid": _mid(p), "group": "touch", "touched": True}
             continue
         key = (pair, si, spot_key)
         if key not in cache:
@@ -247,7 +305,9 @@ def evaluate(lab_dir: str | Path, *, since_ms: int = REGISTERED_MS, until_ms: in
     rows = sorted(latest.values(), key=lambda r: -max(abs((r["kalshi_mid"] if r["kalshi_mid"] is not None else r["fair"]) - r["fair"]),
                                                        abs((r["poly_mid"] if r["poly_mid"] is not None else r["fair"]) - r["fair"])))
     return {"registered_ms": REGISTERED_MS, "since_ms": since_ms, "end_ms": end_ts,
-            "summary": {"pairs": len(pairs), "pairs_priced": len(latest), "surfaces": len(surfaces), "index_points": len(index), "quotes": len(quotes)},
+            "summary": {"pairs": len(pairs), "pairs_priced": len(latest), "surfaces": len(surfaces), "index_points": len(index), "quotes": len(quotes),
+                        "priced_until_ms": max((r["ts"] for r in latest.values()), default=None),
+                        "last_surface_ms": surfaces[-1][0] if surfaces else None, "touched": sorted(touched)},
             "deviation": deviation, "variants": {name: b.summary(end_ts) for name, b in books.items()}, "latest": rows}
 
 

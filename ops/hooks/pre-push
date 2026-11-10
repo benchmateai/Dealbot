@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# git's pre-push hook in the coordinator's clone (git config core.hooksPath ops/hooks): money-code commits
+# go out only with a Reviewed-by: trailer (ops/review_gate.py, ops/TEAM.md "Review before push").
+exec python3 "$(git rev-parse --show-toplevel)/ops/review_gate.py" --hook "$@"
