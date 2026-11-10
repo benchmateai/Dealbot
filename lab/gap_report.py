@@ -75,7 +75,7 @@ def report(lab_dir: str | Path, *, since_ms: int = 0, until_ms: int | None = Non
     series: dict[str, list[tuple[int, dict, dict]]] = defaultdict(list)
     status = None
     end_ts = 0
-    for r in read_lab(lab_dir, since_ms=since_ms, until_ms=until_ms, kinds=("gap_pair", "gap_quote", "gap_status")):
+    for r in read_lab(lab_dir, since_ms=since_ms, until_ms=until_ms, kinds=("gap_pair", "gap_quote", "gap_status"), streams=("gap",)):
         end_ts = max(end_ts, r["ts"])
         if r["kind"] == "gap_pair":
             pairs[r["pair"]] = r

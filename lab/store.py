@@ -102,14 +102,25 @@ def seal(path: Path) -> Path:
     return gz
 
 
-def read_lab(root: str | Path, *, since_ms: int = 0, until_ms: int | None = None, kinds: Iterable[str] | None = None) -> Iterator[dict]:
+def stream_of(path: Path) -> str:
+    """The stream an hour file belongs to: '' for <HH>.jsonl(.gz), 'gap' for <HH>.gap.jsonl(.gz)."""
+    parts = path.name.split(".")
+    return parts[1] if len(parts) > 2 and parts[1] != "jsonl" else ""
+
+
+def read_lab(root: str | Path, *, since_ms: int = 0, until_ms: int | None = None, kinds: Iterable[str] | None = None,
+             streams: Iterable[str] | None = None) -> Iterator[dict]:
     """Records from every hour file (sealed or open) in time order of the hours, skipping a partial last line.
     With `kinds`, a line the store wrote (compact JSON) for another kind is passed over unparsed: most of a
-    recording is trades and index values that a replay of books does not read."""
+    recording is trades and index values that a replay of books does not read. With `streams`, only those
+    streams' files are opened (the gap recorder's 'gap', the live feed's 'ws', '' for the REST recorder)."""
     wanted = set(kinds) if kinds else None
     needles = tuple(f'"kind":"{k}"' for k in wanted) if wanted else ()
+    keep = set(streams) if streams is not None else None
     root = Path(root)
     files = sorted(set(root.glob("*/*.jsonl.gz")) | set(root.glob("*/*.jsonl")), key=lambda p: (p.parent.name, p.name.split(".")[0], p.suffix != ".gz"))
+    if keep is not None:
+        files = [p for p in files if stream_of(p) in keep]
     for p in files:
         hour_start = calendar.timegm(time.strptime(f"{p.parent.name} {p.name[:2]}", "%Y-%m-%d %H")) * 1000
         if until_ms is not None and hour_start >= until_ms or hour_start + 3_600_000 <= since_ms:

@@ -5,7 +5,9 @@
 #   bash ops/watchdog.sh
 #
 # Prints the money line (dashboard.money), the E desk line (dashboard.edesk, on the lab's live-feed
-# recording from shadow-run) and the health line, and exits 3 when the health line is an ALERT, 0
+# recording from shadow-run), the options line (dashboard.options, the Bitcoin options test on the gap
+# recorder's recording, given at most OPTIONS_S seconds) and the health line, and exits 3 when the health
+# line is an ALERT, 0
 # otherwise. The health line judges the round named in ops/round.txt: desk v2's run (reports.health)
 # or, once the E desk is the round, the recording it runs on. MONEY_OUT (default
 # /tmp/dealbot-dashboard/money.json) gets the rows the money dashboard reads; LOG_COPY, when set,
@@ -15,6 +17,7 @@ REPO=$(cd "$(dirname "$0")/.." && pwd)
 RUN_BRANCH=${RUN_BRANCH:-paper-run}
 MONEY_OUT=${MONEY_OUT:-/tmp/dealbot-dashboard/money.json}
 PY=${PY:-python3}
+OPTIONS_S=${OPTIONS_S:-120}
 cd "$REPO"
 
 fetched=""
@@ -40,6 +43,8 @@ lab_ok=""
 if git fetch -q origin shadow-run 2>/dev/null && git archive origin/shadow-run lab/data | tar -x -C "$LAB"; then
   lab_ok=1
   "$PY" -m dashboard.edesk --lab "$LAB/lab/data" --merge-into "$MONEY_OUT" | sed 's/^/edesk: /' || echo "edesk: FAILED to build the E desk rows"
+  timeout "$OPTIONS_S" "$PY" -m dashboard.options --lab "$LAB/lab/data" --merge-into "$MONEY_OUT" | sed 's/^/options: /' \
+    || echo "options: FAILED or out of time building the options test's rows"
 else
   echo "edesk: FAILED to fetch the lab recording (origin/shadow-run)"
 fi
