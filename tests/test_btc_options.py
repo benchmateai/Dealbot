@@ -117,7 +117,9 @@ def _quote(ts, kb, ka, pb, pa, *, result=None, status="active"):
     return ("gap_quote", {"pair": "btc-eoy-70k-75k", "k": k, "p": p}, ts)
 
 
-def test_the_test_buys_the_cheap_side_on_either_venue_marks_it_and_settles_it(tmp_path):
+def _paper_case(tmp_path):
+    """One year-end range for an hour: Kalshi 4 cents under the options' price, Polymarket US 4.5 over, then Kalshi
+    comes to the options' price and settles YES. Returns the options' price at the first quote."""
     model = {"kind": "range", "lo": 70_000, "hi": 75_000, "at": iso(T)}
     f = fair(model, Surface(flat(), T0), T0 + 1000, 75_000.0)
     items = [("gap_pair", {"pair": "btc-eoy-70k-75k", "kalshi": "K", "polymarket_us": "P", "category": "crypto", "k_fee": 0.0, "p_fee": 0.095,
@@ -132,6 +134,11 @@ def test_the_test_buys_the_cheap_side_on_either_venue_marks_it_and_settles_it(tm
         store.write(kind, rec, ts_ms=ts)
     store.wait_sealed()
     store.close()
+    return f
+
+
+def test_the_test_buys_the_cheap_side_on_either_venue_marks_it_and_settles_it(tmp_path):
+    _paper_case(tmp_path)
     r = test.evaluate(tmp_path, since_ms=T0)
     one, three = r["variants"]["hurdle_1c"], r["variants"]["hurdle_3c"]
     assert {(e["venue"], e["side"]) for e in one["entries"]} == {("kalshi", "yes"), ("poly", "no")}
@@ -153,3 +160,38 @@ def test_the_shipped_bitcoin_pairs_each_say_what_they_pay_on():
     assert len(crypto) == 44 and all(p.get("model", {}).get("kind") in ("range", "above", "below", "touch_up", "touch_down") for p in crypto)
     ranges = sorted((p["model"]["lo"], p["model"]["hi"]) for p in crypto if p["model"]["kind"] == "range")
     assert ranges[0] == (20_000, 25_000) and ranges[-1] == (145_000, 150_000) and all(b == c for (_, b), (c, _) in zip(ranges, ranges[1:]))
+
+
+def test_the_dashboard_gets_the_test_s_rows_in_plain_words_and_they_replace_the_old_ones(tmp_path):
+    from dashboard.options import label, merge, rows
+    _paper_case(tmp_path / "lab")
+    r = test.evaluate(tmp_path / "lab", since_ms=T0)
+    new = rows(r, now_ms=T0 + 4_000_000, models={"btc-eoy-70k-75k": {"kind": "range", "lo": 70_000, "hi": 75_000, "at": iso(T)}})
+    tables = [x["table"] for x in new]
+    assert tables.count("opt_summary") == 1 and tables.count("opt_variant") == 3 and tables.count("opt_market") == 1
+    summary = new[0]
+    assert summary["started"] and summary["kalshi_terminal_median_gap_cents"] is not None and summary["poly_edge_share"] >= 0
+    market = next(x for x in new if x["table"] == "opt_market")
+    assert market["label"] == "Year end $70k–75k" and market["group"] == "terminal"
+    two = next(x for x in new if x["id"] == "hurdle_2c")
+    assert two["hurdle_cents"] == 2 and two["positions"] == sum(1 for x in new if x["table"] == "opt_position")
+    assert {x["venue"] for x in new if x["table"] == "opt_position"} == {"kalshi", "poly"}
+    assert label("btc-high-100k", {"kind": "touch_up", "k": 100_000, "by": "2027-01-01T05:00:00Z"}) == "How high: $100k"
+    assert label("btc-low-40k", {"kind": "touch_down", "k": 40_000, "by": "2027-01-01T05:00:00Z"}) == "How low: $40k"
+    assert label("btc-100k-by-dec1", {"kind": "touch_up", "k": 100_000, "by": "2026-12-01T05:00:00Z"}) == "Hits $100k by Nov 30"
+    assert label("btc-eoy-below-20k", {"kind": "below", "k": 20_000, "at": "x"}) == "Year end under $20k"
+    path = tmp_path / "money.json"
+    path.write_text(json.dumps([{"table": "summary", "id": "summary"}, {"table": "opt_summary", "id": "options", "stale": True}, {"table": "edesk", "id": "edesk"}]))
+    merged = merge(path, new)
+    assert [x["table"] for x in merged][:2] == ["summary", "edesk"] and not any(x.get("stale") for x in merged)
+    assert json.loads(path.read_text()) == merged
+
+
+def test_a_reader_can_open_one_stream_s_files_only(tmp_path):
+    LabStore(tmp_path, stream="gap").write("gap_quote", {"pair": "x"}, ts_ms=T0)
+    rest = LabStore(tmp_path)
+    rest.write("book", {"ticker": "K"}, ts_ms=T0)
+    rest.close()
+    assert {r["kind"] for r in read_lab(tmp_path)} == {"gap_quote", "book"}
+    assert [r["kind"] for r in read_lab(tmp_path, streams=("gap",))] == ["gap_quote"]
+    assert [r["kind"] for r in read_lab(tmp_path, streams=("",))] == ["book"]
