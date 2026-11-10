@@ -62,7 +62,7 @@ def _recorder(tmp_path, clock):
 
 def test_quotes_read_each_venue_s_best_prices_and_leave_empty_sides_empty():
     assert kalshi_quote({"yes_bid_dollars": "0.0000", "yes_ask_dollars": "1.0000", "status": "active"}, T0) == \
-        {"bid": None, "ask": None, "bid_size": None, "ask_size": None, "status": "active", "ts": T0}
+        {"bid": None, "ask": None, "bid_size": None, "ask_size": None, "status": "active", "result": None, "ts": T0}
     book = {"marketData": {"bids": [{"px": {"value": "0.0100"}, "qty": "5"}, {"px": {"value": "0.0200"}, "qty": "7"}],
                            "offers": [{"px": {"value": "0.0400"}, "qty": "0"}, {"px": {"value": "0.0300"}, "qty": "9"}], "state": "MARKET_STATE_OPEN"}}
     q = poly_quote(book, T0)
