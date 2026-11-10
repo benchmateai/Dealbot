@@ -1,0 +1,155 @@
+"""The Bitcoin options test: prices from Deribit's option surface (lab/btc_options.py), its recording by the gap
+recorder, and the paper test that buys whichever venue the options say is cheap (lab/strategies/btc_options.py)."""
+
+import io
+import json
+import math
+from datetime import datetime, timezone
+
+import pytest
+
+from lab.btc_options import YEAR_MS, Deribit, Surface, _ncdf, expiry_ms, fair, iso_ms, surface_record
+from lab.gap_recorder import GapRecorder, PolyUS
+from lab.rest import Budget, LabRest
+from lab.store import LabStore, read_lab
+from lab.strategies import btc_options as test
+from tests.test_gaps import PAIRS, T0, FakeKalshi, FakePoly
+
+DAY = 86_400_000
+T = T0 + 45 * DAY  # a contract settling 45 days after T0
+
+
+def iso(ms):
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def flat(vol=0.5, index=75_000.0, days=(30, 60)):
+    """A surface with one volatility at every strike of two expiries, read at T0."""
+    ks = [20_000 + 5_000 * i for i in range(40)]
+    return {"index": index, "expiries": [{"exp": T0 + d * DAY, "f": index, "k": ks, "v": [vol] * len(ks)} for d in days]}
+
+
+def test_with_one_volatility_the_terminal_price_is_black_scholes_and_the_ranges_add_up_to_one():
+    s = Surface(flat(), T0)
+    sd = 0.5 * math.sqrt(45 * DAY / YEAR_MS)
+    for k in (60_000, 75_000, 90_000):
+        d2 = (math.log(75_000 / k) - 0.5 * sd * sd) / sd
+        assert s.prob_above(k, T, T0) == pytest.approx(_ncdf(d2), abs=2e-4)
+    at = iso(T)
+    parts = [fair({"kind": "below", "k": 20_000, "at": at}, s, T0, 75_000.0), fair({"kind": "above", "k": 150_000, "at": at}, s, T0, 75_000.0)]
+    parts += [fair({"kind": "range", "lo": lo, "hi": lo + 5_000, "at": at}, s, T0, 75_000.0) for lo in range(20_000, 150_000, 5_000)]
+    assert sum(parts) == pytest.approx(1.0, abs=1e-9) and min(parts) >= 0
+
+
+def test_a_touch_is_about_twice_the_chance_of_finishing_past_the_barrier():
+    s = Surface(flat(), T0)
+    up, end = s.prob_touch(100_000, T, T0, 75_000.0, up=True), s.prob_above(100_000, T, T0, 75_000.0)
+    down, below = s.prob_touch(60_000, T, T0, 75_000.0, up=False), 1 - s.prob_above(60_000, T, T0, 75_000.0)
+    assert 1.8 * end < up < 2.2 * end and 1.8 * below < down < 2.2 * below  # the reflection rule, give or take the drift
+    assert s.prob_touch(70_000, T, T0, 75_000.0, up=True) == 1.0 and s.prob_touch(80_000, T, T0, 75_000.0, up=False) == 1.0  # already there
+    assert fair({"kind": "touch_up", "k": 100_000, "by": iso(T)}, s, T0, 75_000.0) == pytest.approx(up)
+
+
+def test_volatility_between_two_expiries_interpolates_total_variance_and_moves_with_the_index():
+    rec = flat()
+    rec["expiries"][0]["v"] = [0.4] * 40
+    rec["expiries"][1]["v"] = [0.6] * 40
+    s = Surface(rec, T0)
+    vol, forward, years = s.vol(75_000, T, T0)
+    t1, t2 = 30 * DAY / YEAR_MS, 60 * DAY / YEAR_MS
+    assert vol ** 2 * years == pytest.approx(0.4 ** 2 * t1 + (0.6 ** 2 * t2 - 0.4 ** 2 * t1) * (years - t1) / (t2 - t1))
+    assert s.vol(75_000, T, T0, spot=82_500.0)[1] == pytest.approx(82_500.0)  # the index rose 10%: so did the forward
+
+
+def test_the_surface_keeps_each_expiry_s_out_of_the_money_options_inside_its_window():
+    rows = []
+    for code, fwd in (("8DEC26", 76_000.0), ("25DEC26", 76_500.0), ("10NOV26", 75_100.0)):  # the last expires in under 2 days
+        for k in range(60_000, 95_000, 5_000):
+            for typ in ("C", "P"):
+                iv = 50.0 + (k - 75_000) / 5_000 + (0.5 if typ == "P" else 0.0)
+                rows.append({"instrument_name": f"BTC-{code}-{k}-{typ}", "mark_iv": iv, "underlying_price": fwd, "estimated_delivery_price": 75_000.0})
+    rows.append({"instrument_name": "ETH-25DEC26-3000-C", "mark_iv": 60.0, "underlying_price": 3_000.0})
+    rec = surface_record(rows, None, T0)
+    assert [e["exp"] for e in rec["expiries"]] == [expiry_ms("8DEC26"), expiry_ms("25DEC26")] and rec["index"] == 75_000.0
+    dec = rec["expiries"][1]
+    assert dec["f"] == 76_500.0 and dec["k"] == list(range(60_000, 95_000, 5_000))
+    assert dec["v"][dec["k"].index(70_000)] == pytest.approx(0.495) and dec["v"][dec["k"].index(80_000)] == pytest.approx(0.51)  # puts below, calls above
+    assert expiry_ms("25DEC26") == iso_ms("2026-12-25T08:00:00Z") and expiry_ms("5JAN27") == iso_ms("2027-01-05T08:00:00Z")
+
+
+class FakeDeribit:
+    """Deribit's two public calls, answered with a small Dec 25 surface."""
+
+    def __init__(self):
+        self.urls = []
+
+    def __call__(self, request, timeout=None):
+        self.urls.append(request.full_url)
+        if "get_index_price" in request.full_url:
+            body = {"result": {"index_price": 75_000.0}}
+        else:
+            body = {"result": [{"instrument_name": f"BTC-25DEC26-{k}-{'C' if k >= 76_000 else 'P'}", "mark_iv": 50.0, "underlying_price": 76_000.0}
+                               for k in range(60_000, 95_000, 5_000)]}
+        return io.BytesIO(json.dumps(body).encode())
+
+
+def test_the_gap_recorder_reads_the_index_every_pass_and_the_surface_every_five_minutes(tmp_path):
+    clock = {"ms": T0}
+    deribit = FakeDeribit()
+    rec = GapRecorder(LabStore(tmp_path, stream="gap"), LabRest(FakeKalshi(), Budget(1e9, 1e9)), PolyUS(Budget(1e9, 1e9), opener=FakePoly()), PAIRS,
+                      now_ms=lambda: clock["ms"], options=Deribit(Budget(1e9, 1e9), opener=deribit))
+    for _ in range(6):
+        rec.options_pass()
+        clock["ms"] += 60_000
+    rec.write_status()
+    rec.store.wait_sealed()
+    rec.store.close()
+    recs = list(read_lab(tmp_path))
+    assert sum(r["kind"] == "opt_index" for r in recs) == 6
+    assert [r["ts"] - T0 for r in recs if r["kind"] == "opt_surface"] == [0, 300_000]
+    assert next(r for r in recs if r["kind"] == "gap_status")["deribit"] == {"requests": 8, "errors": 0, "rate_limited": 0}
+    assert all("/api/v2/public/" in u for u in deribit.urls)  # public market data only
+
+
+def _quote(ts, kb, ka, pb, pa, *, result=None, status="active"):
+    k = {"bid": kb, "ask": ka, "bid_size": 500.0, "ask_size": 500.0, "status": status, "result": result, "ts": ts}
+    p = {"bid": pb, "ask": pa, "bid_size": 500.0, "ask_size": 500.0, "state": "MARKET_STATE_OPEN", "ts": ts}
+    return ("gap_quote", {"pair": "btc-eoy-70k-75k", "k": k, "p": p}, ts)
+
+
+def test_the_test_buys_the_cheap_side_on_either_venue_marks_it_and_settles_it(tmp_path):
+    model = {"kind": "range", "lo": 70_000, "hi": 75_000, "at": iso(T)}
+    f = fair(model, Surface(flat(), T0), T0 + 1000, 75_000.0)
+    items = [("gap_pair", {"pair": "btc-eoy-70k-75k", "kalshi": "K", "polymarket_us": "P", "category": "crypto", "k_fee": 0.0, "p_fee": 0.095,
+                           "k_close": T, "p_end": T, "model": model}, T0),
+             ("opt_surface", flat(), T0), ("opt_index", {"index": 75_000.0}, T0 + 500),
+             _quote(T0 + 1000, round(f - 0.06, 3), round(f - 0.04, 3), round(f + 0.045, 3), round(f + 0.065, 3)),  # Kalshi 4c cheap, Polymarket US 4.5c rich
+             ("opt_surface", flat(), T0 + 3_600_000), ("opt_index", {"index": 75_000.0}, T0 + 3_600_500),
+             _quote(T0 + 3_601_000, round(f - 0.01, 3), round(f + 0.01, 3), round(f + 0.045, 3), round(f + 0.065, 3)),  # Kalshi came to the options' price
+             _quote(T0 + 3_700_000, 1.0, 1.0, round(f + 0.045, 3), round(f + 0.065, 3), result="yes", status="settled")]
+    store = LabStore(tmp_path, stream="gap")
+    for kind, rec, ts in items:
+        store.write(kind, rec, ts_ms=ts)
+    store.wait_sealed()
+    store.close()
+    r = test.evaluate(tmp_path, since_ms=T0)
+    one, three = r["variants"]["hurdle_1c"], r["variants"]["hurdle_3c"]
+    assert {(e["venue"], e["side"]) for e in one["entries"]} == {("kalshi", "yes"), ("poly", "no")}
+    assert {(e["venue"], e["side"]) for e in three["entries"]} == {("kalshi", "yes")}  # Polymarket US's NO: about 2.6c after its fee and the money
+    k_buy = next(e for e in one["entries"] if e["venue"] == "kalshi")
+    assert k_buy["n"] == min(500, math.floor(100 / k_buy["price"])) and k_buy["payout"] == 1.0  # the size on offer, at most $100
+    assert next(e for e in one["entries"] if e["venue"] == "poly")["payout"] == 0.0
+    assert one["by_venue"]["kalshi"]["fees_usd"] == 0.0 and one["by_venue"]["poly"]["fees_usd"] > 0  # Kalshi's year-end ranges are fee-free
+    assert one["by_venue"]["kalshi"]["pnl_at_options_usd"] == pytest.approx(k_buy["n"] * (1 - k_buy["price"]), abs=0.05)
+    assert one["drift"]["1h"]["positions"] == 2 and one["drift"]["1h"]["gap_after_cents"] < one["drift"]["1h"]["gap_at_entry_cents"]
+    d = r["deviation"]
+    assert d["kalshi"]["terminal"]["mean_signed_cents"] < 0 < d["poly"]["terminal"]["mean_signed_cents"] and d["kalshi"]["edge_1c_share"] > 0
+    assert test.one_line(r).startswith("options test: 1 of 1 Bitcoin pairs priced")
+
+
+def test_the_shipped_bitcoin_pairs_each_say_what_they_pay_on():
+    from lab.gap_recorder import load_pairs
+    crypto = [p for p in load_pairs() if p["category"] == "crypto"]
+    assert len(crypto) == 44 and all(p.get("model", {}).get("kind") in ("range", "above", "below", "touch_up", "touch_down") for p in crypto)
+    ranges = sorted((p["model"]["lo"], p["model"]["hi"]) for p in crypto if p["model"]["kind"] == "range")
+    assert ranges[0] == (20_000, 25_000) and ranges[-1] == (145_000, 150_000) and all(b == c for (_, b), (c, _) in zip(ranges, ranges[1:]))

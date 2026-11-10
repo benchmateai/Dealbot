@@ -9,16 +9,19 @@ at a time, so the two quotes of a pair are seconds apart. It writes to its own h
   gap_pair   {pair, kalshi, polymarket_us, category, rules, k_fee, p_fee, k_close, p_end}   once a chunk
   gap_quote  {pair, k: {bid, ask, bid_size, ask_size, status, ts}, p: {bid, ask, bid_size, ask_size, state, ts}}
              when either side's quote changes, and every HEARTBEAT_S regardless
-  gap_status {kalshi: request counters, polymarket_us: request counters, pairs, quotes, note}
+  gap_status {kalshi: request counters, polymarket_us: request counters, deribit: request counters, pairs, quotes, note}
+  opt_index  {index}  Deribit's BTC index, every pass             (for the Bitcoin options test,
+  opt_surface {index, expiries: [...]}  its option surface, every OPT_SURFACE_S   lab/strategies/btc_options.py)
 Prices are the market's YES in dollars: Polymarket US has one instrument per market, bought for YES and
-shorted for NO. Sizes are contracts at the best price; a side with nothing resting is null. k_fee and p_fee
+shorted for NO. Sizes are contracts at the best price; a side with nothing resting is null; Kalshi's quote
+carries the market's `result` once it has settled. k_fee and p_fee
 are each venue's taker coefficient for the market (Kalshi's 0.07 times the series' fee multiplier, which is 0
 on a series it charges no fee on, such as its year-end Bitcoin ranges; the coefficient Polymarket US
 publishes on the market, 0.095 for an account below $10,000 of monthly volume).
-Nothing is ever sent to either venue but public GETs; lab/gap_report.py turns the records into gaps net of
-both fees and how long they last.
+Nothing is ever sent to any venue but public GETs (Deribit's too: lab/btc_options.py, no key); lab/gap_report.py
+turns the records into gaps net of both fees and how long they last.
 
-    python -m lab.gap_recorder --until <unix seconds> --data lab/data [--pairs lab/gap_pairs.json] [--every 60]
+    python -m lab.gap_recorder --until <unix seconds> --data lab/data [--pairs lab/gap_pairs.json] [--every 60] [--no-options]
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from lab.btc_options import Deribit, surface_record
 from lab.recorder import _num, _ts
 from lab.rest import Budget, LabRest
 from lab.store import LabStore
@@ -51,6 +55,7 @@ POLY_WORKERS = 8
 KALSHI_TAKER = 0.07          # Kalshi's taker coefficient, times the series' fee_multiplier
 PM_TAKER_DEFAULT = 0.095     # Polymarket US's tier-1 taker coefficient, when a market does not publish its own
 STATUS_S = 600
+OPT_SURFACE_S = 300          # Deribit's option surface every 5 minutes; its index every pass
 DESCRIBE_TRIES = 3           # tries for each of a chunk's one-off Kalshi lookups (fees, settlement dates)
 PAIRS = Path(__file__).with_name("gap_pairs.json")
 
@@ -116,7 +121,7 @@ def kalshi_quote(m: dict, ts: int) -> dict:
     bid, ask = _num(m.get("yes_bid_dollars")), _num(m.get("yes_ask_dollars"))
     return {"bid": bid if bid else None, "ask": ask if ask and ask < 1.0 else None,  # a 0 bid or $1 ask means nothing is resting
             "bid_size": _num(m.get("yes_bid_size_fp")) if bid else None, "ask_size": _num(m.get("yes_ask_size_fp")) if ask and ask < 1.0 else None,
-            "status": m.get("status"), "ts": ts}
+            "status": m.get("status"), "result": m.get("result") or None, "ts": ts}
 
 
 def poly_quote(book: dict, ts: int) -> dict:
@@ -132,10 +137,12 @@ def poly_quote(book: dict, ts: int) -> dict:
 
 
 class GapRecorder:
-    def __init__(self, store: LabStore, kalshi: LabRest, poly: PolyUS, pairs: list[dict], *, now_ms=lambda: int(time.time() * 1000)) -> None:
-        self.store, self.kalshi, self.poly, self.pairs, self.now_ms = store, kalshi, poly, pairs, now_ms
+    def __init__(self, store: LabStore, kalshi: LabRest, poly: PolyUS, pairs: list[dict], *, now_ms=lambda: int(time.time() * 1000),
+                 options: Deribit | None = None) -> None:
+        self.store, self.kalshi, self.poly, self.pairs, self.now_ms, self.options = store, kalshi, poly, pairs, now_ms, options
         self.last: dict[str, tuple] = {}          # pair -> (the quotes last written, when)
         self.quotes = 0
+        self.next_surface = 0
 
     def _lookup(self, path: str, params: dict | None = None) -> dict | None:
         """A Kalshi GET for the chunk's one-off lookups, tried DESCRIBE_TRIES times: a lookup refused for rate
@@ -170,7 +177,7 @@ class GapRecorder:
         for p in self.pairs:
             m = p_info.get(p["polymarket_us"]) or {}
             self.store.write("gap_pair", {"pair": p["id"], "kalshi": p["kalshi"], "polymarket_us": p["polymarket_us"], "category": p.get("category"),
-                                          "rules": p.get("rules"), "k_fee": round(k_fee.get(p["kalshi"].split("-")[0], KALSHI_TAKER), 6),
+                                          "rules": p.get("rules"), "model": p.get("model"), "k_fee": round(k_fee.get(p["kalshi"].split("-")[0], KALSHI_TAKER), 6),
                                           "p_fee": _coeff(m.get("feeCoefficient"), PM_TAKER_DEFAULT), "k_close": k_close.get(p["kalshi"]),
                                           "p_end": _ts(m.get("endDate"))}, ts_ms=now)
 
@@ -194,6 +201,18 @@ class GapRecorder:
                 if book is not None:
                     self.record(p["id"], kq[p["kalshi"]], poly_quote(book, p_ts))
 
+    def options_pass(self) -> None:
+        """Deribit's BTC index now, and its option surface when OPT_SURFACE_S has passed since the last one."""
+        index = self.options.index()
+        now = self.now_ms()
+        if index is not None:
+            self.store.write("opt_index", {"index": index}, ts_ms=now)
+        if now >= self.next_surface:
+            rec = surface_record(self.options.summary() or [], index, now)
+            if rec is not None:
+                self.store.write("opt_surface", rec, ts_ms=now)
+                self.next_surface = now + OPT_SURFACE_S * 1000
+
     def record(self, pair: str, k: dict, p: dict) -> None:
         now = self.now_ms()
         key = tuple(k.get(x) for x in ("bid", "ask", "bid_size", "ask_size", "status")) + tuple(p.get(x) for x in ("bid", "ask", "bid_size", "ask_size", "state"))
@@ -206,6 +225,8 @@ class GapRecorder:
 
     def write_status(self, note: str | None = None) -> None:
         rec = {"kalshi": self.kalshi.counters(), "polymarket_us": self.poly.counters(), "pairs": len(self.pairs), "quotes": self.quotes}
+        if self.options is not None:
+            rec["deribit"] = self.options.counters()
         if note:
             rec["note"] = note
         self.store.write("gap_status", rec, ts_ms=self.now_ms())
@@ -220,6 +241,12 @@ class GapRecorder:
             except Exception as exc:  # noqa: BLE001 - one bad pass must not end the recording
                 log.warning("poll failed: %s: %s", type(exc).__name__, exc)
                 self.write_status(note=f"poll failed: {type(exc).__name__}: {str(exc)[:200]}")
+            if self.options is not None:
+                try:
+                    self.options_pass()
+                except Exception as exc:  # noqa: BLE001 - the option feed must not stop the venues' quotes
+                    log.warning("options pass failed: %s: %s", type(exc).__name__, exc)
+                    self.write_status(note=f"options pass failed: {type(exc).__name__}: {str(exc)[:200]}")
             if self.now_ms() >= next_status:
                 self.write_status()
                 next_status = self.now_ms() + STATUS_S * 1000
@@ -237,12 +264,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pairs", default=str(PAIRS))
     parser.add_argument("--every", type=float, default=EVERY_S, help="seconds between passes over the pairs")
     parser.add_argument("--rate", type=float, default=0.25, help="average Kalshi requests a second")
+    parser.add_argument("--no-options", action="store_true", help="skip Deribit's BTC index and option surface")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     stopping = {"now": False}
     signal.signal(signal.SIGTERM, lambda *_: stopping.__setitem__("now", True))
     store = LabStore(args.data, stream=STREAM)
-    rec = GapRecorder(store, LabRest(budget=Budget(args.rate, 3.0)), PolyUS(), load_pairs(args.pairs))
+    rec = GapRecorder(store, LabRest(budget=Budget(args.rate, 3.0)), PolyUS(), load_pairs(args.pairs), options=None if args.no_options else Deribit())
 
     def nap(seconds: float) -> None:  # sleeps in short steps so a TERM ends the chunk within a second
         end = time.time() + seconds
@@ -256,7 +284,8 @@ def main(argv: list[str] | None = None) -> int:
         rec.write_status(note="gap recorder stopped")
         store.close()
         sealed = store.seal_closed_hours()  # this hour's file too, so the chunk publishes it
-        print(f"gap recorder: {rec.quotes} quotes; Kalshi {rec.kalshi.counters()}; Polymarket US {rec.poly.counters()}; sealed {len(sealed)} hour files")
+        deribit = f"; Deribit {rec.options.counters()}" if rec.options is not None else ""
+        print(f"gap recorder: {rec.quotes} quotes; Kalshi {rec.kalshi.counters()}; Polymarket US {rec.poly.counters()}{deribit}; sealed {len(sealed)} hour files")
     return 0
 
 
