@@ -150,7 +150,12 @@ cents of fees). The gap recorder (`lab/gap_recorder.py`) reads both venues' publ
 no orders, for the pairs in `lab/gap_pairs.json`: markets that settle the same way on both venues, each
 with a note saying why (175 on 2026-11-08: the 2027 NFL, NBA, NHL and MLB champions, the 2028 Democratic
 and Republican nominees, October's CPI and core CPI month-on-month, the December Fed decision and a 2026
-cut). Every 60 seconds it reads Kalshi's best prices in batches and each Polymarket US book right after
+cut; on 2026-11-10 the owner added 44 Bitcoin pairs, 219 in all: the 28 year-end 2026 price ranges, how
+high and how low it goes this year, $100,000 by Dec 1 and by Jan 1, and $150,000, $200,000 and $250,000
+this year, all settled on CF Benchmarks' BRTI on both venues; Kalshi charges no fee on its year-end
+ranges and quotes them in tenths of a cent where Polymarket US quotes whole cents, so the cheapest ranges'
+books cross by a fraction of a cent most of the time and the money a lock ties up until Jan 1 decides
+whether it pays). Every 60 seconds it reads Kalshi's best prices in batches and each Polymarket US book right after
 (seconds apart), and writes a `gap_quote` record when either changes. `python3 -m lab.gap_report --lab
 <shadow-run lab/data>` gives the gaps: the mid gap, the share of the time either venue's bid crossed the
 other's ask, and whether that paid after both taker fees (Kalshi 0.07 times the series' multiplier;

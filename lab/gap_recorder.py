@@ -2,7 +2,7 @@
 
 Each pair in lab/gap_pairs.json names one Kalshi market and the Polymarket US market that settles the same way
 (its `rules` note says why the two match). Every EVERY_S seconds the recorder reads Kalshi's best bid and ask
-for the pairs in batches of KALSHI_BATCH (GET /markets?tickers=..., public: two requests a pass for 175 pairs,
+for the pairs in batches of KALSHI_BATCH (GET /markets?tickers=..., public: three requests a pass for 219 pairs,
 since Kalshi's public limit is shared by the team's sessions) and, right after each batch, the book of each
 Polymarket US market in it (GET https://gateway.polymarket.us/v1/markets/{slug}/book, public), POLY_WORKERS
 at a time, so the two quotes of a pair are seconds apart. It writes to its own hour files (<HH>.gap.jsonl):
@@ -12,8 +12,9 @@ at a time, so the two quotes of a pair are seconds apart. It writes to its own h
   gap_status {kalshi: request counters, polymarket_us: request counters, pairs, quotes, note}
 Prices are the market's YES in dollars: Polymarket US has one instrument per market, bought for YES and
 shorted for NO. Sizes are contracts at the best price; a side with nothing resting is null. k_fee and p_fee
-are each venue's taker coefficient for the market (Kalshi's 0.07 times the series' fee multiplier; the
-coefficient Polymarket US publishes on the market, 0.095 for an account below $10,000 of monthly volume).
+are each venue's taker coefficient for the market (Kalshi's 0.07 times the series' fee multiplier, which is 0
+on a series it charges no fee on, such as its year-end Bitcoin ranges; the coefficient Polymarket US
+publishes on the market, 0.095 for an account below $10,000 of monthly volume).
 Nothing is ever sent to either venue but public GETs; lab/gap_report.py turns the records into gaps net of
 both fees and how long they last.
 
@@ -50,6 +51,7 @@ POLY_WORKERS = 8
 KALSHI_TAKER = 0.07          # Kalshi's taker coefficient, times the series' fee_multiplier
 PM_TAKER_DEFAULT = 0.095     # Polymarket US's tier-1 taker coefficient, when a market does not publish its own
 STATUS_S = 600
+DESCRIBE_TRIES = 3           # tries for each of a chunk's one-off Kalshi lookups (fees, settlement dates)
 PAIRS = Path(__file__).with_name("gap_pairs.json")
 
 
@@ -100,6 +102,12 @@ class PolyUS:
         return {"requests": self.requests, "errors": self.errors, "rate_limited": self.rate_limited}
 
 
+def _coeff(x, default: float) -> float:
+    """A published fee coefficient or multiplier, or `default` when there is none; 0 stays 0 (no fee)."""
+    v = _num(x)
+    return default if v is None else v
+
+
 def _amount(x) -> float | None:
     return _num((x or {}).get("value")) if isinstance(x, dict) else _num(x)
 
@@ -129,17 +137,27 @@ class GapRecorder:
         self.last: dict[str, tuple] = {}          # pair -> (the quotes last written, when)
         self.quotes = 0
 
+    def _lookup(self, path: str, params: dict | None = None) -> dict | None:
+        """A Kalshi GET for the chunk's one-off lookups, tried DESCRIBE_TRIES times: a lookup refused for rate
+        would leave a pair without its fee or settlement date for the whole chunk (LabRest waits out the
+        refusal before the next try)."""
+        for _ in range(DESCRIBE_TRIES):
+            payload = self.kalshi.get(path, params)
+            if payload is not None:
+                return payload
+        return None
+
     def describe(self) -> None:
         """One gap_pair record per pair: the rules note and each venue's taker coefficient and end date."""
         now = self.now_ms()
         k_fee: dict[str, float] = {}
         for series in sorted({p["kalshi"].split("-")[0] for p in self.pairs}):
-            info = (self.kalshi.get(f"/series/{series}") or {}).get("series") or {}
-            k_fee[series] = KALSHI_TAKER * float(info.get("fee_multiplier") or 1.0)
+            info = (self._lookup(f"/series/{series}") or {}).get("series") or {}
+            k_fee[series] = KALSHI_TAKER * _coeff(info.get("fee_multiplier"), 1.0)  # 0 is a fee-free series, not a missing one
         k_close: dict[str, int | None] = {}
         for i in range(0, len(self.pairs), KALSHI_BATCH):  # when each Kalshi market is expected to settle
             batch = self.pairs[i:i + KALSHI_BATCH]
-            payload = self.kalshi.get("/markets", {"tickers": ",".join(p["kalshi"] for p in batch), "limit": len(batch)})
+            payload = self._lookup("/markets", {"tickers": ",".join(p["kalshi"] for p in batch), "limit": len(batch)})
             for m in (payload or {}).get("markets") or []:
                 k_close[m.get("ticker")] = _ts(m.get("expected_expiration_time")) or _ts(m.get("close_time"))
         p_info: dict[str, dict] = {}
@@ -153,7 +171,7 @@ class GapRecorder:
             m = p_info.get(p["polymarket_us"]) or {}
             self.store.write("gap_pair", {"pair": p["id"], "kalshi": p["kalshi"], "polymarket_us": p["polymarket_us"], "category": p.get("category"),
                                           "rules": p.get("rules"), "k_fee": round(k_fee.get(p["kalshi"].split("-")[0], KALSHI_TAKER), 6),
-                                          "p_fee": float(m.get("feeCoefficient") or PM_TAKER_DEFAULT), "k_close": k_close.get(p["kalshi"]),
+                                          "p_fee": _coeff(m.get("feeCoefficient"), PM_TAKER_DEFAULT), "k_close": k_close.get(p["kalshi"]),
                                           "p_end": _ts(m.get("endDate"))}, ts_ms=now)
 
     def poll(self) -> None:
