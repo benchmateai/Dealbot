@@ -164,11 +164,31 @@ nothing there and earn no rebate below $10 million) and after 4% a year on the m
 settlement. On a first live look (two passes) the median mid gap was 0.35 cents, the books crossed 13.5%
 of the time, 4.5% paid after fees and none after the cost of the money. Pairs end as their markets settle
 (the CPI ones on Nov 10); new ones go into `lab/gap_pairs.json` with a rules note and are picked up at
-the next chunk. Polymarket US is reachable only from the Dealbot cloud environment (it allows
-gateway.polymarket.us; the Default one does not), so the gap recorder has its own runner there; a
+the next chunk. Polymarket US and Deribit are reachable only from the Dealbot cloud environment (it allows
+gateway.polymarket.us and www.deribit.com; the Default one does not), so the gap recorder has its own runner there; a
 replacement is created the same way (`create_session` in that environment, source
 https://github.com/benchmateai/Dealbot at `claude/desk-skeleton`, model Haiku 5.5, tags
 `dealbot-paper-run`, `dealbot-lab`, prompt `ops/gap_runner_prompt.md`).
+
+### The Bitcoin options test (from 2026-11-10)
+
+The owner asked to test pricing the Bitcoin markets off Bitcoin's options. The gap recorder also reads
+Deribit's public API (no key, no orders): the BTC index every pass (`opt_index`) and every 5 minutes the
+option surface (`opt_surface`: each expiry 2 to 200 days away, its forward and its out-of-the-money options'
+mark volatilities). Each Bitcoin pair in `lab/gap_pairs.json` carries a `model`, what it pays on: a year-end
+range, the price above or below a level on Jan 1, or a touch of a price before Dec 1 or Jan 1.
+`lab/btc_options.py` prices them: the ranges at what the options imply (the call price's slope in the strike,
+from the smile at Jan 1 between the Dec 25 and Jan 29 expiries), the touch markets at a model's price (a
+geometric Brownian motion with the barrier strike's volatility). `python3 -m lab.strategies.btc_options --lab
+<shadow-run lab/data>` replays the recorded quotes against those prices from 2026-11-10 20:00Z: how far each
+venue's mid sits from the options' price (ranges and touches apart), how often an edge of a cent or more was
+there after fees and the cost of the money, and three paper variants fixed before any result (hurdles of 1, 2
+and 3 cents beyond the taker fee and 4% a year on the money until settlement; taker buys at the displayed
+price and size, at most $100 per market, side and venue and $3,000 in all, held to settlement), marked at the
+options' price and at the venues' bids, with whether the venues drift toward the options' price 1, 6 and 24
+hours after an entry. Settlement comes on Dec 1 for one pair and Jan 1 for the rest, sooner for a touch that
+happens; Kalshi's quotes now carry its `result` so the test can settle them. `python3 -m lab.btc_options`
+gives one live look at every pair beside its price.
 
 ## Desk v2 (from 2026-11-05)
 
@@ -262,7 +282,7 @@ Switching to the E desk (the coordinator, after the final report):
    lab.strategies.e_desk --lab <lab copy> --variants` for its line, its split by kind of market and the
    five variants' lines, replayed side by side in about two minutes by the week's end, each with its net
    if Kalshi credits whole price levels; lab E beside it; and keep the `lab.gap_report` line on the
-   Kalshi to Polymarket US gaps).
+   Kalshi to Polymarket US gaps and the `lab.strategies.btc_options` line on the Bitcoin options test).
 4. Schedule the E desk's final report for 2026-11-19T05:30Z: its result at the week's end (the replay
    stops there by itself) against lab E and the five variants, by market, program and kind of market,
    with the money it tied up.
