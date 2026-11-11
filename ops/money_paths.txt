@@ -23,5 +23,6 @@ lab/replay.py
 lab/btc_options.py
 lab/gap_report.py
 lab/strategies/
+lab/longshot.py
 lab/gap_pairs.json
 dashboard/money_page/index.html
