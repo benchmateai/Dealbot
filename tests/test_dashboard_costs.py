@@ -74,7 +74,8 @@ def test_the_command_appends_once_and_writes_the_dataset(tmp_path):
     assert len(hist.read_text().splitlines()) == 2
     rows = json.loads(out.read_text())
     assert rows[0]["table"] == "cost_summary" and rows[0]["spent_usd"] == pytest.approx(25.2 + 0.6 + 0.5)
-    assert {r["table"] for r in rows[1:]} == {"cost_role"}
+    assert {r["table"] for r in rows[1:]} == {"cost_role", "cost_day"}
+    assert [r["day"] for r in rows if r["table"] == "cost_day"] == ["2026-11-10"]  # 2:30 PM to 6:07 PM in Arizona
 
 
 def test_a_bad_snapshot_is_refused_before_it_reaches_the_history_and_a_bad_line_cannot_block_later_runs(tmp_path):
@@ -129,3 +130,75 @@ def test_since_is_when_the_first_session_the_history_has_seen_began():
     now["retired"] = {"c1": {"role": "coordinator", "cost_usd": 735.0}}
     s, *roles = dc.rows(now, [old], BUDGETS)
     assert s["first_since_ms"] == costs._ms("2026-10-17T22:45:09Z") and s["total_usd"] == 2.0 + 45.0 + 22.0 + 735.0
+
+
+def test_daily_costs_are_measured_between_snapshots_across_arizona_midnight_and_estimated_before_them():
+    budgets = {"coordinator": 40.0, "runner": 10.0}
+    # 05:00Z and 09:00Z straddle Arizona midnight (07:00Z): half of each teammate's spend falls on each day
+    snaps = [snap("2026-11-11T05:00:00Z", coordinator=100.0, runner=10.0), snap("2026-11-11T09:00:00Z", coordinator=120.0, runner=12.0)]
+    before = {"until": "2026-11-11T05:00:00Z", "days": {"2026-11-09": {"coordinator": 30.0, "runner": 5.0}, "2026-11-10": {"coordinator": 50.0, "runner": 4.0}}}
+    days = {r["day"]: r for r in dc.day_rows(snaps, budgets, before)}
+    assert list(days) == ["2026-11-09", "2026-11-10", "2026-11-11"]
+    assert days["2026-11-09"]["cost_usd"] == 35.0 and days["2026-11-09"]["estimated"] and not days["2026-11-09"]["measured"]
+    nov10 = days["2026-11-10"]
+    assert nov10["cost_usd"] == 54.0 + 11.0 and nov10["estimated"] and nov10["measured"] and nov10["over"] and nov10["budget_usd"] == 50.0
+    assert nov10["coordinator_usd"] == 60.0 and nov10["breakdown"] == "coordinator $60.00, runner $5.00"
+    nov11 = days["2026-11-11"]
+    assert nov11["cost_usd"] == 11.0 and nov11["partial"] and not nov11["estimated"] and not days["2026-11-10"]["partial"]
+    assert round(sum(r["cost_usd"] for r in days.values()), 2) == 35.0 + 54.0 + 22.0  # the estimate and the readings add up
+
+
+def test_an_estimate_that_overlaps_the_readings_is_left_out_and_days_without_usage_are_zero():
+    snaps = [snap("2026-11-08T12:00:00Z", coordinator=100.0), snap("2026-11-11T12:00:00Z", coordinator=130.0)]
+    overlapping = {"until": "2026-11-10T00:00:00Z", "days": {"2026-11-07": {"coordinator": 99.0}}}
+    days = dc.day_rows(snaps, {"coordinator": 40.0}, overlapping)
+    assert [r["day"] for r in days] == ["2026-11-08", "2026-11-09", "2026-11-10", "2026-11-11"] and not any(r["estimated"] for r in days)
+    assert round(sum(r["cost_usd"] for r in days), 2) == 30.0 and days[1]["cost_usd"] == 10.0  # a whole day of three, read as even
+    gap = dc.day_rows([snap("2026-11-11T12:00:00Z", coordinator=100.0)], {"coordinator": 40.0},
+                      {"until": "2026-11-11T12:00:00Z", "days": {"2026-11-08": {"coordinator": 20.0}, "2026-11-10": {"coordinator": 5.0}}})
+    assert [(r["day"], r["cost_usd"]) for r in gap] == [("2026-11-08", 20.0), ("2026-11-09", 0.0), ("2026-11-10", 5.0), ("2026-11-11", 0.0)]
+    assert gap[-1]["estimated"] and gap[-1]["partial"]  # midnight to 5 AM Arizona time, read once and no further
+
+
+def test_days_inside_the_estimate_are_estimated_even_at_zero_and_a_gap_before_the_readings_is_partial():
+    snaps = [snap("2026-11-11T12:00:00Z", coordinator=100.0), snap("2026-11-12T12:00:00Z", coordinator=110.0)]
+    covered = {"until": "2026-11-11T12:00:00Z", "days": {"2026-11-08": {"coordinator": 20.0}, "2026-11-10": {"coordinator": 5.0}}}
+    days = {r["day"]: r for r in dc.day_rows(snaps, {"coordinator": 40.0}, covered)}
+    assert days["2026-11-09"]["cost_usd"] == 0.0 and days["2026-11-09"]["estimated"] and not days["2026-11-09"]["partial"]
+    assert days["2026-11-11"]["estimated"] and days["2026-11-11"]["measured"] and not days["2026-11-11"]["partial"]
+    short = {"until": "2026-11-10T07:00:00Z", "days": {"2026-11-09": {"coordinator": 80.0}}}  # ends a day before the readings
+    days = {r["day"]: r for r in dc.day_rows(snaps, {"coordinator": 40.0}, short)}
+    assert days["2026-11-10"]["partial"] and days["2026-11-11"]["partial"] and not days["2026-11-09"]["partial"]
+    alone = dc.day_rows(snaps, {"coordinator": 40.0})
+    assert alone[0]["day"] == "2026-11-11" and alone[0]["partial"]  # read only from 5 AM Arizona time
+
+
+def test_a_teammate_first_seen_in_a_later_snapshot_counts_from_when_it_began():
+    early = snap("2026-11-11T08:00:00Z", coordinator=100.0)
+    later = snap("2026-11-11T20:00:00Z", coordinator=110.0, runner=30.0)
+    later["sessions"]["runner"]["created_at"] = "2026-11-10T08:00:00Z"  # a day and a half of it before it was first read
+    days = {r["day"]: r for r in dc.day_rows([early, later], {"coordinator": 40.0, "runner": 10.0})}
+    assert days["2026-11-10"].get("runner_usd") == pytest.approx(30.0 * 23 / 36, abs=0.01)  # 08:00Z Nov 10 to 07:00Z Nov 11
+    assert days["2026-11-11"]["runner_usd"] == pytest.approx(30.0 * 13 / 36, abs=0.01)
+    assert days["2026-11-11"]["coordinator_usd"] == 10.0
+
+
+def test_a_day_is_the_sum_of_its_split_and_a_bad_estimate_file_is_left_out(tmp_path, capsys):
+    snaps = [snap("2026-11-11T08:00:00Z", coordinator=100.0, runner=10.0, watchdog=5.0),
+             snap("2026-11-11T20:00:00Z", coordinator=100.004, runner=10.004, watchdog=5.004)]
+    day = dc.day_rows(snaps, BUDGETS)[0]
+    assert day["cost_usd"] == round(sum(day.get(f"{r}_usd", 0.0) for r in BUDGETS), 2)
+    hist, out, snapfile, budgets = tmp_path / "history.jsonl", tmp_path / "costs.json", tmp_path / "now.json", tmp_path / "budgets.json"
+    budgets.write_text(json.dumps({"daily_usd": BUDGETS}))
+    hist.write_text(json.dumps(snap("2026-11-10T21:30:00Z", coordinator=750.0, runner=46.8, watchdog=23.6)) + "\n")
+    snapfile.write_text(json.dumps(snap("2026-11-11T01:07:30Z", coordinator=775.2, runner=47.4, watchdog=24.1)))
+    (tmp_path / "before.json").write_text(json.dumps({"until": "2026-11-10T21:30:00Z", "days": {"2026-11-09": {"coordinator": "n/a"}}}))
+    assert dc.main(["--snapshot", str(snapfile), "--history", str(hist), "--budgets", str(budgets), "--append", "--out", str(out)]) == 0
+    assert "left out" in capsys.readouterr().err and len(hist.read_text().splitlines()) == 2 and out.exists()
+
+
+def test_an_estimate_with_a_day_that_is_not_a_padded_date_is_refused():
+    good = {"until": "2026-11-10T21:30:00Z", "days": {"2026-11-09": {"coordinator": 5.0}}}
+    assert dc.valid_before(good)
+    for key in ("Nov 9", "2026-11-9", "2026-02-30"):
+        assert not dc.valid_before({"until": good["until"], "days": {key: {"coordinator": 5.0}}})

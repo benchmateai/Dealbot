@@ -42,6 +42,8 @@
 .pm-cal-down { background: color-mix(in srgb, var(--color-bad) 12%, transparent); border-color: color-mix(in srgb, var(--color-bad) 38%, transparent); }
 .pm-cal-down .pm-cal-v { color: var(--color-bad); }
 .pm-cal-flat .pm-cal-v { color: var(--color-fg); }
+.pm-cal-cost .pm-cal-v { color: var(--color-fg); }
+.pm-cal-est { border-style: dashed; }
 button.pm-cal-day { cursor: pointer; }
 .pm-cal-today .pm-cal-n { color: var(--color-fg); font-weight: var(--cds-font-weight-medium); text-decoration: underline; text-underline-offset: 2px; }
 .pm-cal-sel { box-shadow: 0 0 0 2px var(--color-fg); }
@@ -171,13 +173,13 @@ button.pm-cal-day { cursor: pointer; }
 
   <section class="pm-card" id="days" aria-labelledby="days-title">
     <h2 id="days-title">Daily P&amp;L</h2>
-    <p class="pm-note">The change in paper equity each day, midnight to midnight Arizona time, after fees, so a desk's days add up to its net result. Tap a day for the details.</p>
-    <div class="pm-cal dash-skeleton" data-draw="day-calendar" data-source="calendar"></div>
+    <p class="pm-note">The change in paper equity each day, midnight to midnight Arizona time, after fees, so a desk's days add up to its net result. Team cost shows each day's Claude usage at list prices instead; days with a dashed border are estimated. Tap a day for the details.</p>
+    <div class="pm-cal dash-skeleton" data-draw="day-calendar" data-source="calendar calendar_costs"></div>
   </section>
 
   <section class="pm-card" id="costs" aria-labelledby="costs-title" hidden>
     <h2 id="costs-title">What the team costs to run</h2>
-    <p class="pm-note">Real money, unlike the desks: what each Claude session on the team has cost in usage, as the session itself reports it, read about every six hours. Each teammate has a daily budget; one over it is flagged and looked into, and nothing stops on its own. As of <b data-draw="cost-when" data-source="cost_summary" data-field="updated_ms" data-where="id=team">—</b>.</p>
+    <p class="pm-note">Claude usage, not paper trading: what each session on the team has used, priced at Claude's list prices per token (the helpers it starts included), as the session itself reports it, read about every six hours. On a subscription plan this is what the usage is worth, not a charge: it counts against the plan's limits. Each teammate has a daily budget; one over it is flagged and looked into, and nothing stops on its own. As of <b data-draw="cost-when" data-source="cost_summary" data-field="updated_ms" data-where="id=team">—</b>.</p>
     <div class="pm-tiles">
       <div class="pm-tile">
         <div class="pm-tile-label">Team cost, last <span data-draw="cost-hours" data-source="cost_summary" data-field="window_hours" data-where="id=team">—</span> hours</div>
@@ -473,6 +475,12 @@ button.pm-cal-day { cursor: pointer; }
     title: 'The first desk',
     description: "The first desk's final result, from the measured week's start to desk v2's.",
     fn: (paper) => paper.filter((r) => r.table === 'previous'),
+  });
+  dash.calc('calendar_costs', {
+    inputs: ['costs'],
+    title: 'Daily team cost',
+    description: "The team's Claude usage at list prices for each Arizona day (midnight to midnight, UTC-7), by teammate; days before the first reading on Nov 10 are estimated.",
+    fn: (costs) => costs.filter((r) => r.table === 'cost_day').sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0)),
   });
   dash.calc('cost_summary', {
     inputs: ['costs'],
@@ -772,7 +780,7 @@ button.pm-cal-day { cursor: pointer; }
     }
   });
 
-  // The team's running cost: real money, read from each session's own usage by the coordinator.
+  // The team's running cost: each session's Claude usage at list prices, read from the session by the coordinator.
   const dayOnly = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   rowFigure('cost-when', 'cost_summary', 'team', 'updated_ms', when);
   rowFigure('cost-hours', 'cost_summary', 'team', 'window_hours', hours);
@@ -932,8 +940,9 @@ button.pm-cal-day { cursor: pointer; }
   const longDay = d3.utcFormat('%A, %B %-d');
   const fullCell = d3.format('+,.2f');
   const smallCell = (v) => (Math.abs(v) < 10 ? d3.format('+.2f')(v) : Math.abs(v) < 100 ? d3.format('+.1f')(v) : d3.format('+,.0f')(v));
-  const calState = { v2: { month: null, pick: null }, edesk: { month: null, pick: null } }; // [year, month 0-11], 'YYYY-MM-DD'
-  let calDesk = null; // 'v2' or 'edesk': the E desk once it has days, else desk v2
+  const calState = { v2: { month: null, pick: null }, edesk: { month: null, pick: null }, cost: { month: null, pick: null } }; // [year, month 0-11], 'YYYY-MM-DD'
+  let calDesk = null; // 'v2', 'edesk' or 'cost': the E desk once it has days, else desk v2
+  const costCell = (v) => (v < 10 ? d3.format('$.2f')(v) : v < 100 ? d3.format('$.1f')(v) : d3.format('$,.0f')(v));
   dash.draw('day-calendar', (el) => {
     const dv = dash.data('calendar');
     if (dv.status === 'error') { el.replaceChildren(); el.classList.remove('dash-skeleton'); failLine(el); return; }
@@ -942,8 +951,10 @@ button.pm-cal-day { cursor: pointer; }
     const de = dash.data('calendar_edesk');
     const dr = dash.data('edesk');
     const edeskRow = dr.status === 'ok' && Array.isArray(dr.data) ? dr.data[0] || null : null;
-    const sets = { v2: dv.data, edesk: de.status === 'ok' && Array.isArray(de.data) ? de.data : [] };
+    const dc = dash.data('calendar_costs');
+    const sets = { v2: dv.data, edesk: de.status === 'ok' && Array.isArray(de.data) ? de.data : [], cost: dc.status === 'ok' && Array.isArray(dc.data) ? dc.data : [] };
     if (!calDesk) calDesk = sets.edesk.length ? 'edesk' : 'v2';
+    if (calDesk === 'cost' && !sets.cost.length) calDesk = 'v2'; // the costs did not load: no Team cost tab
     const today = azDay(Date.now());
     const ym = (day) => [Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1];
     const key = ([y, m]) => y * 12 + m;
@@ -952,13 +963,14 @@ button.pm-cal-day { cursor: pointer; }
     const render = (focus) => {
       el.replaceChildren();
       const desk = calDesk;
+      const isCost = desk === 'cost';
       const rows = sets[desk];
       const st = calState[desk];
       const tabs = document.createElement('div');
       tabs.className = 'pm-cal-tabs';
       tabs.setAttribute('role', 'group');
       tabs.setAttribute('aria-label', 'Desk');
-      for (const [id, label] of [['v2', 'Desk v2'], ['edesk', 'E desk']]) {
+      for (const [id, label] of [['v2', 'Desk v2'], ['edesk', 'E desk'], ['cost', 'Team cost']].filter(([id]) => id !== 'cost' || sets.cost.length)) {
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'pm-cal-tab';
@@ -973,7 +985,7 @@ button.pm-cal-day { cursor: pointer; }
       if (!rows.length && !waiting) {
         const p = document.createElement('p');
         p.className = 'pm-chart-note';
-        p.textContent = 'Days appear as the desk trades.';
+        p.textContent = isCost ? "Days appear once the team's cost has been read." : 'Days appear as the desk trades.';
         el.append(p);
         if (focus) el.querySelector(`[data-desk="${desk}"]`)?.focus();
         return;
@@ -989,7 +1001,9 @@ button.pm-cal-day { cursor: pointer; }
       const [y, m] = st.month;
       const prefix = `${y}-${String(m + 1).padStart(2, '0')}-`;
       const inMonth = rows.filter((r) => r.day.startsWith(prefix));
-      const total = inMonth.length ? toCents(inMonth[inMonth.length - 1].close_usd - inMonth[0].open_usd) : 0;
+      const total = isCost ? toCents(inMonth.reduce((a, r) => a + Number(r.cost_usd), 0))
+        : inMonth.length ? toCents(inMonth[inMonth.length - 1].close_usd - inMonth[0].open_usd) : 0;
+      const over = inMonth.filter((r) => r.over).length;
       const up = inMonth.filter((r) => r.pnl_usd > 0).length;
       const down = inMonth.filter((r) => r.pnl_usd < 0).length;
       const narrow = (el.clientWidth || 320) < 440;
@@ -1023,6 +1037,11 @@ button.pm-cal-day { cursor: pointer; }
       sum.className = 'pm-cal-sum';
       if (waiting) {
         sum.textContent = 'not started yet';
+      } else if (isCost) {
+        const amount = document.createElement('b');
+        amount.textContent = usd(total);
+        const budget = inMonth.length ? usd(Number(inMonth[0].budget_usd)) : null;
+        sum.append(amount, document.createTextNode(budget ? ` · ${over} ${over === 1 ? 'day' : 'days'} over ${budget}` : ''));
       } else {
         const amount = document.createElement('b');
         amount.textContent = signed(total);
@@ -1065,12 +1084,19 @@ button.pm-cal-day { cursor: pointer; }
           cell.type = 'button';
           const v = document.createElement('span');
           v.className = 'pm-cal-v';
-          v.textContent = narrow ? smallCell(r.pnl_usd) : fullCell(r.pnl_usd);
+          if (isCost) {
+            v.textContent = narrow ? costCell(Number(r.cost_usd)) : usd(Number(r.cost_usd));
+            cell.classList.add(r.over ? 'pm-cal-down' : 'pm-cal-cost');
+            if (r.estimated) cell.classList.add('pm-cal-est');
+            cell.setAttribute('aria-label', `${longDay(asDate(day))}${day === today ? ' (today)' : ''}: ${usd(Number(r.cost_usd))} of Claude usage${r.partial ? ' so far' : ''}${r.estimated ? (r.measured ? ', partly estimated' : ', estimated') : ''}${r.over ? ', over budget' : ''}`);
+          } else {
+            v.textContent = narrow ? smallCell(r.pnl_usd) : fullCell(r.pnl_usd);
+            cell.classList.add(r.pnl_usd > 0 ? 'pm-cal-up' : r.pnl_usd < 0 ? 'pm-cal-down' : 'pm-cal-flat');
+            const extra = desk === 'v2' ? `${r.trades} ${r.trades === 1 ? 'bet' : 'bets'} closed` : parts(r);
+            cell.setAttribute('aria-label', `${longDay(asDate(day))}${day === today ? ' (today)' : ''}: ${signed(r.pnl_usd)}${extra ? ', ' + extra : ''}`);
+          }
           cell.append(v);
-          cell.classList.add(r.pnl_usd > 0 ? 'pm-cal-up' : r.pnl_usd < 0 ? 'pm-cal-down' : 'pm-cal-flat');
           cell.setAttribute('aria-pressed', String(day === st.pick));
-          const extra = desk === 'v2' ? `${r.trades} ${r.trades === 1 ? 'bet' : 'bets'} closed` : parts(r);
-          cell.setAttribute('aria-label', `${longDay(asDate(day))}${day === today ? ' (today)' : ''}: ${signed(r.pnl_usd)}${extra ? ', ' + extra : ''}`);
           cell.addEventListener('click', () => { st.pick = day; render('day:' + day); });
         } else if (day > today || day < firstDay) {
           cell.classList.add('pm-cal-out'); // before the desk's first day or still to come
@@ -1085,13 +1111,15 @@ button.pm-cal-day { cursor: pointer; }
       const r = st.pick ? byDay.get(st.pick) : null;
       if (r && st.pick.startsWith(prefix)) {
         const label = document.createElement('b');
-        label.textContent = st.pick === today ? 'Today so far' : shortDay(asDate(st.pick));
+        label.textContent = st.pick === today ? 'Today so far' : shortDay(asDate(st.pick)) + (isCost && r.partial ? ' (not all read yet)' : '');
         const amt = document.createElement('span');
-        amt.className = ('pm-cal-amt ' + tone(r.pnl_usd)).trim();
-        amt.textContent = signed(r.pnl_usd);
-        const extra = desk === 'v2'
-          ? (r.trades ? `${count(r.trades)} ${r.trades === 1 ? 'bet' : 'bets'} closed, ${count(r.wins)} made money, ${usd(r.fees_usd)} in fees` : 'no bets closed')
-          : parts(r);
+        amt.className = ('pm-cal-amt ' + (isCost ? (r.over ? 'pm-down' : '') : tone(r.pnl_usd))).trim();
+        amt.textContent = isCost ? usd(Number(r.cost_usd)) : signed(r.pnl_usd);
+        const extra = isCost
+          ? `${r.estimated ? (r.measured ? 'partly estimated; ' : 'estimated; ') : ''}${r.breakdown || 'no usage'}`
+          : desk === 'v2'
+            ? (r.trades ? `${count(r.trades)} ${r.trades === 1 ? 'bet' : 'bets'} closed, ${count(r.wins)} made money, ${usd(r.fees_usd)} in fees` : 'no bets closed')
+            : parts(r);
         detail.append(label, document.createTextNode(': '), amt);
         if (extra) detail.append(document.createTextNode(' · ' + extra));
       } else if (waiting) {
@@ -1099,7 +1127,7 @@ button.pm-cal-day { cursor: pointer; }
           ? `The E desk starts ${shortDay(asDate(azDay(startMs)))} at ${d3.utcFormat('%-I:%M %p')(new Date(startMs - AZ_OFFSET_MS))} Arizona time. Its days fill in here as it runs.`
           : 'The E desk has not started yet. Its days fill in here as it runs.';
       } else {
-        detail.textContent = inMonth.length ? 'Tap a day for the details.' : 'No trading this month.';
+        detail.textContent = inMonth.length ? 'Tap a day for the details.' : isCost ? 'No usage this month.' : 'No trading this month.';
       }
       el.append(head, grid, detail);
       if (focus) {
