@@ -16,6 +16,7 @@ reports/*.py
 dashboard/money.py
 dashboard/edesk.py
 dashboard/options.py
+dashboard/costs.py
 dashboard/lab.py
 lab/fills.py
 lab/replay.py
