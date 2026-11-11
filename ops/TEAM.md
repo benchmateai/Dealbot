@@ -105,7 +105,12 @@ it spent before the switch is counted. It then runs `python3 -m reports.costs
 --snapshot <that file> --ledger <coordinator scratchpad>/costs/ledger.jsonl --record --paper-24h <the
 round's paper change over the last 24 hours>`: each teammate's spend since the last morning against its
 daily budget, the team's total, and the desk's paper result beside it. The supervisor checks run it the same
-way on their own snapshot (`costs/now.json`) without `--record`. A teammate that has spent a whole day's
+way on their own snapshot (`costs/now.json`) without `--record`. Both then put it on the money dashboard
+(from 2026-11-11): `python3 -m dashboard.costs --snapshot <that file> --history <coordinator
+scratchpad>/costs/history.jsonl --append --out <coordinator scratchpad>/costs/costs.json` (each teammate's
+spend since the history's snapshot nearest 24 hours back, against its budget, and its total), uploaded as
+an asset and set as the file of the dashboard's `costs` dataset, as for `datasets/paper`; the page shows it
+beside the desks' paper result over the same hours. A teammate that has spent a whole day's
 budget since the morning is a runaway: the coordinator reads its last replies, stops or fixes the loop as
 the escalation section says, and tells the owner in two lines. The budgets in `ops/budgets.json` change only
 with the owner, and nothing is stopped automatically for being over one.
@@ -311,7 +316,8 @@ Switching to the E desk (the coordinator, after the final report):
    lab.strategies.e_desk --lab <lab copy> --variants` for its line, its split by kind of market and the
    five variants' lines, replayed side by side in about two minutes by the week's end, each with its net
    if Kalshi credits whole price levels; lab E beside it; and keep the `lab.gap_report` line on the
-   Kalshi to Polymarket US gaps and the `lab.strategies.btc_options` line on the Bitcoin options test).
+   Kalshi to Polymarket US gaps, the `lab.strategies.btc_options` line on the Bitcoin options test, and the
+   team's running cost with its dashboard step, as "Running cost and budgets" says).
 4. Schedule the E desk's final report for 2026-11-19T05:30Z: its result at the week's end (the replay
    stops there by itself) against lab E and the five variants, by market, program and kind of market,
    with the money it tied up.
