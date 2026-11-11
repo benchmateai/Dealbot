@@ -173,8 +173,8 @@ button.pm-cal-day { cursor: pointer; }
 
   <section class="pm-card" id="days" aria-labelledby="days-title">
     <h2 id="days-title">Daily P&amp;L</h2>
-    <p class="pm-note">The change in paper equity each day, midnight to midnight Arizona time, after fees, so a desk's days add up to its net result. Team cost shows each day's Claude usage at list prices instead; days with a dashed border are estimated. Tap a day for the details.</p>
-    <div class="pm-cal dash-skeleton" data-draw="day-calendar" data-source="calendar calendar_costs"></div>
+    <p class="pm-note">The change in paper equity each day, midnight to midnight Arizona time, after fees, so a desk's days add up to its net result. Team cost shows each day's Claude usage at list prices instead; days with a dashed border are estimated. "Net of team cost" takes the team's usage on the same days from a desk's result. Tap a day for the details.</p>
+    <div class="pm-cal dash-skeleton" data-draw="day-calendar" data-source="calendar calendar_costs calendar_net"></div>
   </section>
 
   <section class="pm-card" id="costs" aria-labelledby="costs-title" hidden>
@@ -481,6 +481,25 @@ button.pm-cal-day { cursor: pointer; }
     title: 'Daily team cost',
     description: "The team's Claude usage at list prices for each Arizona day (midnight to midnight, UTC-7), by teammate; days before the first reading on Nov 10 are estimated.",
     fn: (costs) => costs.filter((r) => r.table === 'cost_day').sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0)),
+  });
+  // Each desk's day less the team's Claude usage that whole day, at list prices: the result net of what running the team is worth.
+  dash.calc('calendar_net', {
+    inputs: ['calendar', 'calendar_edesk', 'calendar_costs'],
+    title: 'Daily P&L net of team cost',
+    description: "Each desk's paper result for an Arizona day less the team's Claude usage that day at list prices.",
+    fn: (v2Days, edeskDays, costDays) => {
+      const cost = new Map(costDays.map((c) => [c.day, c]));
+      const out = [];
+      for (const [desk, days] of [['v2', v2Days], ['edesk', edeskDays]]) {
+        for (const d of days) {
+          if (!cost.has(d.day)) continue;
+          const c = cost.get(d.day);
+          out.push({ id: `${desk}:${d.day}`, desk, day: d.day, pnl_usd: d.pnl_usd, cost_usd: Number(c.cost_usd), net_usd: toCents(Number(d.pnl_usd) - Number(c.cost_usd)),
+            cost_estimated: Boolean(c.estimated), cost_partial: Boolean(c.partial) });
+        }
+      }
+      return out;
+    },
   });
   dash.calc('cost_summary', {
     inputs: ['costs'],
@@ -952,6 +971,8 @@ button.pm-cal-day { cursor: pointer; }
     const dr = dash.data('edesk');
     const edeskRow = dr.status === 'ok' && Array.isArray(dr.data) ? dr.data[0] || null : null;
     const dc = dash.data('calendar_costs');
+    const dn = dash.data('calendar_net');
+    const nets = new Map(dn.status === 'ok' && Array.isArray(dn.data) ? dn.data.map((x) => [x.id, x]) : []);
     const sets = { v2: dv.data, edesk: de.status === 'ok' && Array.isArray(de.data) ? de.data : [], cost: dc.status === 'ok' && Array.isArray(dc.data) ? dc.data : [] };
     if (!calDesk) calDesk = sets.edesk.length ? 'edesk' : 'v2';
     if (calDesk === 'cost' && !sets.cost.length) calDesk = 'v2'; // the costs did not load: no Team cost tab
@@ -1049,6 +1070,19 @@ button.pm-cal-day { cursor: pointer; }
         sum.append(amount, document.createTextNode(` · ${up} ${up === 1 ? 'day' : 'days'} up, ${down} down`));
       }
       title.append(month, sum);
+      const netDays = isCost || waiting ? [] : inMonth.map((r) => nets.get(`${desk}:${r.day}`)).filter(Boolean);
+      if (netDays.length) {
+        const netTotal = toCents(netDays.reduce((a, x) => a + Number(x.net_usd), 0));
+        const line = document.createElement('span');
+        line.className = 'pm-cal-sum';
+        const b = document.createElement('b');
+        b.textContent = signed(netTotal);
+        if (tone(netTotal)) b.className = tone(netTotal);
+        const notes = [netDays.length < inMonth.length ? `${netDays.length} of ${inMonth.length} days` : '',
+          netDays.some((x) => x.cost_estimated) ? 'cost partly estimated' : '', netDays.some((x) => x.cost_partial) ? 'not all read yet' : ''].filter(Boolean);
+        line.append(document.createTextNode('net of team cost '), b, document.createTextNode(notes.length ? ` (${notes.join(', ')})` : ''));
+        title.append(line);
+      }
       head.append(nav(-1), title, nav(1));
 
       const grid = document.createElement('div');
@@ -1122,6 +1156,14 @@ button.pm-cal-day { cursor: pointer; }
             : parts(r);
         detail.append(label, document.createTextNode(': '), amt);
         if (extra) detail.append(document.createTextNode(' · ' + extra));
+        const n = isCost ? null : nets.get(`${desk}:${st.pick}`);
+        if (n) {
+          const nb = document.createElement('span');
+          nb.className = ('pm-cal-amt ' + tone(Number(n.net_usd))).trim();
+          nb.textContent = signed(Number(n.net_usd));
+          const about = [n.cost_estimated ? 'estimated' : '', n.cost_partial ? 'not all read yet' : ''].filter(Boolean).join(', ');
+          detail.append(document.createTextNode(' · net of team cost '), nb, document.createTextNode(` (team cost ${usd(Number(n.cost_usd))}${about ? ', ' + about : ''})`));
+        }
       } else if (waiting) {
         detail.textContent = Number.isFinite(startMs)
           ? `The E desk starts ${shortDay(asDate(azDay(startMs)))} at ${d3.utcFormat('%-I:%M %p')(new Date(startMs - AZ_OFFSET_MS))} Arizona time. Its days fill in here as it runs.`

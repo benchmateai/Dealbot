@@ -195,3 +195,10 @@ def test_a_day_is_the_sum_of_its_split_and_a_bad_estimate_file_is_left_out(tmp_p
     (tmp_path / "before.json").write_text(json.dumps({"until": "2026-11-10T21:30:00Z", "days": {"2026-11-09": {"coordinator": "n/a"}}}))
     assert dc.main(["--snapshot", str(snapfile), "--history", str(hist), "--budgets", str(budgets), "--append", "--out", str(out)]) == 0
     assert "left out" in capsys.readouterr().err and len(hist.read_text().splitlines()) == 2 and out.exists()
+
+
+def test_an_estimate_with_a_day_that_is_not_a_padded_date_is_refused():
+    good = {"until": "2026-11-10T21:30:00Z", "days": {"2026-11-09": {"coordinator": 5.0}}}
+    assert dc.valid_before(good)
+    for key in ("Nov 9", "2026-11-9", "2026-02-30"):
+        assert not dc.valid_before({"until": good["until"], "days": {key: {"coordinator": 5.0}}})

@@ -179,8 +179,8 @@ def valid_before(before: object) -> bool:
     """An estimate this module can read: {"until": ISO time, "days": {day: {role: dollars}}}."""
     try:
         _ms(before["until"])
-        return all(isinstance(d, str) and isinstance(roles, dict) and all(float(v) >= 0 for v in roles.values())
-                   for d, roles in before["days"].items())
+        return all(isinstance(d, str) and datetime.strptime(d, "%Y-%m-%d").strftime("%Y-%m-%d") == d  # a real, zero-padded day
+                   and isinstance(roles, dict) and all(float(v) >= 0 for v in roles.values()) for d, roles in before["days"].items())
     except (KeyError, TypeError, ValueError, AttributeError):
         return False
 
