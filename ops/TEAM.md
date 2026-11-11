@@ -108,7 +108,10 @@ daily budget, the team's total, and the desk's paper result beside it. The super
 way on their own snapshot (`costs/now.json`) without `--record`. Both then put it on the money dashboard
 (from 2026-11-11): `python3 -m dashboard.costs --snapshot <that file> --history <coordinator
 scratchpad>/costs/history.jsonl --append --out <coordinator scratchpad>/costs/costs.json` (each teammate's
-spend since the history's snapshot nearest 24 hours back, against its budget, and its total), uploaded as
+spend since the history's snapshot nearest 24 hours back, against its budget, and its total, and the team's
+cost by Arizona day for the calendar's Team cost tab; the days before the first snapshot, 2026-11-10T21:30Z, come
+from `costs/before.json` beside the history, estimated once: the coordinator's from its own logs priced at list
+prices, the other teammates' spread evenly over their sessions), uploaded as
 an asset and set as the file of the dashboard's `costs` dataset, as for `datasets/paper`; the page shows it
 beside the desks' paper result over the same hours. A teammate that has spent a whole day's
 budget since the morning is a runaway: the coordinator reads its last replies, stops or fixes the loop as
