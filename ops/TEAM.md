@@ -268,6 +268,14 @@ weight fell from 0.55 to 0.15, lab A fell to about zero, and Kalshi's price scor
 every horizon), so the owner chose the E desk instead: a paper desk for strategy E, resting two-sided
 orders where Kalshi pays liquidity rewards.
 
+On 2026-11-12 the owner skipped the E desk and stood the team down after v2's final report: v2 failed its
+paper test (its forecast scored no better than Kalshi's price at any horizon, and its deflated Sharpe was
+0.05 against the 0.95 needed). The desk runner, the watchdog, the analyst and the three lab runners are
+stopped, their scheduled tasks and the morning report are disabled, and `ops/round.txt` stays `v2`;
+nothing was deleted or archived. Only the long-shot backtest (`lab/longshot.py`) runs, in the
+coordinator's session, restarted every two hours until its download finishes. The E desk below was never
+started.
+
 The E desk (`lab/strategies/e_desk.py`) quotes as lab E does and adds risk rules that stop it adding
 risk but never stop it pairing off what it holds: $250 per market, $5,000 of orders and holdings in all,
 nothing added in a market's last 3 hours, and no new risk in a market after a $40 loss there. Five
@@ -310,7 +318,7 @@ other; only Kalshi's own payouts can settle it. On the same hours cheap_side mad
 in payments ($39.59, near its cap all along): its lead is one Senate-seat long shot bought cheap and
 marked up $77, unsettled, and the approval bracket that cost the main desk $79, which it never held.
 
-Switching to the E desk (the coordinator, after the final report):
+Switching to the E desk (planned for after the final report; not done, as the owner skipped the E desk):
 1. On `claude/desk-skeleton`, set `ops/round.txt` to `edesk` and push (ops/ never restarts the desk).
 2. The desk runner stays stopped after v2's week. Never stop the lab runners: the E desk runs on the live
    feed, and lab E stays its control.
