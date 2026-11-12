@@ -276,6 +276,17 @@ nothing was deleted or archived. Only the long-shot backtest (`lab/longshot.py`)
 coordinator's session, restarted every two hours until its download finishes. The E desk below was never
 started.
 
+Later on 2026-11-12: the long-shot backtest failed its main test, and the owner asked for one more test
+and for a fresh look at everything tried. The weather settlement backtest (`lab/weather.py`, Kalshi's
+temperature markets against The Weather Company's settlement figure) runs in the coordinator's session.
+An audit of the earlier tests found that the Kalshi to Polymarket US gaps on the Bitcoin year-end ranges
+paid after both fees and the cost of the money 15% of the time on the final recording, which the final
+summary had misreported. On the owner's word (about 19:40Z) the gap-recorder runner was restarted, which
+also feeds the Bitcoin options test, and the coordinator builds a backtest of quoting Kalshi's combos
+from public trade data; the combos stay on paper, as their legs are sports contracts and Arizona's case
+on those is still open. The desk runner, the watchdog, the analyst and the other two lab runners stay
+stopped.
+
 The E desk (`lab/strategies/e_desk.py`) quotes as lab E does and adds risk rules that stop it adding
 risk but never stop it pairing off what it holds: $250 per market, $5,000 of orders and holdings in all,
 nothing added in a market's last 3 hours, and no new risk in a market after a $40 loss there. Five
