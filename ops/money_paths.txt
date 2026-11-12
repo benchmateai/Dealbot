@@ -26,3 +26,4 @@ lab/strategies/
 lab/longshot.py
 lab/gap_pairs.json
 dashboard/money_page/index.html
+lab/weather.py
