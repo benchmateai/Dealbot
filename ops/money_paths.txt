@@ -1,0 +1,31 @@
+# Code that places, sizes, fills, prices, fees, settles or reports money. A commit that touches any of these
+# is pushed only after a fresh reviewer has read it and its message carries a Reviewed-by: trailer
+# (ops/TEAM.md, "Review before push"; ops/review_gate.py enforces it in the coordinator's clone).
+# A line ending in / is a folder and everything under it; any other line is a path or a glob.
+broker/
+kalshi/
+desk/
+policy/
+filter/
+risk/
+book/
+outcomes/
+feed/
+trials/
+reports/*.py
+dashboard/money.py
+dashboard/edesk.py
+dashboard/options.py
+dashboard/costs.py
+dashboard/lab.py
+lab/fills.py
+lab/replay.py
+lab/btc_options.py
+lab/gap_report.py
+lab/strategies/
+lab/longshot.py
+lab/gap_pairs.json
+dashboard/money_page/index.html
+lab/weather.py
+lab/combos.py
+lab/etf.py

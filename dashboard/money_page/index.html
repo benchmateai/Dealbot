@@ -1,0 +1,1142 @@
+<meta name="dash-one-writer">
+<style>
+/* Layout: one narrow column that reads on a phone first. The result after fees is the hero, then the
+   figures that explain it, the equity curve, every bet, and the days. Paper money, said plainly. */
+.pm { max-width: 46rem; margin-inline: auto; display: grid; gap: var(--cds-gap-lg); font-family: var(--font-anthropic-sans); color: var(--color-fg); }
+.pm-head { display: grid; gap: var(--cds-gap-xs); }
+.pm-eyebrow { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.pm-title { margin: 0; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); text-wrap: balance; }
+.pm-lede { margin: 0; font-size: var(--cds-font-size-body); color: var(--color-fg-muted); max-width: 38rem; }
+.pm .pm-lede b, .pm .pm-foot b, .pm .pm-hero-sub b, .pm .pm-tile-sub b { font-weight: var(--cds-font-weight-medium); color: var(--color-fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pm-card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); min-width: 0; }
+.pm-card h2 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); }
+.pm-note { margin: var(--cds-gap-xs) 0 var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.pm-hero { display: grid; gap: var(--cds-gap-sm); }
+.pm-hero-label { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); letter-spacing: 0.04em; text-transform: uppercase; }
+.pm-hero-value { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: calc(var(--cds-font-size-title) * 2.4); line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; min-height: 1em; }
+.pm-hero-sub { font-size: var(--cds-font-size-body); color: var(--color-fg-muted); }
+.pm .pm-up { color: var(--color-ok); }
+.pm .pm-down { color: var(--color-bad); }
+.pm-chart { position: relative; min-height: 150px; margin-top: var(--cds-gap-sm); }
+.pm-cal { display: grid; gap: var(--cds-gap-sm); min-height: 18rem; }
+.pm-cal-tabs { display: inline-flex; justify-self: start; gap: 2px; padding: 3px; border: 1px solid var(--color-border-line); border-radius: 999px; }
+.pm-cal-tab { border: 0; border-radius: 999px; background: transparent; color: var(--color-fg-muted); font: inherit; font-size: var(--cds-font-size-caption); padding: 6px 14px; cursor: pointer; }
+.pm-cal-tab[aria-pressed="true"] { background: var(--color-fg); color: var(--color-panel); font-weight: var(--cds-font-weight-medium); }
+.pm-cal-tab:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+.pm-cal-head { display: grid; grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem; align-items: center; gap: var(--cds-gap-xs); }
+.pm-cal-title { display: grid; justify-items: center; gap: 2px; text-align: center; min-width: 0; }
+.pm-cal-month { font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); }
+.pm-cal-sum { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+.pm .pm-cal-sum b { font-weight: var(--cds-font-weight-medium); }
+.pm-cal-nav { width: 2.5rem; height: 2.5rem; border-radius: 50%; border: 1px solid var(--color-border-line); background: transparent; color: var(--color-fg); font: inherit; font-size: 1.125rem; line-height: 1; cursor: pointer; }
+.pm-cal-nav:disabled { opacity: 0.3; cursor: default; }
+.pm-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.pm-cal-dow { text-align: center; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); padding-bottom: 2px; }
+.pm-cal-day { min-width: 0; min-height: 2.9rem; display: grid; align-content: start; justify-items: center; gap: 2px; padding: 5px 1px; border: 1px solid var(--color-border-line); border-radius: calc(var(--cds-radius) * 0.75); background: transparent; color: var(--color-fg-muted); font: inherit; font-variant-numeric: tabular-nums; }
+.pm-cal-n { font-size: var(--cds-font-size-caption); line-height: 1.1; }
+.pm-cal-v { max-width: 100%; overflow: hidden; white-space: nowrap; font-size: clamp(0.6875rem, 2.9vw, 0.875rem); font-weight: var(--cds-font-weight-medium); line-height: 1.2; }
+.pm-cal-blank { border-color: transparent; }
+.pm-cal-out { opacity: 0.4; }
+.pm-cal-up { background: color-mix(in srgb, var(--color-ok) 14%, transparent); border-color: color-mix(in srgb, var(--color-ok) 38%, transparent); }
+.pm-cal-up .pm-cal-v { color: var(--color-ok); }
+.pm-cal-down { background: color-mix(in srgb, var(--color-bad) 12%, transparent); border-color: color-mix(in srgb, var(--color-bad) 38%, transparent); }
+.pm-cal-down .pm-cal-v { color: var(--color-bad); }
+.pm-cal-flat .pm-cal-v { color: var(--color-fg); }
+.pm-cal-cost .pm-cal-v { color: var(--color-fg); }
+.pm-cal-est { border-style: dashed; }
+button.pm-cal-day { cursor: pointer; }
+.pm-cal-today .pm-cal-n { color: var(--color-fg); font-weight: var(--cds-font-weight-medium); text-decoration: underline; text-underline-offset: 2px; }
+.pm-cal-sel { box-shadow: 0 0 0 2px var(--color-fg); }
+.pm-cal-day:focus-visible, .pm-cal-nav:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+.pm-cal-detail { margin: 0; min-height: 1.5em; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); font-variant-numeric: tabular-nums; }
+.pm .pm-cal-detail b { font-weight: var(--cds-font-weight-medium); color: var(--color-fg); }
+.pm-cal-amt { font-weight: var(--cds-font-weight-medium); }
+.pm-chart-note { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.pm-fail { display: flex; align-items: center; justify-content: center; gap: var(--cds-gap-xs); min-height: inherit; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.pm-fail i { width: 0.375rem; height: 0.375rem; border-radius: 50%; background: var(--color-bad); display: inline-block; }
+.pm-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); gap: var(--cds-gap-md); }
+.pm-tile { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-md); display: grid; gap: var(--cds-gap-xs); align-content: start; min-width: 0; }
+.pm-tile-label { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.pm-tile-value { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pm-tile-sub { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.pm-table-wrap { overflow-x: auto; max-height: 28rem; overflow-y: auto; }
+.pm-table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+.pm-table th { position: sticky; top: 0; background: var(--color-panel); text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
+.pm-table td { padding: var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
+.pm-table .pm-r { text-align: right; }
+.pm-table-fit th, .pm-table-fit td { padding-inline: 6px; }
+.pm-table-fit td:first-child { white-space: normal; min-width: 7rem; }
+.pm-result { text-transform: capitalize; }
+.pm-result.pm-won { color: var(--color-ok); }
+.pm-result.pm-lost { color: var(--color-bad); }
+.pm-result.pm-open { color: var(--color-fg-muted); }
+.pm-empty { margin: 0; font-size: var(--cds-font-size-body); color: var(--color-fg-muted); }
+.pm-shadow { display: grid; gap: var(--cds-gap-xs); min-width: 0; }
+.pm-shadow h2 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); }
+.pm-shadow .pm-note { margin: 0 0 var(--cds-gap-sm); }
+.pm .pm-shadow .pm-note b, .pm .pm-shadow .pm-tile-label b { font-weight: var(--cds-font-weight-medium); color: var(--color-fg); font-variant-numeric: tabular-nums; }
+.pm-foot { margin: 0; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); text-align: center; }
+.pm-axis text { fill: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+.pm-grid line { stroke: var(--cds-chart-grid); stroke-width: 1; }
+.pm-tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); white-space: nowrap; }
+.pm-tip .pm-tip-when { color: var(--cds-text-secondary); }
+.pm [data-dash-source-state=empty] { color: transparent; }
+.pm [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+</style>
+
+<div class="pm">
+  <header class="pm-head" id="top">
+    <p class="pm-eyebrow">Paper money · Kalshi 15-minute crypto · no real orders</p>
+    <h1 class="pm-title">Dealbot paper money</h1>
+    <p class="pm-lede"><b data-draw="desk-name" data-source="paper" data-field="desk" data-where="table=summary" class="dash-skeleton">—</b> has traded since <b data-draw="since" data-source="paper" data-field="week_started_ms" data-where="table=summary" class="dash-skeleton">—</b>. After fees it stands at <b data-draw="net-lede" data-source="paper" data-field="net_pnl_usd" data-where="table=summary" class="dash-skeleton">—</b>, with <b data-draw="closed-lede" data-source="paper" data-field="trades_closed" data-where="table=summary" class="dash-skeleton">—</b> bets settled and <b data-draw="open-lede" data-source="paper" data-field="trades_open" data-where="table=summary" class="dash-skeleton">—</b> open.</p>
+  </header>
+
+  <section class="pm-card" id="edesk" aria-labelledby="edesk-title">
+    <h2 id="edesk-title">E desk: Kalshi's liquidity payments</h2>
+    <p class="pm-note" data-edesk="before">The next round, on paper, from <b data-draw="edesk-start" data-source="edesk" data-field="start_ms" data-where="id=edesk">—</b>. It keeps resting orders on both sides of the markets where Kalshi pays for them, collects the payments and marks whatever gets filled, and never places a real order. It adds nothing to a market already holding $250, keeps orders and holdings under $5,000 in all, adds nothing in a market's last 3 hours, and stops adding where it has lost $40.</p>
+    <p class="pm-note" data-edesk="running" hidden>Day <b data-draw="edesk-day" data-source="edesk" data-field="week_day" data-where="id=edesk">—</b> of 7 since <b data-draw="edesk-since" data-source="edesk" data-field="start_ms" data-where="id=edesk">—</b>: Kalshi's payments plus what its fills are worth now, on paper. It never places a real order.</p>
+    <div class="pm-tiles" data-edesk="running" hidden>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Net</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-net" data-source="edesk" data-field="net_usd" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub">equity <b data-draw="ed-equity" data-source="edesk" data-field="equity_usd" data-where="id=edesk">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Kalshi's payments</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-pay" data-source="edesk" data-field="payable_usd" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub">over <b data-draw="ed-hours" data-source="edesk" data-field="hours" data-where="id=edesk">—</b> hours</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Fills, worth now</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-marked" data-source="edesk" data-field="fills_marked_usd" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub"><b data-draw="ed-contracts" data-source="edesk" data-field="contracts_filled" data-where="id=edesk">—</b> contracts filled</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Money tied up</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-cap" data-source="edesk" data-field="capital_avg_usd" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub">on average; <b data-draw="ed-cap-peak" data-source="edesk" data-field="capital_peak_usd" data-where="id=edesk">—</b> at most</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Markets</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-markets" data-source="edesk" data-field="markets_quoted" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub">quoted; <b data-draw="ed-held" data-source="edesk" data-field="held_markets" data-where="id=edesk">—</b> still held</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Loss stops</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="ed-stops" data-source="edesk" data-field="loss_stops" data-where="id=edesk">—</div>
+        <div class="pm-tile-sub">caps cut quotes in <b data-draw="ed-capped" data-source="edesk" data-field="capped_markets" data-where="id=edesk">—</b> markets</div>
+      </div>
+    </div>
+    <div class="pm-table-wrap" data-edesk="running" hidden>
+      <table class="pm-table" data-source="edesk_markets" data-row-key="id">
+        <thead><tr><th data-field="ticker">Market</th><th data-field="reward_usd" class="pm-r">Payments</th><th data-field="contracts" class="pm-r">Filled</th><th data-field="net_yes" class="pm-r">Holding</th><th data-field="pnl_usd" class="pm-r">Fills now</th><th data-field="status">Status</th></tr></thead>
+        <tbody data-draw="edesk-rows"></tbody>
+      </table>
+    </div>
+    <div class="pm-table-wrap" data-edesk="running" hidden>
+      <table class="pm-table" data-source="edesk_categories" data-row-key="id">
+        <thead><tr><th data-field="group">Kind of market</th><th data-field="markets" class="pm-r">Markets</th><th data-field="payable_usd" class="pm-r">Payments</th><th data-field="fills_marked_usd" class="pm-r">Fills now</th><th data-field="net_usd" class="pm-r">Net</th></tr></thead>
+        <tbody data-draw="edesk-category-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="pm-card pm-hero" id="result" aria-labelledby="result-label">
+    <div class="pm-hero-label" id="result-label">Net result after fees</div>
+    <div data-draw="net" data-source="paper" data-field="net_pnl_usd" data-where="table=summary" class="pm-hero-value dash-skeleton">—</div>
+    <div class="pm-hero-sub">Equity <b data-draw="equity" data-source="paper" data-field="equity_usd" data-where="table=summary" class="dash-skeleton">—</b> from a <b data-draw="start" data-source="paper" data-field="start_usd" data-where="table=summary" class="dash-skeleton">—</b> paper bankroll</div>
+    <div class="pm-chart dash-skeleton" id="equity-chart" data-draw="equity-chart" data-source="equity"></div>
+  </section>
+
+  <section class="pm-tiles" id="figures" aria-label="Key figures">
+    <div class="pm-tile">
+      <div class="pm-tile-label">Today, Arizona</div>
+      <div data-draw="today" data-source="calendar" class="pm-tile-value dash-skeleton">—</div>
+      <div class="pm-tile-sub">change in equity since midnight Arizona time</div>
+    </div>
+    <div class="pm-tile">
+      <div class="pm-tile-label">Win rate</div>
+      <div data-draw="winrate" data-source="paper" data-field="win_rate" data-where="table=summary" class="pm-tile-value dash-skeleton">—</div>
+      <div class="pm-tile-sub"><b data-draw="wins" data-source="paper" data-field="wins" data-where="table=summary">—</b> won, <b data-draw="losses" data-source="paper" data-field="losses" data-where="table=summary">—</b> lost</div>
+    </div>
+    <div class="pm-tile">
+      <div class="pm-tile-label">Best bet</div>
+      <div data-draw="best" data-source="paper" data-field="best_pnl_usd" data-where="table=summary" class="pm-tile-value dash-skeleton">—</div>
+      <div class="pm-tile-sub">worst <b data-draw="worst" data-source="paper" data-field="worst_pnl_usd" data-where="table=summary">—</b></div>
+    </div>
+    <div class="pm-tile">
+      <div class="pm-tile-label">Kalshi fees paid</div>
+      <div data-draw="fees" data-source="paper" data-field="fees_usd" data-where="table=summary" class="pm-tile-value dash-skeleton">—</div>
+      <div class="pm-tile-sub">already taken out of the result</div>
+    </div>
+  </section>
+
+  <section class="pm-card" id="days" aria-labelledby="days-title">
+    <h2 id="days-title">Daily P&amp;L</h2>
+    <p class="pm-note">The change in paper equity each day, midnight to midnight Arizona time, after fees, so a desk's days add up to its net result. Team cost shows each day's Claude usage at list prices instead; days with a dashed border are estimated. Tap a day for the details.</p>
+    <div class="pm-cal dash-skeleton" data-draw="day-calendar" data-source="calendar calendar_costs"></div>
+  </section>
+
+  <section class="pm-card" id="costs" aria-labelledby="costs-title" hidden>
+    <h2 id="costs-title">What the team costs to run</h2>
+    <p class="pm-note">Claude usage, not paper trading: what each session on the team has used, priced at Claude's list prices per token (the helpers it starts included), as the session itself reports it, read about every six hours. On a subscription plan this is what the usage is worth, not a charge: it counts against the plan's limits. Each teammate has a daily budget; one over it is flagged and looked into, and nothing stops on its own. As of <b data-draw="cost-when" data-source="cost_summary" data-field="updated_ms" data-where="id=team">—</b>.</p>
+    <div class="pm-tiles">
+      <div class="pm-tile">
+        <div class="pm-tile-label">Team cost, last <span data-draw="cost-hours" data-source="cost_summary" data-field="window_hours" data-where="id=team">—</span> hours</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="cost-spent" data-source="cost_summary" data-field="spent_usd" data-where="id=team">—</div>
+        <div class="pm-tile-sub">budget <b data-draw="cost-budget" data-source="cost_summary" data-field="budget_usd" data-where="id=team">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Desks on paper, same hours</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="cost-paper-window" data-source="cost_paper" data-field="window_pnl_usd" data-where="id=paper">—</div>
+        <div class="pm-tile-sub">change in paper equity, after fees</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Team cost so far</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="cost-total" data-source="cost_summary" data-field="total_usd" data-where="id=team">—</div>
+        <div class="pm-tile-sub">since <b data-draw="cost-since" data-source="cost_summary" data-field="first_since_ms" data-where="id=team">—</b>, when the first session began</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Desks on paper so far</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="cost-paper-all" data-source="cost_paper" data-field="all_pnl_usd" data-where="id=paper">—</div>
+        <div class="pm-tile-sub">every desk's net since Nov 3, after fees</div>
+      </div>
+    </div>
+    <div class="pm-table-wrap">
+      <table class="pm-table pm-table-fit" data-source="cost_roles" data-row-key="id">
+        <thead><tr><th data-field="name">Teammate</th><th data-field="spent_usd" class="pm-r">Last <span data-draw="cost-hours-col" data-source="cost_summary" data-field="window_hours" data-where="id=team"></span> h</th><th data-field="limit_usd" class="pm-r">Budget</th><th data-field="total_usd" class="pm-r">So far</th></tr></thead>
+        <tbody data-draw="cost-role-rows"></tbody>
+      </table>
+    </div>
+    <p class="pm-note" data-cost="missing" hidden>The replaced session of the <b data-draw="cost-missing" data-source="cost_summary" data-field="missing" data-where="id=team">—</b> has not been read since it was replaced, so what it spent in these hours is not counted yet.</p>
+  </section>
+
+  <section class="pm-shadow" id="rules" aria-labelledby="rules-title">
+    <h2 id="rules-title">Paper rules on v2's own bets</h2>
+    <span data-draw="rules-state" data-source="rules"></span>
+    <p class="pm-note">The two rules you chose on Nov 5 count the bets v2 places from <b data-draw="rules-when" data-source="rules" data-field="registered_ms" data-where="id=desk">—</b>; the third and the next round's pick, chosen on Nov 6, count from <b data-draw="rules-when-3" data-source="rules" data-field="registered_ms" data-where="id=skip_late_entries">—</b>, beside v2 on the same bets. v2 itself trades unchanged; a rule can only keep a bet v2 sold or skip one it took.</p>
+    <div class="pm-tiles">
+      <div class="pm-tile">
+        <div class="pm-tile-label">v2, as traded</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="r-desk" data-source="rules" data-field="test_pnl_usd" data-where="id=desk">—</div>
+        <div class="pm-tile-sub"><b data-draw="r-desk-n" data-source="rules" data-field="test_trades" data-where="id=desk">—</b> bets closed</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Late stop on long shots only</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="r-late" data-source="rules" data-field="test_pnl_usd" data-where="id=late_stop_underdogs">—</div>
+        <div class="pm-tile-sub">favorites held to the close; <b data-draw="r-late-n" data-source="rules" data-field="test_trades" data-where="id=late_stop_underdogs">—</b> bets closed</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Skip favorites (over 70¢)</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="r-skip" data-source="rules" data-field="test_pnl_usd" data-where="id=skip_favourites">—</div>
+        <div class="pm-tile-sub"><b data-draw="r-skip-n" data-source="rules" data-field="test_trades" data-where="id=skip_favourites">—</b> closed, <b data-draw="r-skip-s" data-source="rules" data-field="test_skipped" data-where="id=skip_favourites">—</b> skipped</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">No new bets in the last 3 minutes</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="r-lateentry" data-source="rules" data-field="test_pnl_usd" data-where="id=skip_late_entries">—</div>
+        <div class="pm-tile-sub"><b data-draw="r-lateentry-n" data-source="rules" data-field="test_trades" data-where="id=skip_late_entries">—</b> closed, <b data-draw="r-lateentry-s" data-source="rules" data-field="test_skipped" data-where="id=skip_late_entries">—</b> skipped; v2 made <b data-draw="r-same" data-source="rules" data-field="desk_same_pnl_usd" data-where="id=skip_late_entries">—</b> on the same <b data-draw="r-same-n" data-source="rules" data-field="desk_same_trades" data-where="id=skip_late_entries">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Next round's pick</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="r-next" data-source="rules" data-field="test_pnl_usd" data-where="id=next_round">—</div>
+        <div class="pm-tile-sub">no bets in the last 3 minutes, late stop on long shots only, favorites kept; <b data-draw="r-next-n" data-source="rules" data-field="test_trades" data-where="id=next_round">—</b> closed</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pm-shadow" id="previous" aria-labelledby="previous-title">
+    <h2 id="previous-title">The first desk</h2>
+    <span data-draw="previous-state" data-source="previous"></span>
+    <p class="pm-note">From Nov 3 the first desk bet against the market using Jev's odds. Kalshi's own price turned out to be the better forecast, so on Nov 5 the desk switched to v2: the market price, nudged by a model of how these contracts settle only as far as past results allow. v2 holds each bet to the close and sells one still losing a minute before.</p>
+    <div class="pm-tiles">
+      <div class="pm-tile">
+        <div class="pm-tile-label">First desk's final result</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="v1-net" data-source="previous" data-field="net_pnl_usd" data-where="id=v1">—</div>
+        <div class="pm-tile-sub"><b data-draw="v1-n" data-source="previous" data-field="trades_closed" data-where="id=v1">—</b> bets, <b data-draw="v1-wins" data-source="previous" data-field="wins" data-where="id=v1">—</b> won, until <b data-draw="v1-end" data-source="previous" data-field="to_ms" data-where="id=v1">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">First desk's fees and Jev calls</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="v1-fees" data-source="previous" data-field="fees_usd" data-where="id=v1">—</div>
+        <div class="pm-tile-sub"><b data-draw="v1-jev" data-source="previous" data-field="jev_calls" data-where="id=v1">—</b> Jev calls; v2 makes none</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pm-shadow" id="lab" aria-labelledby="lab-title">
+    <h2 id="lab-title">Kalshi's liquidity payments (strategy E, paper)</h2>
+    <span data-draw="lab-state" data-source="lab"></span>
+    <p class="pm-note">Kalshi pays traders who keep orders resting in some markets. Strategy E replays the recorded live feed as if it had kept orders there: the payments it would have earned, less what the bets it got filled on are worth now. No orders are placed. Rebuilt each morning; as of <b data-draw="lab-when" data-source="lab" data-field="updated_ms" data-where="id=E">—</b>.</p>
+    <div class="pm-tiles">
+      <div class="pm-tile">
+        <div class="pm-tile-label">E, realistic result</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="e-net" data-source="lab" data-field="net_usd_realistic" data-where="id=E">—</div>
+        <div class="pm-tile-sub">over <b data-draw="e-hours" data-source="lab" data-field="hours" data-where="id=E">—</b> hours: payments <b data-draw="e-pay" data-source="lab" data-field="payable_usd" data-where="id=E">—</b>, fills now worth <b data-draw="e-marked" data-source="lab" data-field="fills_marked_usd" data-where="id=E">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Money E ties up</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="e-cap" data-source="lab" data-field="capital_avg_usd" data-where="id=E">—</div>
+        <div class="pm-tile-sub">on average, <b data-draw="e-cap-peak" data-source="lab" data-field="capital_peak_usd" data-where="id=E">—</b> at most; best case <b data-draw="e-best" data-source="lab" data-field="net_usd_upper_bound" data-where="id=E">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Lab A: v2's forecast, BTC and ETH at once</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="a-pnl" data-source="lab" data-field="pnl_usd" data-where="id=A">—</div>
+        <div class="pm-tile-sub"><b data-draw="a-n" data-source="lab" data-field="trades" data-where="id=A">—</b> paper trades since Nov 3, held to the close</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pm-card" id="options" aria-labelledby="options-title" hidden>
+    <h2 id="options-title">Bitcoin options test (paper)</h2>
+    <p class="pm-note">Kalshi's and Polymarket US's 44 Bitcoin markets beside the price Bitcoin's options imply. Wherever a venue sells a side for less than that, by more than its fee and the cost of the money until the market settles, the test makes a paper buy at the displayed price, at most $100 a market. The year-end ranges are priced straight from the options; the "hits a price" markets from a model, so trust those prices less. They settle on Jan 1. No orders are placed.</p>
+    <p class="pm-note" data-opt="waiting" hidden>Recording started on Nov 10. The first prices appear here within a couple of hours.</p>
+    <div class="pm-tiles" data-opt="running" hidden>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Kalshi vs the options</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="opt-k-gap" data-source="opt_summary" data-field="kalshi_all_median_gap_cents" data-where="id=options">—</div>
+        <div class="pm-tile-sub">median gap; ranges <b data-draw="opt-k-ranges" data-source="opt_summary" data-field="kalshi_terminal_median_gap_cents" data-where="id=options">—</b>, hits-a-price <b data-draw="opt-k-touch" data-source="opt_summary" data-field="kalshi_touch_median_gap_cents" data-where="id=options">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Polymarket US vs the options</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="opt-p-gap" data-source="opt_summary" data-field="poly_all_median_gap_cents" data-where="id=options">—</div>
+        <div class="pm-tile-sub">median gap; ranges <b data-draw="opt-p-ranges" data-source="opt_summary" data-field="poly_terminal_median_gap_cents" data-where="id=options">—</b>, hits-a-price <b data-draw="opt-p-touch" data-source="opt_summary" data-field="poly_touch_median_gap_cents" data-where="id=options">—</b></div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">Paper buys, 2¢ hurdle</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="opt-2c" data-source="opt_variants" data-field="pnl_at_options_usd" data-where="id=hurdle_2c">—</div>
+        <div class="pm-tile-sub">at the options' price; buys: <b data-draw="opt-2c-n" data-source="opt_variants" data-field="positions" data-where="id=hurdle_2c">—</b>, cost <b data-draw="opt-2c-cost" data-source="opt_variants" data-field="cost_usd" data-where="id=hurdle_2c">—</b>; <b data-draw="opt-2c-bids" data-source="opt_variants" data-field="pnl_at_bids_usd" data-where="id=hurdle_2c">—</b> at the venues' bids</div>
+      </div>
+      <div class="pm-tile">
+        <div class="pm-tile-label">1¢ and 3¢ hurdles</div>
+        <div class="pm-tile-value dash-skeleton" data-draw="opt-1c" data-source="opt_variants" data-field="pnl_at_options_usd" data-where="id=hurdle_1c">—</div>
+        <div class="pm-tile-sub">1¢ at the options' price (buys: <b data-draw="opt-1c-n" data-source="opt_variants" data-field="positions" data-where="id=hurdle_1c">—</b>); 3¢: <b data-draw="opt-3c" data-source="opt_variants" data-field="pnl_at_options_usd" data-where="id=hurdle_3c">—</b> (buys: <b data-draw="opt-3c-n" data-source="opt_variants" data-field="positions" data-where="id=hurdle_3c">—</b>)</div>
+      </div>
+    </div>
+    <div class="pm-table-wrap" data-opt="running" hidden>
+      <table class="pm-table pm-table-fit" data-source="opt_markets" data-row-key="id">
+        <thead><tr><th data-field="label">Market</th><th data-field="fair" class="pm-r">Options</th><th data-field="kalshi_mid" class="pm-r">Kalshi</th><th data-field="poly_mid" class="pm-r">Poly US</th></tr></thead>
+        <tbody data-draw="opt-market-rows"></tbody>
+      </table>
+    </div>
+    <p class="pm-note" data-opt="running" hidden>YES prices in cents; each venue's is the middle of its bid and ask (Poly US is Polymarket US). Largest gaps first. <span class="pm-up">Green</span>: at least 1¢ cheaper than the options say, so YES would be the buy. <span class="pm-down">Red</span>: at least 1¢ dearer, so NO would be. Prices as of <b data-draw="opt-when" data-source="opt_summary" data-field="priced_until_ms" data-where="id=options">—</b>.</p>
+    <div class="pm-table-wrap" data-opt="buys" hidden>
+      <table class="pm-table pm-table-fit" data-source="opt_positions" data-row-key="id">
+        <thead><tr><th data-field="label">Paper buy, 2¢ hurdle</th><th data-field="price" class="pm-r">Paid</th><th data-field="contracts" class="pm-r">Count</th><th data-field="pnl_at_options_usd" class="pm-r">At options</th></tr></thead>
+        <tbody data-draw="opt-position-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="pm-card" id="bets" aria-labelledby="bets-title">
+    <h2 id="bets-title">Every bet</h2>
+    <p class="pm-note">Newest first. Each contract pays $1 if its side is right at the 15-minute close; the stake is what the side cost. Profit or loss is after the Kalshi fee.</p>
+    <p class="pm-empty" id="no-bets" hidden>No bets yet. They appear here as soon as the desk places one.</p>
+    <span data-draw="bets-state" data-source="trades"></span>
+    <div class="pm-table-wrap">
+      <table class="pm-table" data-source="trades" data-row-key="id">
+        <thead><tr><th data-field="opened_ms">Placed</th><th data-field="market">Market</th><th data-field="bet">Side</th><th data-field="price_cents" class="pm-r">Price</th><th data-field="stake_usd" class="pm-r">Stake</th><th data-field="result">Result</th><th data-field="pnl_usd" class="pm-r">Profit</th></tr></thead>
+        <tbody data-draw="bet-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="pm-foot">Day <b data-draw="weekday" data-source="paper" data-field="week_day" data-where="table=summary">—</b> of the 7-day paper test · updated <b data-draw="updated" data-source="paper" data-field="updated_ms" data-where="table=summary">—</b></p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const usd = d3.format('$,.2f');
+  const signed = d3.format('+$,.2f');
+  const pct = d3.format('.0%');
+  const count = d3.format(',');
+  const whole = d3.format('$,.0f');
+  const cents = (v) => d3.format('.1~f')(v) + '¢';
+  const small = (v) => (Math.abs(v) < 0.1 ? d3.format('$,.3f')(v) : usd(v));
+  const when = (ms) => new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  // Arizona keeps UTC-7 all year (no daylight saving), so an Arizona calendar day is the UTC day of ms - 7 h.
+  const AZ_OFFSET_MS = 7 * 3600 * 1000;
+  const azDay = (ms) => new Date(ms - AZ_OFFSET_MS).toISOString().slice(0, 10);
+  const asDate = (day) => new Date(day + 'T00:00:00Z');
+  const toCents = (v) => Math.round(v * 100) / 100 || 0; // || 0 also turns -0 into 0
+
+  dash.calc('trades', {
+    inputs: ['paper'],
+    title: 'Bets',
+    description: 'The bet rows of the paper run file, newest first.',
+    fn: (paper) => paper.filter((r) => r.table === 'trade'),
+  });
+  dash.calc('equity', {
+    inputs: ['paper'],
+    title: 'Equity curve',
+    description: 'Paper equity, the last reading in each 10-minute slot.',
+    fn: (paper) => paper.filter((r) => r.table === 'equity'),
+  });
+  // Arizona days from an equity series [{t, v, ...}]: each day's last reading less the day before's (the
+  // bankroll before the first), so the days add up to the net result; a reading exactly at midnight closes the
+  // day before. Each field named in `parts` (the E desk's payments and fills) also gets the day's change.
+  const arizonaDays = (points, start, parts = []) => {
+    const last = new Map();
+    const pts = points.filter((q) => Number.isFinite(q.t) && Number.isFinite(q.v)).sort((a, b) => a.t - b.t);
+    for (const q of pts) last.set(azDay(q.t - 1), q);
+    let prev = { v: Number.isFinite(start) ? start : (pts.length ? pts[0].v : null) };
+    for (const k of parts) prev[k] = 0;
+    return [...last.keys()].sort().map((day) => {
+      const q = last.get(day);
+      const row = { id: day, day, open_usd: prev.v, close_usd: q.v, pnl_usd: prev.v === null ? 0 : toCents(q.v - prev.v) };
+      for (const k of parts) row[k] = Number.isFinite(q[k]) && Number.isFinite(prev[k]) ? toCents(q[k] - prev[k]) : null;
+      prev = q;
+      return row;
+    });
+  };
+  dash.calc('calendar', {
+    inputs: ['paper'],
+    title: 'Daily P&L, desk v2',
+    description: 'Desk v2\'s change in paper equity for each Arizona day (midnight to midnight, UTC-7): its last reading less the day before\'s (the bankroll before the first), so the days add up to the net result; with the bets that closed that day, how many made money, and their fees.',
+    fn: (paper) => {
+      const s = paper.find((r) => r.table === 'summary');
+      const points = paper.filter((r) => r.table === 'equity').map((r) => ({ t: Number(r.t_ms), v: Number(r.equity_usd) }));
+      const rows = arizonaDays(points, s ? Number(s.start_usd) : NaN);
+      const byDay = new Map(rows.map((r) => [r.day, Object.assign(r, { trades: 0, wins: 0, fees_usd: 0 })]));
+      for (const t of paper) {
+        if (t.table !== 'trade' || t.closed_ms === null || t.closed_ms === undefined || t.pnl_usd === null || t.pnl_usd === undefined) continue;
+        const r = byDay.get(azDay(Number(t.closed_ms)));
+        if (!r) continue;
+        r.trades += 1;
+        if (Number(t.pnl_usd) > 0) r.wins += 1;
+        r.fees_usd += Number(t.fees_usd) || 0;
+      }
+      for (const r of rows) r.fees_usd = toCents(r.fees_usd);
+      return rows;
+    },
+  });
+  dash.calc('calendar_edesk', {
+    inputs: ['paper'],
+    title: 'Daily P&L, E desk',
+    description: "The E desk's change in paper equity for each Arizona day, from its equity at every 10-minute mark (its bankroll before the first), so the days add up to its net result; with the day's change in Kalshi's payments and in what its fills are worth.",
+    fn: (paper) => {
+      const e = paper.find((r) => r.table === 'edesk');
+      if (!e || !e.started) return [];
+      const points = paper.filter((r) => r.table === 'edesk_equity')
+        .map((r) => ({ t: Number(r.t_ms), v: Number(r.equity_usd), payable_usd: Number(r.payable_usd), fills_marked_usd: Number(r.fills_marked_usd) }));
+      return arizonaDays(points, Number(e.bankroll_usd), ['payable_usd', 'fills_marked_usd']);
+    },
+  });
+
+  dash.calc('rules', {
+    inputs: ['paper'],
+    title: 'Paper rules on v2',
+    description: "Desk v2 as traded beside the owner's paper rules and the next round's pick, each over v2's bets placed from its own start.",
+    fn: (paper) => paper.filter((r) => r.table === 'rule'),
+  });
+  dash.calc('edesk', {
+    inputs: ['paper'],
+    title: 'E desk',
+    description: "The E desk's totals: Kalshi's liquidity payments plus what its fills are worth now, from its start.",
+    fn: (paper) => paper.filter((r) => r.table === 'edesk'),
+  });
+  dash.calc('edesk_markets', {
+    inputs: ['paper'],
+    title: 'E desk markets',
+    description: 'One row per market the E desk quoted or holds, most paid first.',
+    fn: (paper) => paper.filter((r) => r.table === 'edesk_market').sort((a, b) => Number(b.reward_usd) - Number(a.reward_usd)),
+  });
+  dash.calc('edesk_categories', {
+    inputs: ['paper'],
+    title: 'E desk by kind of market',
+    description: "The E desk's payments, fills marked and net for each kind of market (Kalshi's category for the series), largest net first.",
+    fn: (paper) => paper.filter((r) => r.table === 'edesk_category').sort((a, b) => Number(b.net_usd) - Number(a.net_usd)),
+  });
+  dash.calc('opt_summary', {
+    inputs: ['paper'],
+    title: 'Bitcoin options test',
+    description: "The Bitcoin options test's totals: each venue's median gap to the price Bitcoin's options imply (all, the year-end ranges, the hits-a-price markets) and how often an edge of 1 cent or more was there after fees and the cost of the money.",
+    fn: (paper) => paper.filter((r) => r.table === 'opt_summary'),
+  });
+  dash.calc('opt_variants', {
+    inputs: ['paper'],
+    title: 'Options test variants',
+    description: 'One row per hurdle (1, 2 and 3 cents beyond the fee and the money\'s cost): paper buys, cost, and their worth at the options\' price and at the venues\' bids.',
+    fn: (paper) => paper.filter((r) => r.table === 'opt_variant'),
+  });
+  dash.calc('opt_markets', {
+    inputs: ['paper'],
+    title: 'Bitcoin markets beside the options',
+    description: "Each Bitcoin pair's price from the options and both venues' mid prices, largest gap first.",
+    fn: (paper) => paper.filter((r) => r.table === 'opt_market'),
+  });
+  dash.calc('opt_positions', {
+    inputs: ['paper'],
+    title: 'Options test paper buys',
+    description: "The 2-cent variant's paper buys, newest first, with each one's worth at the options' price.",
+    fn: (paper) => paper.filter((r) => r.table === 'opt_position').sort((a, b) => Number(b.opened_ms) - Number(a.opened_ms)),
+  });
+  dash.calc('previous', {
+    inputs: ['paper'],
+    title: 'The first desk',
+    description: "The first desk's final result, from the measured week's start to desk v2's.",
+    fn: (paper) => paper.filter((r) => r.table === 'previous'),
+  });
+  dash.calc('calendar_costs', {
+    inputs: ['costs'],
+    title: 'Daily team cost',
+    description: "The team's Claude usage at list prices for each Arizona day (midnight to midnight, UTC-7), by teammate; days before the first reading on Nov 10 are estimated.",
+    fn: (costs) => costs.filter((r) => r.table === 'cost_day').sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0)),
+  });
+  dash.calc('cost_summary', {
+    inputs: ['costs'],
+    title: 'Team running cost',
+    description: "The team's usage cost over about the last day against its budget, and in all since each session began.",
+    fn: (costs) => costs.filter((r) => r.table === 'cost_summary'),
+  });
+  dash.calc('cost_roles', {
+    inputs: ['costs'],
+    title: 'Running cost by teammate',
+    description: "Each teammate's usage cost over the same hours against its daily budget, and its total since its session began.",
+    fn: (costs) => costs.filter((r) => r.table === 'cost_role'),
+  });
+  // Each desk's change in paper equity over the cost's hours (its last reading at or before each end; a desk that
+  // began inside them counts from its bankroll), and every desk's net so far: desk v2, the first desk and the E desk.
+  dash.calc('cost_paper', {
+    inputs: ['paper', 'cost_summary'],
+    title: 'Paper result beside the cost',
+    description: "The desks' change in paper equity over the same hours as the team's cost, and every desk's net result since Nov 3.",
+    fn: (paper, costSummary) => {
+      const c = costSummary[0];
+      const v2 = paper.find((r) => r.table === 'summary');
+      const v1 = paper.find((r) => r.table === 'previous');
+      const ed = paper.find((r) => r.table === 'edesk');
+      const desks = [];
+      if (v2) desks.push({ bankroll: Number(v2.start_usd), table: 'equity' });
+      if (ed && ed.started) desks.push({ bankroll: Number(ed.bankroll_usd), table: 'edesk_equity' });
+      let windowPnl = null;
+      if (c && c.window_start_ms !== null && c.window_start_ms !== undefined) {
+        const t0 = Number(c.window_start_ms);
+        const t1 = Number(c.updated_ms);
+        windowPnl = 0;
+        for (const d of desks) {
+          const pts = paper.filter((r) => r.table === d.table).map((r) => ({ t: Number(r.t_ms), v: Number(r.equity_usd) }))
+            .filter((q) => Number.isFinite(q.t) && Number.isFinite(q.v)).sort((a, b) => a.t - b.t);
+          const at = (t) => { let v = null; for (const q of pts) { if (q.t > t) break; v = q.v; } return v; };
+          const end = at(t1);
+          if (end === null) continue;
+          const start = at(t0);
+          windowPnl += end - (start === null ? d.bankroll : start);
+        }
+        windowPnl = toCents(windowPnl);
+      }
+      const net = (r, field) => (r && Number.isFinite(Number(r[field])) ? Number(r[field]) : 0);
+      const allPnl = toCents(net(v2, 'net_pnl_usd') + net(v1, 'net_pnl_usd') + (ed && ed.started ? net(ed, 'net_usd') : 0));
+      return [{ id: 'paper', window_pnl_usd: windowPnl, all_pnl_usd: allPnl }];
+    },
+  });
+
+  const summary = () => {
+    const d = dash.data('paper');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return null;
+    return d.data.find((r) => r.table === 'summary') || null;
+  };
+  const failLine = (el) => {
+    const box = document.createElement('div');
+    box.className = 'pm-fail';
+    const dot = document.createElement('i');
+    const words = document.createElement('span');
+    words.textContent = 'Failed to load';
+    box.append(dot, words);
+    el.append(box);
+  };
+
+  const figure = (name, field, fmt, sign) => dash.draw(name, (el) => {
+    const d = dash.data('paper');
+    const s = summary();
+    const v = s ? s[field] : null;
+    el.classList.remove('pm-up', 'pm-down');
+    if (d.status === 'ok' || d.status === 'error') el.classList.remove('dash-skeleton');
+    if (v === null || v === undefined || !Number.isFinite(Number(v))) { el.textContent = '—'; return; }
+    const n = Number(v);
+    el.textContent = fmt(n);
+    if (sign) { el.classList.toggle('pm-up', n > 0); el.classList.toggle('pm-down', n < 0); }
+  });
+  figure('net', 'net_pnl_usd', signed, true);
+  figure('net-lede', 'net_pnl_usd', signed, true);
+  figure('closed-lede', 'trades_closed', count);
+  figure('open-lede', 'trades_open', count);
+  figure('equity', 'equity_usd', usd);
+  figure('start', 'start_usd', whole);
+  dash.draw('today', (el) => {
+    const d = dash.data('calendar');
+    el.classList.remove('pm-up', 'pm-down');
+    if (d.status === 'ok' || d.status === 'error') el.classList.remove('dash-skeleton');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) { el.textContent = '—'; return; }
+    const row = d.data.find((r) => r.day === azDay(Date.now()));
+    const n = row ? Number(row.pnl_usd) : 0;
+    el.textContent = signed(n);
+    el.classList.toggle('pm-up', n > 0);
+    el.classList.toggle('pm-down', n < 0);
+  });
+  figure('winrate', 'win_rate', pct);
+  figure('wins', 'wins', count);
+  figure('losses', 'losses', count);
+  figure('best', 'best_pnl_usd', signed, true);
+  figure('worst', 'worst_pnl_usd', signed, true);
+  figure('fees', 'fees_usd', usd);
+  figure('since', 'week_started_ms', when);
+  dash.draw('desk-name', (el) => {
+    const d = dash.data('paper');
+    const s = summary();
+    if (d.status === 'ok' || d.status === 'error') el.classList.remove('dash-skeleton');
+    el.textContent = !s ? '—' : s.desk === 'v2' ? 'Desk v2' : 'The first desk';
+  });
+  figure('weekday', 'week_day', count);
+  figure('updated', 'updated_ms', when);
+
+  const rowFigure = (name, source, id, field, fmt, sign) => dash.draw(name, (el) => {
+    const d = dash.data(source);
+    const row = d.status === 'ok' && Array.isArray(d.data) ? d.data.find((r) => r.id === id) : null;
+    const v = row ? row[field] : null;
+    el.classList.remove('pm-up', 'pm-down');
+    if (d.status === 'ok' || d.status === 'error') el.classList.remove('dash-skeleton');
+    if (v === null || v === undefined || !Number.isFinite(Number(v))) { el.textContent = '—'; return; }
+    const n = Number(v);
+    el.textContent = fmt(n);
+    if (sign) { el.classList.toggle('pm-up', n > 0); el.classList.toggle('pm-down', n < 0); }
+  });
+  rowFigure('rules-when', 'rules', 'desk', 'registered_ms', when);
+  rowFigure('r-desk', 'rules', 'desk', 'test_pnl_usd', signed, true);
+  rowFigure('r-desk-n', 'rules', 'desk', 'test_trades', count);
+  rowFigure('r-late', 'rules', 'late_stop_underdogs', 'test_pnl_usd', signed, true);
+  rowFigure('r-late-n', 'rules', 'late_stop_underdogs', 'test_trades', count);
+  rowFigure('r-skip', 'rules', 'skip_favourites', 'test_pnl_usd', signed, true);
+  rowFigure('r-skip-n', 'rules', 'skip_favourites', 'test_trades', count);
+  rowFigure('r-skip-s', 'rules', 'skip_favourites', 'test_skipped', count);
+  rowFigure('rules-when-3', 'rules', 'skip_late_entries', 'registered_ms', when);
+  rowFigure('r-lateentry', 'rules', 'skip_late_entries', 'test_pnl_usd', signed, true);
+  rowFigure('r-lateentry-n', 'rules', 'skip_late_entries', 'test_trades', count);
+  rowFigure('r-lateentry-s', 'rules', 'skip_late_entries', 'test_skipped', count);
+  rowFigure('r-same', 'rules', 'skip_late_entries', 'desk_same_pnl_usd', signed, true);
+  rowFigure('r-same-n', 'rules', 'skip_late_entries', 'desk_same_trades', count);
+  rowFigure('r-next', 'rules', 'next_round', 'test_pnl_usd', signed, true);
+  rowFigure('r-next-n', 'rules', 'next_round', 'test_trades', count);
+  dash.draw('rules-state', () => {
+    const d = dash.data('rules');
+    const none = d.status === 'ok' && d.data.length === 0;
+    for (const sec of document.querySelectorAll('#rules')) sec.hidden = none;
+  });
+  rowFigure('v1-net', 'previous', 'v1', 'net_pnl_usd', signed, true);
+  rowFigure('v1-n', 'previous', 'v1', 'trades_closed', count);
+  rowFigure('v1-wins', 'previous', 'v1', 'wins', count);
+  rowFigure('v1-end', 'previous', 'v1', 'to_ms', when);
+  rowFigure('v1-fees', 'previous', 'v1', 'fees_usd', usd);
+  rowFigure('v1-jev', 'previous', 'v1', 'jev_calls', count);
+  const tenth = d3.format('.1f');
+  rowFigure('edesk-start', 'edesk', 'edesk', 'start_ms', when);
+  rowFigure('edesk-since', 'edesk', 'edesk', 'start_ms', when);
+  rowFigure('edesk-day', 'edesk', 'edesk', 'week_day', count);
+  rowFigure('ed-net', 'edesk', 'edesk', 'net_usd', signed, true);
+  rowFigure('ed-equity', 'edesk', 'edesk', 'equity_usd', usd);
+  rowFigure('ed-pay', 'edesk', 'edesk', 'payable_usd', usd);
+  rowFigure('ed-hours', 'edesk', 'edesk', 'hours', tenth);
+  rowFigure('ed-marked', 'edesk', 'edesk', 'fills_marked_usd', signed, true);
+  rowFigure('ed-contracts', 'edesk', 'edesk', 'contracts_filled', count);
+  rowFigure('ed-cap', 'edesk', 'edesk', 'capital_avg_usd', whole);
+  rowFigure('ed-cap-peak', 'edesk', 'edesk', 'capital_peak_usd', whole);
+  rowFigure('ed-markets', 'edesk', 'edesk', 'markets_quoted', count);
+  rowFigure('ed-held', 'edesk', 'edesk', 'held_markets', count);
+  rowFigure('ed-stops', 'edesk', 'edesk', 'loss_stops', count);
+  rowFigure('ed-capped', 'edesk', 'edesk', 'capped_markets', count);
+  dash.onData(() => { // shows or hides its own section, so it cannot be a drawing inside it
+    const d = dash.data('edesk');
+    const row = d.status === 'ok' && Array.isArray(d.data) ? d.data[0] : null;
+    const running = Boolean(row && row.started);
+    for (const sec of document.querySelectorAll('#edesk')) sec.hidden = !row;
+    for (const el of document.querySelectorAll('#edesk [data-edesk]')) el.hidden = (el.dataset.edesk === 'running') !== running;
+  });
+  dash.draw('edesk-rows', (tbody) => {
+    tbody.replaceChildren();
+    const d = dash.data('edesk_markets');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return;
+    for (const m of d.data.slice(0, 40)) {
+      const tr = document.createElement('tr');
+      tr.dataset.key = String(m.id);
+      const net = Number(m.net_yes);
+      const pnl = Number(m.pnl_usd);
+      const holding = Math.abs(net) < 0.5 ? '—' : (net > 0 ? 'YES ' : 'NO ') + count(Math.round(Math.abs(net)));
+      const cells = [[String(m.ticker), ''], [usd(Number(m.reward_usd)), 'pm-r'], [count(Math.round(Number(m.contracts))), 'pm-r'],
+        [holding, 'pm-r'], [signed(pnl), 'pm-r' + (pnl > 0 ? ' pm-up' : pnl < 0 ? ' pm-down' : '')], [String(m.status), '']];
+      for (const [text, cls] of cells) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        if (cls) td.className = cls;
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+  });
+  dash.draw('edesk-category-rows', (tbody) => {
+    tbody.replaceChildren();
+    const d = dash.data('edesk_categories');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return;
+    for (const c of d.data) {
+      const tr = document.createElement('tr');
+      tr.dataset.key = String(c.id);
+      const tone = (x) => 'pm-r' + (x > 0 ? ' pm-up' : x < 0 ? ' pm-down' : '');
+      const cells = [[String(c.group), ''], [count(Number(c.markets)), 'pm-r'], [usd(Number(c.payable_usd)), 'pm-r'],
+        [signed(Number(c.fills_marked_usd)), tone(Number(c.fills_marked_usd))], [signed(Number(c.net_usd)), tone(Number(c.net_usd))]];
+      for (const [text, cls] of cells) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        if (cls) td.className = cls;
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+  });
+  const hours = d3.format('.1f');
+  rowFigure('e-net', 'lab', 'E', 'net_usd_realistic', signed, true);
+  rowFigure('e-hours', 'lab', 'E', 'hours', hours);
+  rowFigure('e-pay', 'lab', 'E', 'payable_usd', usd);
+  rowFigure('e-marked', 'lab', 'E', 'fills_marked_usd', signed, true);
+  rowFigure('e-cap', 'lab', 'E', 'capital_avg_usd', whole);
+  rowFigure('e-cap-peak', 'lab', 'E', 'capital_peak_usd', whole);
+  rowFigure('e-best', 'lab', 'E', 'net_usd_upper_bound', signed);
+  rowFigure('a-pnl', 'lab', 'A', 'pnl_usd', signed, true);
+  rowFigure('a-n', 'lab', 'A', 'trades', count);
+  rowFigure('lab-when', 'lab', 'E', 'updated_ms', when);
+  dash.draw('lab-state', () => {
+    const d = dash.data('lab');
+    const none = d.status === 'error' || (d.status === 'ok' && (!Array.isArray(d.data) || d.data.length === 0));
+    for (const sec of document.querySelectorAll('#lab')) sec.hidden = none;
+  });
+  dash.draw('previous-state', () => {
+    const d = dash.data('previous');
+    const none = d.status === 'ok' && d.data.length === 0;
+    for (const sec of document.querySelectorAll('#previous')) sec.hidden = none;
+  });
+
+  const gapCents = (v) => d3.format('.1f')(v) + '¢';
+  const priceCents = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? '—' : d3.format('.1f')(100 * Number(v)));
+  rowFigure('opt-k-gap', 'opt_summary', 'options', 'kalshi_all_median_gap_cents', gapCents);
+  rowFigure('opt-k-ranges', 'opt_summary', 'options', 'kalshi_terminal_median_gap_cents', gapCents);
+  rowFigure('opt-k-touch', 'opt_summary', 'options', 'kalshi_touch_median_gap_cents', gapCents);
+  rowFigure('opt-p-gap', 'opt_summary', 'options', 'poly_all_median_gap_cents', gapCents);
+  rowFigure('opt-p-ranges', 'opt_summary', 'options', 'poly_terminal_median_gap_cents', gapCents);
+  rowFigure('opt-p-touch', 'opt_summary', 'options', 'poly_touch_median_gap_cents', gapCents);
+  rowFigure('opt-when', 'opt_summary', 'options', 'priced_until_ms', when);
+  rowFigure('opt-2c', 'opt_variants', 'hurdle_2c', 'pnl_at_options_usd', signed, true);
+  rowFigure('opt-2c-n', 'opt_variants', 'hurdle_2c', 'positions', count);
+  rowFigure('opt-2c-cost', 'opt_variants', 'hurdle_2c', 'cost_usd', usd);
+  rowFigure('opt-2c-bids', 'opt_variants', 'hurdle_2c', 'pnl_at_bids_usd', signed, true);
+  rowFigure('opt-1c', 'opt_variants', 'hurdle_1c', 'pnl_at_options_usd', signed, true);
+  rowFigure('opt-1c-n', 'opt_variants', 'hurdle_1c', 'positions', count);
+  rowFigure('opt-3c', 'opt_variants', 'hurdle_3c', 'pnl_at_options_usd', signed, true);
+  rowFigure('opt-3c-n', 'opt_variants', 'hurdle_3c', 'positions', count);
+  // A section under `hidden` runs no drawing, so whatever shows or hides a whole section runs in onData.
+  dash.onData(() => {
+    const d = dash.data('opt_summary');
+    const row = d.status === 'ok' && Array.isArray(d.data) ? d.data[0] : null;
+    const started = Boolean(row && row.started);
+    const pos = dash.data('opt_positions');
+    const buys = started && pos.status === 'ok' && Array.isArray(pos.data) && pos.data.length > 0;
+    for (const sec of document.querySelectorAll('#options')) sec.hidden = !row;
+    for (const el of document.querySelectorAll('#options [data-opt]')) {
+      el.hidden = el.dataset.opt === 'waiting' ? started : el.dataset.opt === 'buys' ? !buys : !started;
+    }
+  });
+  const cellRow = (tbody, key, cells) => {
+    const tr = document.createElement('tr');
+    tr.dataset.key = String(key);
+    for (const [text, cls] of cells) {
+      const td = document.createElement('td');
+      td.textContent = text;
+      if (cls) td.className = cls;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  };
+  dash.draw('opt-market-rows', (tbody) => {
+    tbody.replaceChildren();
+    const d = dash.data('opt_markets');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return;
+    const vs = (mid, fair) => {
+      if (mid === null || mid === undefined || !Number.isFinite(Number(mid))) return 'pm-r';
+      const g = Number(mid) - Number(fair);
+      return 'pm-r' + (g <= -0.01 ? ' pm-up' : g >= 0.01 ? ' pm-down' : '');
+    };
+    for (const m of d.data) {
+      const done = m.state === 'reached' || m.state === 'closed'; // no longer traded: shown, not coloured
+      const name = String(m.label) + (m.state === 'reached' ? ' · price reached' : m.state === 'closed' ? ' · closed' : '');
+      cellRow(tbody, m.id, [[name, ''], [priceCents(m.fair), 'pm-r'], [priceCents(m.kalshi_mid), done ? 'pm-r' : vs(m.kalshi_mid, m.fair)],
+        [priceCents(m.poly_mid), done ? 'pm-r' : vs(m.poly_mid, m.fair)]]);
+    }
+  });
+  dash.draw('opt-position-rows', (tbody) => {
+    tbody.replaceChildren();
+    const d = dash.data('opt_positions');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return;
+    for (const b of d.data.slice(0, 60)) {
+      const pnl = Number(b.pnl_at_options_usd);
+      const what = `${b.label} · ${String(b.side).toUpperCase()} on ${b.venue === 'poly' ? 'Polymarket US' : 'Kalshi'}`;
+      cellRow(tbody, b.id, [[what, ''], [priceCents(b.price) + '¢', 'pm-r'], [count(Number(b.contracts)), 'pm-r'],
+        [signed(pnl), 'pm-r' + (pnl > 0 ? ' pm-up' : pnl < 0 ? ' pm-down' : '')]]);
+    }
+  });
+
+  // The team's running cost: each session's Claude usage at list prices, read from the session by the coordinator.
+  const dayOnly = (ms) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  rowFigure('cost-when', 'cost_summary', 'team', 'updated_ms', when);
+  rowFigure('cost-hours', 'cost_summary', 'team', 'window_hours', hours);
+  rowFigure('cost-hours-col', 'cost_summary', 'team', 'window_hours', hours);
+  rowFigure('cost-spent', 'cost_summary', 'team', 'spent_usd', usd);
+  rowFigure('cost-budget', 'cost_summary', 'team', 'budget_usd', usd);
+  rowFigure('cost-total', 'cost_summary', 'team', 'total_usd', usd);
+  rowFigure('cost-since', 'cost_summary', 'team', 'first_since_ms', dayOnly);
+  rowFigure('cost-paper-window', 'cost_paper', 'paper', 'window_pnl_usd', signed, true);
+  rowFigure('cost-paper-all', 'cost_paper', 'paper', 'all_pnl_usd', signed, true);
+  dash.draw('cost-missing', (el) => {
+    const d = dash.data('cost_summary');
+    const row = d.status === 'ok' && Array.isArray(d.data) ? d.data[0] : null;
+    el.textContent = row && Array.isArray(row.missing) && row.missing.length ? row.missing.join(' and ') : '—';
+  });
+  dash.draw('cost-role-rows', (tbody) => {
+    tbody.replaceChildren();
+    const d = dash.data('cost_roles');
+    if (d.status !== 'ok' || !Array.isArray(d.data)) return;
+    const money = (v) => (v === null || v === undefined || !Number.isFinite(Number(v)) ? '—' : usd(Number(v)));
+    for (const r of d.data) {
+      const name = String(r.name);
+      cellRow(tbody, r.id, [[name.charAt(0).toUpperCase() + name.slice(1), ''], [money(r.spent_usd) + (r.over ? ' over' : ''), 'pm-r' + (r.over ? ' pm-down' : '')],
+        [money(r.limit_usd), 'pm-r'], [money(r.total_usd), 'pm-r']]);
+    }
+  });
+  dash.onData(() => {
+    const d = dash.data('cost_summary');
+    const row = d.status === 'ok' && Array.isArray(d.data) ? d.data[0] : null;
+    for (const sec of document.querySelectorAll('#costs')) sec.hidden = !row;
+    for (const el of document.querySelectorAll('#costs [data-cost="missing"]')) el.hidden = !(row && Array.isArray(row.missing) && row.missing.length);
+  });
+
+  dash.draw('bets-state', () => {
+    const d = dash.data('trades');
+    const none = d.status === 'ok' && d.data.length === 0;
+    for (const p of document.querySelectorAll('#no-bets')) p.hidden = !none;
+  });
+
+  dash.draw('bet-rows', (tbody) => {
+    tbody.replaceChildren();
+    const d = dash.data('trades');
+    if (d.status !== 'ok') return;
+    for (const t of d.data) {
+      const tr = document.createElement('tr');
+      tr.dataset.key = String(t.id);
+      const pnl = t.pnl_usd === null || t.pnl_usd === undefined ? null : Number(t.pnl_usd);
+      const cells = [
+        [when(Number(t.opened_ms)), ''],
+        [String(t.market), ''],
+        [String(t.bet), ''],
+        [cents(Number(t.price_cents)), 'pm-r'],
+        [usd(Number(t.stake_usd)), 'pm-r'],
+        [String(t.result), 'pm-result pm-' + String(t.result)],
+        [pnl === null ? '' : signed(pnl), 'pm-r' + (pnl === null ? '' : pnl > 0 ? ' pm-up' : pnl < 0 ? ' pm-down' : '')],
+      ];
+      for (const [text, cls] of cells) {
+        const td = document.createElement('td');
+        td.textContent = text;
+        if (cls) td.className = cls;
+        tr.append(td);
+      }
+      tbody.append(tr);
+    }
+  });
+
+  const measure = (svg, texts) => {
+    const probe = svg.append('g').attr('class', 'pm-axis');
+    let w = 0;
+    for (const t of texts) w = Math.max(w, probe.append('text').text(t).node().getComputedTextLength());
+    probe.remove();
+    return Math.ceil(w);
+  };
+
+  dash.draw('equity-chart', (el) => {
+    el.replaceChildren();
+    const d = dash.data('equity');
+    if (d.status === 'error') { el.classList.remove('dash-skeleton'); failLine(el); return; }
+    if (d.status !== 'ok') return;
+    el.classList.remove('dash-skeleton');
+    const pts = d.data
+      .map((r) => ({ t: new Date(Number(r.t_ms)), v: Number(r.equity_usd) }))
+      .filter((p) => Number.isFinite(p.v) && !Number.isNaN(p.t.getTime()))
+      .sort((a, b) => a.t - b.t);
+    if (pts.length < 2) {
+      const p = document.createElement('p');
+      p.className = 'pm-chart-note';
+      p.textContent = 'The curve appears once two readings are in.';
+      el.append(p);
+      return;
+    }
+    const s = summary();
+    const start = s && Number.isFinite(Number(s.start_usd)) ? Number(s.start_usd) : null;
+    const W = Math.max(260, el.clientWidth || 320);
+    const H = W < 480 ? 150 : 190;
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', 'Paper equity over time');
+    const vals = pts.map((p) => p.v).concat(start === null ? [] : [start]);
+    let lo = d3.min(vals), hi = d3.max(vals);
+    if (hi - lo < 2) { const mid = (hi + lo) / 2; lo = mid - 1; hi = mid + 1; }
+    const padY = (hi - lo) * 0.18; lo -= padY; hi += padY;
+    const tickFmt = hi - lo < 20 ? d3.format('$,.2f') : whole;
+    const yTicks = d3.scaleLinear([lo, hi], [0, 1]).ticks(3);
+    const last = pts[pts.length - 1];
+    const endText = usd(last.v);
+    const left = measure(svg, yTicks.map(tickFmt)) + 8;
+    const right = measure(svg, [endText]) + 14;
+    const top = 10, bottom = 22;
+    const x = d3.scaleTime([pts[0].t, last.t], [left, W - right]);
+    const y = d3.scaleLinear([lo, hi], [H - bottom, top]);
+    const grid = svg.append('g').attr('class', 'pm-grid');
+    for (const v of yTicks) grid.append('line').attr('x1', left).attr('x2', W - right).attr('y1', y(v)).attr('y2', y(v));
+    const axis = svg.append('g').attr('class', 'pm-axis');
+    for (const v of yTicks) axis.append('text').attr('x', left - 8).attr('y', y(v) + 4).attr('text-anchor', 'end').text(tickFmt(v));
+    const xTicks = x.ticks(W < 480 ? 3 : 5);
+    const xFmt = x.tickFormat(W < 480 ? 3 : 5);
+    xTicks.forEach((t, i) => axis.append('text').attr('x', x(t)).attr('y', H - 6).attr('text-anchor', i === 0 && x(t) - left < 20 ? 'start' : 'middle').text(xFmt(t)));
+    if (start !== null) {
+      svg.append('line').attr('x1', left).attr('x2', W - right).attr('y1', y(start)).attr('y2', y(start))
+        .attr('stroke', 'var(--cds-chart-reference)').attr('stroke-width', 1).attr('stroke-dasharray', '4 4');
+    }
+    const gid = 'pm-eq-fade';
+    const grad = svg.append('defs').append('linearGradient').attr('id', gid).attr('x1', 0).attr('x2', 0).attr('y1', 0).attr('y2', 1);
+    [[0, 0.26], [0.25, 0.16], [0.5, 0.08], [0.75, 0.03], [1, 0]].forEach(([o, a]) => grad.append('stop').attr('offset', o).attr('style', `stop-color: ${dash.colors[0]}; stop-opacity: ${a}`));
+    svg.append('path').datum(pts).attr('fill', `url(#${gid})`).attr('d', d3.area().x((p) => x(p.t)).y0(H - bottom).y1((p) => y(p.v)));
+    svg.append('path').datum(pts).attr('fill', 'none').attr('stroke', dash.colors[0]).attr('stroke-width', 2).attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round')
+      .attr('d', d3.line().x((p) => x(p.t)).y((p) => y(p.v)));
+    svg.append('circle').attr('cx', x(last.t)).attr('cy', y(last.v)).attr('r', 4).attr('fill', dash.colors[0]);
+    svg.append('text').attr('class', 'pm-axis').attr('x', x(last.t) + 8).attr('y', y(last.v) + 4).text(endText);
+    const hoverDot = svg.append('circle').attr('r', 4).attr('fill', dash.colors[0]).attr('visibility', 'hidden');
+    const tip = document.createElement('div');
+    tip.className = 'pm-tip';
+    tip.hidden = true;
+    el.append(tip);
+    const bis = d3.bisector((p) => p.t).center;
+    svg.append('rect').attr('x', left).attr('y', top).attr('width', Math.max(0, W - left - right)).attr('height', H - top - bottom).attr('fill', 'transparent')
+      .on('pointermove', (event) => {
+        const [mx] = d3.pointer(event);
+        const p = pts[bis(pts, x.invert(mx))];
+        hoverDot.attr('cx', x(p.t)).attr('cy', y(p.v)).attr('visibility', 'visible');
+        tip.replaceChildren();
+        const a = document.createElement('div'); a.className = 'pm-tip-when'; a.textContent = when(p.t.getTime());
+        const b = document.createElement('div'); b.textContent = usd(p.v);
+        tip.append(a, b);
+        tip.hidden = false;
+        const box = el.getBoundingClientRect();
+        const px = (x(p.t) / W) * box.width;
+        tip.style.left = Math.max(0, Math.min(px + 10, box.width - tip.offsetWidth)) + 'px';
+        tip.style.top = Math.max(0, (y(p.v) / H) * box.height - 44) + 'px';
+      })
+      .on('pointerleave', () => { hoverDot.attr('visibility', 'hidden'); tip.hidden = true; });
+  });
+
+  // The month calendar: one cell per Arizona day, green up and red down, a month total, and the picked
+  // day's bets underneath. Which month and day are shown survives the page's hourly data refresh.
+  const monthName = d3.utcFormat('%B %Y');
+  const shortDay = d3.utcFormat('%a, %b %-d');
+  const longDay = d3.utcFormat('%A, %B %-d');
+  const fullCell = d3.format('+,.2f');
+  const smallCell = (v) => (Math.abs(v) < 10 ? d3.format('+.2f')(v) : Math.abs(v) < 100 ? d3.format('+.1f')(v) : d3.format('+,.0f')(v));
+  const calState = { v2: { month: null, pick: null }, edesk: { month: null, pick: null }, cost: { month: null, pick: null } }; // [year, month 0-11], 'YYYY-MM-DD'
+  let calDesk = null; // 'v2', 'edesk' or 'cost': the E desk once it has days, else desk v2
+  const costCell = (v) => (v < 10 ? d3.format('$.2f')(v) : v < 100 ? d3.format('$.1f')(v) : d3.format('$,.0f')(v));
+  dash.draw('day-calendar', (el) => {
+    const dv = dash.data('calendar');
+    if (dv.status === 'error') { el.replaceChildren(); el.classList.remove('dash-skeleton'); failLine(el); return; }
+    if (dv.status !== 'ok' || !Array.isArray(dv.data)) return;
+    el.classList.remove('dash-skeleton');
+    const de = dash.data('calendar_edesk');
+    const dr = dash.data('edesk');
+    const edeskRow = dr.status === 'ok' && Array.isArray(dr.data) ? dr.data[0] || null : null;
+    const dc = dash.data('calendar_costs');
+    const sets = { v2: dv.data, edesk: de.status === 'ok' && Array.isArray(de.data) ? de.data : [], cost: dc.status === 'ok' && Array.isArray(dc.data) ? dc.data : [] };
+    if (!calDesk) calDesk = sets.edesk.length ? 'edesk' : 'v2';
+    if (calDesk === 'cost' && !sets.cost.length) calDesk = 'v2'; // the costs did not load: no Team cost tab
+    const today = azDay(Date.now());
+    const ym = (day) => [Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1];
+    const key = ([y, m]) => y * 12 + m;
+    const tone = (v) => (v > 0 ? 'pm-up' : v < 0 ? 'pm-down' : '');
+
+    const render = (focus) => {
+      el.replaceChildren();
+      const desk = calDesk;
+      const isCost = desk === 'cost';
+      const rows = sets[desk];
+      const st = calState[desk];
+      const tabs = document.createElement('div');
+      tabs.className = 'pm-cal-tabs';
+      tabs.setAttribute('role', 'group');
+      tabs.setAttribute('aria-label', 'Desk');
+      for (const [id, label] of [['v2', 'Desk v2'], ['edesk', 'E desk'], ['cost', 'Team cost']].filter(([id]) => id !== 'cost' || sets.cost.length)) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pm-cal-tab';
+        b.dataset.desk = id;
+        b.textContent = label;
+        b.setAttribute('aria-pressed', String(id === desk));
+        b.addEventListener('click', () => { calDesk = id; render('desk:' + id); });
+        tabs.append(b);
+      }
+      el.append(tabs);
+      const waiting = desk === 'edesk' && !rows.length; // the E desk before its first day
+      if (!rows.length && !waiting) {
+        const p = document.createElement('p');
+        p.className = 'pm-chart-note';
+        p.textContent = isCost ? "Days appear once the team's cost has been read." : 'Days appear as the desk trades.';
+        el.append(p);
+        if (focus) el.querySelector(`[data-desk="${desk}"]`)?.focus();
+        return;
+      }
+      const byDay = new Map(rows.map((r) => [r.day, r]));
+      const startMs = edeskRow ? Number(edeskRow.start_ms) : NaN;
+      const firstDay = rows.length ? rows[0].day : Number.isFinite(startMs) ? azDay(startMs) : today;
+      const lastDay = rows.length ? rows[rows.length - 1].day : firstDay;
+      const lo = key(ym(firstDay));
+      const hi = Math.max(key(ym(lastDay)), key(ym(today)));
+      if (!st.pick || !byDay.has(st.pick)) st.pick = byDay.has(today) ? today : rows.length ? lastDay : null;
+      if (!st.month || key(st.month) < lo || key(st.month) > hi) st.month = ym(st.pick || firstDay);
+      const [y, m] = st.month;
+      const prefix = `${y}-${String(m + 1).padStart(2, '0')}-`;
+      const inMonth = rows.filter((r) => r.day.startsWith(prefix));
+      const total = isCost ? toCents(inMonth.reduce((a, r) => a + Number(r.cost_usd), 0))
+        : inMonth.length ? toCents(inMonth[inMonth.length - 1].close_usd - inMonth[0].open_usd) : 0;
+      const over = inMonth.filter((r) => r.over).length;
+      const up = inMonth.filter((r) => r.pnl_usd > 0).length;
+      const down = inMonth.filter((r) => r.pnl_usd < 0).length;
+      const narrow = (el.clientWidth || 320) < 440;
+      const parts = (r) => (desk === 'edesk' && r.payable_usd !== null && r.fills_marked_usd !== null
+        ? `Kalshi's payments ${signed(r.payable_usd)}, fills ${signed(r.fills_marked_usd)}` : null);
+
+      const head = document.createElement('div');
+      head.className = 'pm-cal-head';
+      const nav = (dir) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pm-cal-nav';
+        b.dataset.nav = dir < 0 ? 'prev' : 'next';
+        b.textContent = dir < 0 ? '‹' : '›';
+        b.setAttribute('aria-label', dir < 0 ? 'Previous month' : 'Next month');
+        b.disabled = dir < 0 ? key(st.month) <= lo : key(st.month) >= hi;
+        b.addEventListener('click', () => {
+          const k = key(st.month) + dir;
+          st.month = [Math.floor(k / 12), k % 12];
+          render('nav:' + b.dataset.nav);
+        });
+        return b;
+      };
+      const title = document.createElement('div');
+      title.className = 'pm-cal-title';
+      title.setAttribute('aria-live', 'polite');
+      const month = document.createElement('span');
+      month.className = 'pm-cal-month';
+      month.textContent = monthName(new Date(Date.UTC(y, m, 1)));
+      const sum = document.createElement('span');
+      sum.className = 'pm-cal-sum';
+      if (waiting) {
+        sum.textContent = 'not started yet';
+      } else if (isCost) {
+        const amount = document.createElement('b');
+        amount.textContent = usd(total);
+        const budget = inMonth.length ? usd(Number(inMonth[0].budget_usd)) : null;
+        sum.append(amount, document.createTextNode(budget ? ` · ${over} ${over === 1 ? 'day' : 'days'} over ${budget}` : ''));
+      } else {
+        const amount = document.createElement('b');
+        amount.textContent = signed(total);
+        if (tone(total)) amount.className = tone(total);
+        sum.append(amount, document.createTextNode(` · ${up} ${up === 1 ? 'day' : 'days'} up, ${down} down`));
+      }
+      title.append(month, sum);
+      head.append(nav(-1), title, nav(1));
+
+      const grid = document.createElement('div');
+      grid.className = 'pm-cal-grid';
+      grid.setAttribute('role', 'group');
+      grid.setAttribute('aria-label', 'Days of ' + monthName(new Date(Date.UTC(y, m, 1))));
+      for (const w of ['S', 'M', 'T', 'W', 'T', 'F', 'S']) {
+        const h = document.createElement('div');
+        h.className = 'pm-cal-dow';
+        h.setAttribute('aria-hidden', 'true');
+        h.textContent = w;
+        grid.append(h);
+      }
+      const lead = new Date(Date.UTC(y, m, 1)).getUTCDay();
+      const length = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+      for (let i = 0; i < lead; i++) {
+        const b = document.createElement('div');
+        b.className = 'pm-cal-day pm-cal-blank';
+        b.setAttribute('aria-hidden', 'true');
+        grid.append(b);
+      }
+      for (let n = 1; n <= length; n++) {
+        const day = prefix + String(n).padStart(2, '0');
+        const r = byDay.get(day);
+        const cell = document.createElement(r ? 'button' : 'div');
+        cell.className = 'pm-cal-day';
+        cell.dataset.day = day;
+        const num = document.createElement('span');
+        num.className = 'pm-cal-n';
+        num.textContent = String(n);
+        cell.append(num);
+        if (r) {
+          cell.type = 'button';
+          const v = document.createElement('span');
+          v.className = 'pm-cal-v';
+          if (isCost) {
+            v.textContent = narrow ? costCell(Number(r.cost_usd)) : usd(Number(r.cost_usd));
+            cell.classList.add(r.over ? 'pm-cal-down' : 'pm-cal-cost');
+            if (r.estimated) cell.classList.add('pm-cal-est');
+            cell.setAttribute('aria-label', `${longDay(asDate(day))}${day === today ? ' (today)' : ''}: ${usd(Number(r.cost_usd))} of Claude usage${r.partial ? ' so far' : ''}${r.estimated ? (r.measured ? ', partly estimated' : ', estimated') : ''}${r.over ? ', over budget' : ''}`);
+          } else {
+            v.textContent = narrow ? smallCell(r.pnl_usd) : fullCell(r.pnl_usd);
+            cell.classList.add(r.pnl_usd > 0 ? 'pm-cal-up' : r.pnl_usd < 0 ? 'pm-cal-down' : 'pm-cal-flat');
+            const extra = desk === 'v2' ? `${r.trades} ${r.trades === 1 ? 'bet' : 'bets'} closed` : parts(r);
+            cell.setAttribute('aria-label', `${longDay(asDate(day))}${day === today ? ' (today)' : ''}: ${signed(r.pnl_usd)}${extra ? ', ' + extra : ''}`);
+          }
+          cell.append(v);
+          cell.setAttribute('aria-pressed', String(day === st.pick));
+          cell.addEventListener('click', () => { st.pick = day; render('day:' + day); });
+        } else if (day > today || day < firstDay) {
+          cell.classList.add('pm-cal-out'); // before the desk's first day or still to come
+        }
+        if (day === today) cell.classList.add('pm-cal-today');
+        if (r && day === st.pick) cell.classList.add('pm-cal-sel');
+        grid.append(cell);
+      }
+
+      const detail = document.createElement('p');
+      detail.className = 'pm-cal-detail';
+      const r = st.pick ? byDay.get(st.pick) : null;
+      if (r && st.pick.startsWith(prefix)) {
+        const label = document.createElement('b');
+        label.textContent = st.pick === today ? 'Today so far' : shortDay(asDate(st.pick)) + (isCost && r.partial ? ' (not all read yet)' : '');
+        const amt = document.createElement('span');
+        amt.className = ('pm-cal-amt ' + (isCost ? (r.over ? 'pm-down' : '') : tone(r.pnl_usd))).trim();
+        amt.textContent = isCost ? usd(Number(r.cost_usd)) : signed(r.pnl_usd);
+        const extra = isCost
+          ? `${r.estimated ? (r.measured ? 'partly estimated; ' : 'estimated; ') : ''}${r.breakdown || 'no usage'}`
+          : desk === 'v2'
+            ? (r.trades ? `${count(r.trades)} ${r.trades === 1 ? 'bet' : 'bets'} closed, ${count(r.wins)} made money, ${usd(r.fees_usd)} in fees` : 'no bets closed')
+            : parts(r);
+        detail.append(label, document.createTextNode(': '), amt);
+        if (extra) detail.append(document.createTextNode(' · ' + extra));
+      } else if (waiting) {
+        detail.textContent = Number.isFinite(startMs)
+          ? `The E desk starts ${shortDay(asDate(azDay(startMs)))} at ${d3.utcFormat('%-I:%M %p')(new Date(startMs - AZ_OFFSET_MS))} Arizona time. Its days fill in here as it runs.`
+          : 'The E desk has not started yet. Its days fill in here as it runs.';
+      } else {
+        detail.textContent = inMonth.length ? 'Tap a day for the details.' : isCost ? 'No usage this month.' : 'No trading this month.';
+      }
+      el.append(head, grid, detail);
+      if (focus) {
+        const [kind, arg] = [focus.slice(0, focus.indexOf(':')), focus.slice(focus.indexOf(':') + 1)];
+        const target = el.querySelector(kind === 'day' ? `[data-day="${arg}"]` : kind === 'nav' ? `[data-nav="${arg}"]` : `[data-desk="${arg}"]`);
+        if (target && !target.disabled) target.focus();
+      }
+    };
+    render();
+  });
+})();
+</script>
